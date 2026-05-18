@@ -1,0 +1,80 @@
+name: Mundicam
+description: "App oficial de Mundicam"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cached_network_image: ^3.4.1
+  flutter_riverpod: ^2.5.1
+  flutter_native_splash: ^2.4.3
+
+  # Red de datos
+  http: ^1.2.0
+  dio: ^5.4.0
+  webview_flutter: ^4.2.1
+  url_launcher: ^6.3.0
+
+  # Diseño
+  cupertino_icons: ^1.0.8
+
+  # Firebase - VERSIONES COMPATIBLES
+  firebase_core: ^3.15.1
+  cloud_firestore: ^5.6.5
+  firebase_auth: ^5.4.2
+  firebase_remote_config: ^5.4.7
+  firebase_messaging: ^15.2.10
+
+  # Caché / utilidades
+  shared_preferences: ^2.5.5
+  intl: ^0.20.2
+
+  # Variables de entorno
+  flutter_dotenv: ^5.1.0
+  flutter_cache_manager: ^3.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - .env
+    - assets/logo.png
+    - assets/gif/fondo.gif
+    - assets/banners/
+    - assets/brands/
+    - assets/images/
+    - assets/noticias/
+    - assets/productos/
+    - assets/categorias/
+
+  fonts:
+    - family: Oswald
+      fonts:
+        - asset: assets/fonts/Oswald-Regular.ttf
+        - asset: assets/fonts/Oswald-Bold.ttf
+          weight: 700
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/mundicamlogo.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/mundicamlogo.png"
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: "assets/images/mundicamlogo.png"
+  android_12:
+    image: "assets/images/mundicamlogo.png"
+    color: "#FFFFFF"

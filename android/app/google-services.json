@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "754565814741",
+    "project_id": "mundicam-app",
+    "storage_bucket": "mundicam-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:754565814741:android:74c8d2a07bdf2bd5f9855c",
+        "android_client_info": {
+          "package_name": "com.example.pruebaaa"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCAPjO2CTzQFXFGoiP-0dWPPSGQfPWqR0s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
