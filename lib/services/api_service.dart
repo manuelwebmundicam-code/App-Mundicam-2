@@ -1,8 +1,10 @@
 // services/api_service.dart
 import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/foundation.dart';
+
 import '../models/banner.dart';
 import '../models/cursos_model.dart';
 import '../models/noticia.dart';
@@ -10,6 +12,46 @@ import '../models/order_model.dart';
 import '../models/producto.dart';
 import '../models/category_model.dart';
 import '../models/quote_model.dart';
+
+class OrderCreateResult {
+  final bool success;
+  final int? orderId;
+  final String? orderKey;
+  final String? orderNumber;
+  final String? status;
+  final String? errorMessage;
+  final Map<String, dynamic>? rawData;
+
+  const OrderCreateResult({
+    required this.success,
+    this.orderId,
+    this.orderKey,
+    this.orderNumber,
+    this.status,
+    this.errorMessage,
+    this.rawData,
+  });
+
+  factory OrderCreateResult.success(Map<String, dynamic> data) {
+    return OrderCreateResult(
+      success: true,
+      orderId: data['id'] is int
+          ? data['id'] as int
+          : int.tryParse(data['id']?.toString() ?? ''),
+      orderKey: data['order_key']?.toString(),
+      orderNumber: data['number']?.toString(),
+      status: data['status']?.toString(),
+      rawData: data,
+    );
+  }
+
+  factory OrderCreateResult.failure(String message) {
+    return OrderCreateResult(
+      success: false,
+      errorMessage: message,
+    );
+  }
+}
 
 class ApiService {
   // Singleton
@@ -32,6 +74,7 @@ class ApiService {
         headers: {'Accept': 'application/json'},
       ),
     );
+
     // Cargar keys en segundo plano
     _loadKeys();
   }
@@ -74,25 +117,38 @@ class ApiService {
       debugPrint('❌ API Keys no configuradas');
       return 'Basic ${base64Encode(utf8.encode('error:error'))}';
     }
+
     return 'Basic ${base64Encode(utf8.encode('$_consumerKey:$_consumerSecret'))}';
   }
 
-  Options get _wooOptions => Options(headers: {'Authorization': _basicAuth});
+  Options get _wooOptions => Options(
+    headers: {
+      'Authorization': _basicAuth,
+    },
+  );
 
   // ================================================================
   // CLIENTES
   // ================================================================
   Future<Map<String, dynamic>?> getCustomerByEmail(String email) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/customers',
-        queryParameters: {'email': email, 'role': 'all'},
+        queryParameters: {
+          'email': email,
+          'role': 'all',
+        },
         options: _wooOptions,
       );
-      if (response.statusCode == 200 && response.data is List && response.data.isNotEmpty) {
+
+      if (response.statusCode == 200 &&
+          response.data is List &&
+          response.data.isNotEmpty) {
         return (response.data as List).first as Map<String, dynamic>;
       }
+
       return null;
     } catch (e) {
       debugPrint('Error en getCustomerByEmail: $e');
@@ -102,12 +158,17 @@ class ApiService {
 
   Future<Map<String, dynamic>?> getCustomerById(int id) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/customers/$id',
         options: _wooOptions,
       );
-      if (response.statusCode == 200) return response.data as Map<String, dynamic>;
+
+      if (response.statusCode == 200) {
+        return response.data as Map<String, dynamic>;
+      }
+
       return null;
     } catch (e) {
       debugPrint('Error en getCustomerById: $e');
@@ -125,6 +186,7 @@ class ApiService {
     String? orderBy,
   }) async {
     await _ensureInitialized();
+
     try {
       final Map<String, dynamic> queryParams = {
         'per_page': perPage,
@@ -142,22 +204,32 @@ class ApiService {
       );
 
       final List data = response.data;
-      List<Product> productos = data.map((item) => Product.fromJson(item)).toList();
+      List<Product> productos =
+      data.map((item) => Product.fromJson(item)).toList();
 
       if (brand != null && brand.isNotEmpty) {
         final String queryMarca = brand.toLowerCase().trim();
+
         productos = productos.where((p) {
-          return p.attributes.any((attr) =>
-          attr.name.toLowerCase().contains('marca') &&
-              attr.options.any((opt) => opt.toLowerCase().trim() == queryMarca));
+          return p.attributes.any(
+                (attr) =>
+            attr.name.toLowerCase().contains('marca') &&
+                attr.options.any(
+                      (opt) => opt.toLowerCase().trim() == queryMarca,
+                ),
+          );
         }).toList();
       }
 
       if (orderBy != null) {
         if (orderBy == 'price_asc') {
-          productos.sort((a, b) => double.parse(a.price).compareTo(double.parse(b.price)));
+          productos.sort(
+                (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
+          );
         } else if (orderBy == 'price_desc') {
-          productos.sort((a, b) => double.parse(b.price).compareTo(double.parse(a.price)));
+          productos.sort(
+                (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
+          );
         } else if (orderBy == 'date') {
           productos.sort((a, b) => b.id.compareTo(a.id));
         }
@@ -175,6 +247,7 @@ class ApiService {
   // ================================================================
   Future<List<OrderMundicam>> getOrders(String customerEmail) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/orders',
@@ -190,24 +263,35 @@ class ApiService {
             .map((order) => OrderMundicam.fromJson(order))
             .toList();
       }
+
       return [];
     } catch (e) {
-      print("Error obteniendo pedidos: $e");
+      debugPrint("Error obteniendo pedidos: $e");
       return [];
     }
   }
 
-// ================================================================
-// CREAR PEDIDO
-// ================================================================
-  Future<bool> crearPedido(Map<String, dynamic> orderData) async {
+  // ================================================================
+  // CREAR PEDIDO CON RESULTADO COMPLETO
+  // ================================================================
+  Future<OrderCreateResult> crearPedidoConResultado(
+      Map<String, dynamic> orderData, {
+        bool forceProcessingIfPending = true,
+      }) async {
     await _ensureInitialized();
-    try {
-      debugPrint('📦 Creando pedido...');
 
-      // Forzar status a processing para que envíe emails
+    try {
+      debugPrint('📦 Creando pedido con resultado...');
+
       final data = Map<String, dynamic>.from(orderData);
-      data['status'] = 'processing';
+
+      if (forceProcessingIfPending &&
+          (!data.containsKey('status') || data['status'] == 'pending')) {
+        data['status'] = 'processing';
+      }
+
+      debugPrint('📦 Status enviado: ${data['status']}');
+      debugPrint('📦 Payment method: ${data['payment_method']}');
 
       final response = await _dio.post(
         '/wp-json/wc/v3/orders',
@@ -215,24 +299,68 @@ class ApiService {
         options: _wooOptions,
       );
 
-      debugPrint('📦 Status: ${response.statusCode}');
+      debugPrint('📦 Status HTTP: ${response.statusCode}');
 
-      if (response.statusCode == 201) {
-        final orderId = response.data['id'];
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        if (response.data is! Map) {
+          debugPrint('❌ Respuesta inesperada al crear pedido: ${response.data}');
+          return OrderCreateResult.failure(
+            'WooCommerce devolvió una respuesta no válida.',
+          );
+        }
+
+        final responseData = Map<String, dynamic>.from(response.data as Map);
+
+        final orderId = responseData['id'];
+        final orderKey = responseData['order_key'];
+        final status = responseData['status'];
+
         debugPrint('✅ Pedido #$orderId creado correctamente');
+        debugPrint('🔑 Order key: $orderKey');
+        debugPrint('📌 Estado WooCommerce: $status');
 
-        return true;
+        return OrderCreateResult.success(responseData);
       }
 
       debugPrint('❌ Error al crear pedido: ${response.statusCode}');
       debugPrint('   Respuesta: ${response.data}');
-      return false;
 
+      return OrderCreateResult.failure(
+        'WooCommerce respondió con código ${response.statusCode}.',
+      );
+    } on DioException catch (e) {
+      debugPrint('❌ DioException al crear pedido:');
+      debugPrint('   Status Code: ${e.response?.statusCode}');
+      debugPrint('   Response: ${e.response?.data}');
+      debugPrint('   Message: ${e.message}');
+
+      final responseData = e.response?.data;
+
+      if (responseData is Map && responseData['message'] != null) {
+        return OrderCreateResult.failure(responseData['message'].toString());
+      }
+
+      return OrderCreateResult.failure(_mapDioError(e));
     } catch (e) {
       debugPrint('❌ Error al crear pedido: $e');
-      return false;
+      return OrderCreateResult.failure(e.toString());
     }
   }
+
+  // ================================================================
+  // CREAR PEDIDO
+  // Mantiene compatibilidad con el resto de la app.
+  // Devuelve bool como antes.
+  // ================================================================
+  Future<bool> crearPedido(Map<String, dynamic> orderData) async {
+    final result = await crearPedidoConResultado(
+      orderData,
+      forceProcessingIfPending: true,
+    );
+
+    return result.success;
+  }
+
   // ================================================================
   // CREAR PRESUPUESTO
   // ================================================================
@@ -245,6 +373,7 @@ class ApiService {
     String? customerNote,
   }) async {
     await _ensureInitialized();
+
     try {
       final orderData = {
         'status': 'checkout-draft',
@@ -257,7 +386,8 @@ class ApiService {
             'quantity': quantity,
           }
         ],
-        'customer_note': customerNote ?? 'Presupuesto solicitado desde la app Mundicam',
+        'customer_note':
+        customerNote ?? 'Presupuesto solicitado desde la app Mundicam',
       };
 
       debugPrint('📝 Creando presupuesto...');
@@ -286,6 +416,7 @@ class ApiService {
   // ================================================================
   Future<List<Product>> buscarProductos(String query) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/products',
@@ -305,6 +436,7 @@ class ApiService {
         if (!a.isInstock && b.isInstock) return 1;
         return 0;
       });
+
       return lista;
     } catch (e) {
       debugPrint("Error en buscarProductos: $e");
@@ -320,6 +452,7 @@ class ApiService {
     bool soloCategoriasPadre = true,
   }) async {
     await _ensureInitialized();
+
     try {
       int page = 1;
       int totalPages = 1;
@@ -338,7 +471,9 @@ class ApiService {
         );
 
         final data = response.data;
-        todas.addAll((data as List).map((item) => CategoryModel.fromJson(item)));
+        todas.addAll(
+          (data as List).map((item) => CategoryModel.fromJson(item)),
+        );
 
         final totalPagesHeader = response.headers.value('x-wp-totalpages');
         totalPages = int.tryParse(totalPagesHeader ?? '1') ?? 1;
@@ -346,8 +481,14 @@ class ApiService {
       } while (page <= totalPages);
 
       List<CategoryModel> resultado = todas;
-      if (soloConProductos) resultado = _filtrarCategoriasVisibles(resultado);
-      if (soloCategoriasPadre) resultado = resultado.where((c) => c.parent == 0).toList();
+
+      if (soloConProductos) {
+        resultado = _filtrarCategoriasVisibles(resultado);
+      }
+
+      if (soloCategoriasPadre) {
+        resultado = resultado.where((c) => c.parent == 0).toList();
+      }
 
       return resultado;
     } on DioException catch (e) {
@@ -357,7 +498,9 @@ class ApiService {
 
   Future<List<CategoryModel>> getSubcategoriasDe(int? parentId) async {
     await _ensureInitialized();
+
     if (parentId == null) return [];
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/products/categories',
@@ -368,7 +511,10 @@ class ApiService {
         },
         options: _wooOptions,
       );
-      return (response.data as List).map((json) => CategoryModel.fromJson(json)).toList();
+
+      return (response.data as List)
+          .map((json) => CategoryModel.fromJson(json))
+          .toList();
     } catch (e) {
       return [];
     }
@@ -382,6 +528,7 @@ class ApiService {
     String? orderBy,
   }) async {
     await _ensureInitialized();
+
     try {
       final Map<String, dynamic> queryParams = {
         'per_page': perPage,
@@ -400,22 +547,32 @@ class ApiService {
       );
 
       final List data = response.data;
-      List<Product> productos = data.map((item) => Product.fromJson(item)).toList();
+      List<Product> productos =
+      data.map((item) => Product.fromJson(item)).toList();
 
       if (brand != null && brand.isNotEmpty) {
         final String queryMarca = brand.toLowerCase().trim();
+
         productos = productos.where((p) {
-          return p.attributes.any((attr) =>
-          attr.name.toLowerCase().contains('marca') &&
-              attr.options.any((opt) => opt.toLowerCase().trim() == queryMarca));
+          return p.attributes.any(
+                (attr) =>
+            attr.name.toLowerCase().contains('marca') &&
+                attr.options.any(
+                      (opt) => opt.toLowerCase().trim() == queryMarca,
+                ),
+          );
         }).toList();
       }
 
       if (orderBy != null) {
         if (orderBy == 'price_asc') {
-          productos.sort((a, b) => double.parse(a.price).compareTo(double.parse(b.price)));
+          productos.sort(
+                (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
+          );
         } else if (orderBy == 'price_desc') {
-          productos.sort((a, b) => double.parse(b.price).compareTo(double.parse(a.price)));
+          productos.sort(
+                (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
+          );
         }
       }
 
@@ -430,18 +587,26 @@ class ApiService {
   // ================================================================
   Future<List<Map<String, dynamic>>> getMarcas() async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/products/attributes/pa_marca/terms',
-        queryParameters: {'per_page': 100, 'hide_empty': true},
+        queryParameters: {
+          'per_page': 100,
+          'hide_empty': true,
+        },
         options: _wooOptions,
       );
+
       if (response.statusCode == 200) {
-        return (response.data as List).map((term) => {
-          'id': term['id'],
-          'name': term['name'],
+        return (response.data as List).map((term) {
+          return {
+            'id': term['id'],
+            'name': term['name'],
+          };
         }).toList();
       }
+
       return [];
     } catch (e) {
       return [];
@@ -451,26 +616,40 @@ class ApiService {
   // ================================================================
   // FILTRAR CATEGORÍAS
   // ================================================================
-  List<CategoryModel> _filtrarCategoriasVisibles(List<CategoryModel> categorias) {
+  List<CategoryModel> _filtrarCategoriasVisibles(
+      List<CategoryModel> categorias,
+      ) {
     final Map<int, List<CategoryModel>> hijosPorPadre = {};
+
     for (final categoria in categorias) {
       hijosPorPadre.putIfAbsent(categoria.parent, () => []).add(categoria);
     }
+
     bool tieneProductos(CategoryModel cat) {
       if (cat.count > 0) return true;
+
       final hijos = hijosPorPadre[cat.id] ?? [];
       return hijos.any((h) => tieneProductos(h));
     }
+
     return categorias.where(tieneProductos).toList();
   }
 
   // ================================================================
-  // ACADEMY / NOTICIAS / BANNERS (No necesitan WooCommerce)
+  // ACADEMY / NOTICIAS / BANNERS
   // ================================================================
   Future<List<CourseModel>> getAcademyCourses() async {
     try {
-      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {'per_page': 10});
-      return (response.data as List).map((post) => CourseModel.fromWordPress(post)).toList();
+      final response = await _dio.get(
+        '/wp-json/wp/v2/posts',
+        queryParameters: {
+          'per_page': 10,
+        },
+      );
+
+      return (response.data as List)
+          .map((post) => CourseModel.fromWordPress(post))
+          .toList();
     } catch (e) {
       return [];
     }
@@ -478,8 +657,17 @@ class ApiService {
 
   Future<List<Noticia>> getNoticias() async {
     try {
-      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {'per_page': 4, '_embed': 'true'});
-      return (response.data as List).map((item) => Noticia.fromJson(item)).toList();
+      final response = await _dio.get(
+        '/wp-json/wp/v2/posts',
+        queryParameters: {
+          'per_page': 4,
+          '_embed': 'true',
+        },
+      );
+
+      return (response.data as List)
+          .map((item) => Noticia.fromJson(item))
+          .toList();
     } catch (e) {
       throw Exception("Error en noticias");
     }
@@ -488,7 +676,10 @@ class ApiService {
   Future<List<BannerModel>> getBanners() async {
     try {
       final response = await _dio.get('/wp-json/mundicam/v1/banners');
-      return (response.data as List).map((item) => BannerModel.fromJson(item)).toList();
+
+      return (response.data as List)
+          .map((item) => BannerModel.fromJson(item))
+          .toList();
     } catch (e) {
       return [];
     }
@@ -499,12 +690,17 @@ class ApiService {
   // ================================================================
   Future<Map<String, dynamic>?> getOrdenCompleta(String orderId) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/orders/$orderId',
         options: _wooOptions,
       );
-      if (response.statusCode == 200) return response.data as Map<String, dynamic>;
+
+      if (response.statusCode == 200) {
+        return response.data as Map<String, dynamic>;
+      }
+
       return null;
     } catch (e) {
       debugPrint('Error al obtener orden $orderId: $e');
@@ -514,6 +710,7 @@ class ApiService {
 
   Future<List<QuoteMundicam>> getPresupuestosPorEmail(String email) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/orders',
@@ -524,8 +721,14 @@ class ApiService {
         },
         options: _wooOptions,
       );
-      debugPrint('📊 Presupuestos encontrados: ${(response.data as List).length}');
-      return (response.data as List).map((item) => QuoteMundicam.fromJson(item)).toList();
+
+      debugPrint(
+        '📊 Presupuestos encontrados: ${(response.data as List).length}',
+      );
+
+      return (response.data as List)
+          .map((item) => QuoteMundicam.fromJson(item))
+          .toList();
     } catch (e) {
       debugPrint('❌ Error getPresupuestosPorEmail: $e');
       return [];
@@ -537,12 +740,17 @@ class ApiService {
   // ================================================================
   Future<Product?> getProductoById(int id) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/products/$id',
         options: _wooOptions,
       );
-      if (response.statusCode == 200) return Product.fromJson(response.data);
+
+      if (response.statusCode == 200) {
+        return Product.fromJson(response.data);
+      }
+
       return null;
     } catch (e) {
       debugPrint("Error al obtener producto $id: $e");
@@ -561,6 +769,7 @@ class ApiService {
     required String descripcion,
   }) async {
     await _ensureInitialized();
+
     try {
       final data = {
         'email': email,
@@ -569,12 +778,15 @@ class ApiService {
         'reason': motivo,
         'description': descripcion,
       };
+
       debugPrint('📝 Creando RMA: ${jsonEncode(data)}');
+
       final response = await _dio.post(
         '/wp-json/mundicam/v1/rma',
         data: data,
         options: _wooOptions,
       );
+
       debugPrint('✅ RMA creada - Status: ${response.statusCode}');
       return response.statusCode == 201 || response.statusCode == 200;
     } catch (e) {
@@ -583,14 +795,20 @@ class ApiService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getRmaRequests(String customerEmail) async {
+  Future<List<Map<String, dynamic>>> getRmaRequests(
+      String customerEmail,
+      ) async {
     await _ensureInitialized();
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/rma',
-        queryParameters: {'email': customerEmail},
+        queryParameters: {
+          'email': customerEmail,
+        },
         options: _wooOptions,
       );
+
       return List<Map<String, dynamic>>.from(response.data);
     } catch (e) {
       return [];
@@ -598,14 +816,18 @@ class ApiService {
   }
 
   // ================================================================
-  // TICKETS (No necesita WooCommerce)
+  // TICKETS
   // ================================================================
   Future<List<Map<String, dynamic>>> getTickets(String customerEmail) async {
     try {
-      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {
-        'search': customerEmail,
-        'categories': 'soporte-tecnico'
-      });
+      final response = await _dio.get(
+        '/wp-json/wp/v2/posts',
+        queryParameters: {
+          'search': customerEmail,
+          'categories': 'soporte-tecnico',
+        },
+      );
+
       return List<Map<String, dynamic>>.from(response.data);
     } catch (e) {
       return [];
@@ -619,11 +841,24 @@ class ApiService {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
         return 'Tiempo de conexión agotado';
+
       case DioExceptionType.badResponse:
         if (e.response?.statusCode == 401) {
           return 'Error de autenticación (401). Verifica las credenciales API.';
         }
+
+        if (e.response?.statusCode == 400) {
+          final data = e.response?.data;
+
+          if (data is Map && data['message'] != null) {
+            return data['message'].toString();
+          }
+
+          return 'Solicitud no válida. Revisa los datos del pedido.';
+        }
+
         return 'Error del servidor: ${e.response?.statusCode}';
+
       default:
         return 'Error de red: ${e.message}';
     }

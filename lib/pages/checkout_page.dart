@@ -4,25 +4,27 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/professional_page_app_bar.dart';
 import '../providers/cart_provider.dart';
 import '../providers/order_provider.dart';
 import '../services/api_service.dart';
 import '../theme.dart';
+import 'payment_page.dart';
 
 class _CheckoutPaymentMethod {
   final String id;
   final String title;
   final String description;
   final IconData icon;
+  final bool requiresCredit;
 
   const _CheckoutPaymentMethod({
     required this.id,
     required this.title,
     required this.description,
     required this.icon,
+    this.requiresCredit = false,
   });
 }
 
@@ -62,37 +64,30 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   String _paymentMethod = 'bacs';
   String? _assignedManager;
 
-  static const String _paymentInfoUrl =
-      'https://www.mundicam.com/condiciones-venta-suministros/';
+  static const String _baseUrl = 'https://www.mundicam.com';
 
   static const List<_CheckoutPaymentMethod> _paymentMethods = [
     _CheckoutPaymentMethod(
       id: 'bacs',
       title: 'Transferencia bancaria',
       description:
-      'Pago mediante transferencia bancaria. El pedido será verificado antes de su envío.',
+      'Pago mediante transferencia bancaria. El pedido será procesado por MundiCam.',
       icon: Icons.account_balance_outlined,
     ),
     _CheckoutPaymentMethod(
+      id: 'cheque',
+      title: 'Giro / pago aplazado',
+      description:
+      'Forma de pago vinculada a condiciones comerciales y crédito aprobado.',
+      icon: Icons.receipt_long_outlined,
+      requiresCredit: true,
+    ),
+    _CheckoutPaymentMethod(
       id: 'redsys',
-      title: 'Tarjeta bancaria en web',
+      title: '💳 Pago con Tarjeta (Redsys)',
       description:
-      'Pago seguro con tarjeta bancaria desde la web o mediante enlace de pago.',
+      'Pago seguro con tarjeta bancaria a través de la pasarela Redsys de WooCommerce.',
       icon: Icons.credit_card_outlined,
-    ),
-    _CheckoutPaymentMethod(
-      id: 'office_payment',
-      title: 'Pago en oficinas',
-      description:
-      'Pago directo en las oficinas de MundiCam, según condiciones comerciales.',
-      icon: Icons.storefront_outlined,
-    ),
-    _CheckoutPaymentMethod(
-      id: 'customer_credit',
-      title: 'Crédito cliente',
-      description:
-      'Forma de pago sujeta al crédito comercial asignado y aprobado para la cuenta.',
-      icon: Icons.account_balance_wallet_outlined,
     ),
   ];
 
@@ -105,6 +100,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   @override
   void dispose() {
     _scrollController.dispose();
+
     for (var c in [
       _nameController,
       _lastNameController,
@@ -121,6 +117,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     ]) {
       c.dispose();
     }
+
     super.dispose();
   }
 
@@ -133,17 +130,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       return 'redsys';
     }
 
-    if (text.contains('oficina') ||
-        text.contains('office') ||
-        text.contains('efectivo') ||
-        text.contains('cash')) {
-      return 'office_payment';
-    }
-
-    if (text.contains('credito') ||
+    if (text.contains('giro') ||
+        text.contains('cheque') ||
+        text.contains('aplazado') ||
+        text.contains('credito') ||
         text.contains('crédito') ||
         text.contains('credit')) {
-      return 'customer_credit';
+      return 'cheque';
     }
 
     return 'bacs';
@@ -159,23 +152,21 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   String get _paymentMethodTitle => _selectedPaymentMethod.title;
 
   bool _isPaymentMethodEnabled(_CheckoutPaymentMethod method) {
-    if (method.id != 'customer_credit') return true;
+    if (!method.requiresCredit) return true;
 
     final disponible = _creditLimit - _creditUsed;
     return _creditLimit > 0 && disponible > 0;
   }
 
-  Future<void> _openPaymentInfo() async {
-    final uri = Uri.parse(_paymentInfoUrl);
-
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (!mounted) return;
-      _mostrarError('No se pudieron abrir las condiciones de venta.');
-    }
+  String _buildWooPaymentUrl({
+    required int orderId,
+    required String orderKey,
+  }) {
+    return '$_baseUrl/checkout/order-pay/$orderId/?pay_for_order=true&key=${Uri.encodeComponent(orderKey)}';
   }
 
   // ============================================================
-  // CARGAR DATOS DESDE WOOCOMMERCE (USANDO ApiService SEGURO)
+  // CARGAR DATOS DESDE WOOCOMMERCE
   // ============================================================
   Future<void> _cargarDatosCliente() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -198,6 +189,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             .collection('users')
             .doc(user.uid)
             .get();
+
         email = (userDoc.data()?['email'] as String?)?.trim().toLowerCase();
       }
 
@@ -219,10 +211,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         if (wooEmail != email) {
           debugPrint('🚨 Email no coincide');
+
           setState(() {
             _loadingProfile = false;
             _errorMessage = 'Error de seguridad al cargar los datos';
           });
+
           return;
         }
 
@@ -241,12 +235,18 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         final wooPaymentMethod =
         _getMetaValue(wooCustomer['meta_data'], 'payment_method');
+
         final normalizedPaymentMethod = _normalizePaymentMethod(wooPaymentMethod);
 
-        if (normalizedPaymentMethod == 'customer_credit' && _creditLimit <= 0) {
-          _paymentMethod = 'bacs';
-        } else {
+        final selectedMethod = _paymentMethods.firstWhere(
+              (method) => method.id == normalizedPaymentMethod,
+          orElse: () => _paymentMethods.first,
+        );
+
+        if (_isPaymentMethodEnabled(selectedMethod)) {
           _paymentMethod = normalizedPaymentMethod;
+        } else {
+          _paymentMethod = 'bacs';
         }
 
         _assignedManager =
@@ -279,11 +279,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         }
 
         debugPrint('✅ Datos cargados correctamente');
+        debugPrint('   Cliente: $_customerId');
         debugPrint('   Crédito: $_creditUsed / $_creditLimit €');
         debugPrint('   Pago: $_paymentMethod');
         debugPrint('   Gestor: ${_assignedManager ?? "Sin gestor asignado"}');
       } else {
         debugPrint('⚠️ Cliente no encontrado en WooCommerce');
+
         setState(() {
           _loadingProfile = false;
           _errorMessage = 'No se encontraron tus datos. Contacta con soporte.';
@@ -291,6 +293,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       }
     } catch (e) {
       debugPrint('❌ Error: $e');
+
       setState(() {
         _loadingProfile = false;
         _errorMessage = 'Error al cargar datos. Intenta de nuevo.';
@@ -373,9 +376,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       return true;
     } catch (e) {
       debugPrint('❌ Error validando stock antes del pedido: $e');
+
       _mostrarError(
         'No se pudo verificar el stock actualizado. Intenta de nuevo.',
       );
+
       return false;
     }
   }
@@ -395,23 +400,25 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+
       return;
     }
 
     final cartItems = ref.read(cartProvider);
     final notifier = ref.read(cartProvider.notifier);
     final total = notifier.total;
+    final disponible = _creditLimit - _creditUsed;
+    final isCardPayment = _paymentMethod == 'redsys';
 
-    if (_paymentMethod == 'customer_credit' &&
-        _creditLimit > 0 &&
-        total > (_creditLimit - _creditUsed)) {
+    if (_selectedPaymentMethod.requiresCredit && total > disponible) {
       HapticFeedback.heavyImpact();
 
       if (mounted) {
         setState(() => _isLoading = false);
+
         _mostrarError(
           'Crédito insuficiente.\n'
-              'Disponible: ${(_creditLimit - _creditUsed).toStringAsFixed(2)} €\n'
+              'Disponible: ${disponible.toStringAsFixed(2)} €\n'
               'Total pedido: ${total.toStringAsFixed(2)} €',
         );
       }
@@ -421,77 +428,131 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
     final lineItems = cartItems.map((item) {
       return {
-        "product_id": item.product.id,
-        "quantity": item.quantity,
+        'product_id': item.product.id,
+        'quantity': item.quantity,
       };
     }).toList();
 
     final orderData = {
-      if (_customerId != null) "customer_id": _customerId,
-      "payment_method": _paymentMethod,
-      "payment_method_title": _paymentMethodTitle,
-      "set_paid": false,
-      "status": "pending",
-      "billing": {
-        "first_name": _nameController.text.trim(),
-        "last_name": _lastNameController.text.trim(),
-        "company": _companyController.text.trim(),
-        "address_1": _addressController.text.trim(),
-        "city": _cityController.text.trim(),
-        "postcode": _postCodeController.text.trim(),
-        "state": _stateController.text.trim(),
-        "country": _countryController.text.trim().isEmpty
-            ? "ES"
+      if (_customerId != null) 'customer_id': _customerId,
+      'payment_method': _paymentMethod,
+      'payment_method_title': _paymentMethodTitle,
+      'set_paid': false,
+      'status': isCardPayment ? 'pending' : 'processing',
+      'billing': {
+        'first_name': _nameController.text.trim(),
+        'last_name': _lastNameController.text.trim(),
+        'company': _companyController.text.trim(),
+        'address_1': _addressController.text.trim(),
+        'city': _cityController.text.trim(),
+        'postcode': _postCodeController.text.trim(),
+        'state': _stateController.text.trim(),
+        'country': _countryController.text.trim().isEmpty
+            ? 'ES'
             : _countryController.text.trim(),
-        "email": _emailController.text.trim(),
-        "phone": _phoneController.text.trim(),
+        'email': _emailController.text.trim(),
+        'phone': _phoneController.text.trim(),
       },
-      "shipping": {
-        "first_name": _nameController.text.trim(),
-        "last_name": _lastNameController.text.trim(),
-        "company": _companyController.text.trim(),
-        "address_1": _addressController.text.trim(),
-        "city": _cityController.text.trim(),
-        "postcode": _postCodeController.text.trim(),
-        "state": _stateController.text.trim(),
-        "country": _countryController.text.trim().isEmpty
-            ? "ES"
+      'shipping': {
+        'first_name': _nameController.text.trim(),
+        'last_name': _lastNameController.text.trim(),
+        'company': _companyController.text.trim(),
+        'address_1': _addressController.text.trim(),
+        'city': _cityController.text.trim(),
+        'postcode': _postCodeController.text.trim(),
+        'state': _stateController.text.trim(),
+        'country': _countryController.text.trim().isEmpty
+            ? 'ES'
             : _countryController.text.trim(),
       },
-      "line_items": lineItems,
-      "customer_note": _notesController.text.trim(),
-      "meta_data": [
-        {"key": "_billing_nif", "value": _nifController.text.trim()},
-        {"key": "_mundicam_payment_method_app", "value": _paymentMethod},
-        {"key": "_mundicam_payment_method_title", "value": _paymentMethodTitle},
+      'line_items': lineItems,
+      'customer_note': _notesController.text.trim(),
+      'meta_data': [
+        {'key': '_billing_nif', 'value': _nifController.text.trim()},
+        {'key': '_mundicam_payment_method_app', 'value': _paymentMethod},
+        {'key': '_mundicam_payment_method_title', 'value': _paymentMethodTitle},
         if (_assignedManager != null && _assignedManager!.trim().isNotEmpty)
-          {"key": "_assigned_manager", "value": _assignedManager!.trim()},
+          {'key': '_assigned_manager', 'value': _assignedManager!.trim()},
         if (_assignedManager != null && _assignedManager!.trim().isNotEmpty)
           {
-            "key": "_mundicam_assigned_manager_app",
-            "value": _assignedManager!.trim(),
+            'key': '_mundicam_assigned_manager_app',
+            'value': _assignedManager!.trim(),
           },
       ],
     };
 
     debugPrint('📦 Creando pedido para cliente $_customerId');
     debugPrint('   Método de pago: $_paymentMethod - $_paymentMethodTitle');
+    debugPrint('   Status: ${isCardPayment ? "pending" : "processing"}');
     debugPrint('   Gestor asignado: ${_assignedManager ?? "Sin gestor"}');
 
     try {
-      final success = await ApiService().crearPedido(orderData);
+      final result = await ApiService().crearPedidoConResultado(
+        orderData,
+        forceProcessingIfPending: false,
+      );
 
       if (!mounted) return;
 
-      if (success) {
-        ref.read(cartProvider.notifier).clearCart();
-        ref.invalidate(ordersProvider);
-        _mostrarExito();
-      } else {
+      if (!result.success || result.orderId == null) {
         _mostrarError(
-          'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.',
+          result.errorMessage ??
+              'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.',
         );
+
+        return;
       }
+
+      if (isCardPayment) {
+        final orderKey = result.orderKey;
+
+        if (orderKey == null || orderKey.isEmpty) {
+          _mostrarError(
+            'Pedido creado, pero WooCommerce no devolvió la clave de pago. Contacta con soporte.',
+          );
+
+          return;
+        }
+
+        final paymentUrl = _buildWooPaymentUrl(
+          orderId: result.orderId!,
+          orderKey: orderKey,
+        );
+
+        debugPrint('💳 URL Redsys/WooCommerce: $paymentUrl');
+
+        setState(() => _isLoading = false);
+
+        final paid = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PaymentPage(
+              orderId: result.orderId!,
+              orderKey: orderKey,
+              paymentUrl: paymentUrl,
+            ),
+          ),
+        );
+
+        if (!mounted) return;
+
+        if (paid == true) {
+          ref.read(cartProvider.notifier).clearCart();
+          ref.invalidate(ordersProvider);
+
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        } else {
+          _mostrarError(
+            'Pedido creado pendiente de pago. Puedes finalizarlo desde la web o contactar con MundiCam.',
+          );
+        }
+
+        return;
+      }
+
+      ref.read(cartProvider.notifier).clearCart();
+      ref.invalidate(ordersProvider);
+      _mostrarExito();
     } catch (e) {
       debugPrint('❌ Error creando pedido: $e');
 
@@ -501,7 +562,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         );
       }
     } finally {
-      if (mounted) {
+      if (mounted && _isLoading) {
         setState(() => _isLoading = false);
       }
     }
@@ -725,6 +786,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   _loadingProfile = true;
                   _errorMessage = null;
                 });
+
                 _cargarDatosCliente();
               },
               icon: const Icon(Icons.refresh),
@@ -962,35 +1024,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildManagerInfo() {
     final manager = _assignedManager?.trim();
 
@@ -1054,6 +1087,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
     if (_creditLimit > 0) {
       porcentaje = _creditUsed / _creditLimit;
+
       if (porcentaje < 0.0) porcentaje = 0.0;
       if (porcentaje > 1.0) porcentaje = 1.0;
     }
@@ -1123,14 +1157,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   Widget _buildPaymentInfo() {
-    final notifier = ref.watch(cartProvider.notifier);
-    final total = notifier.total;
     final disponible = _creditLimit - _creditUsed;
 
     return Column(
       children: [
         for (final method in _paymentMethods) ...[
-          _buildPaymentOption(method, total, disponible),
+          _buildPaymentOption(method, disponible),
           if (method != _paymentMethods.last) const SizedBox(height: 10),
         ],
         const SizedBox(height: 12),
@@ -1152,32 +1184,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'El primer pedido debe ser abonado por anticipado. '
-                      'El crédito cliente está sujeto a estudio y aprobación comercial. '
-                      'El pago con tarjeta se gestionará mediante web o enlace seguro.',
+                  'El pago con tarjeta se realizará mediante Redsys en entorno seguro de WooCommerce. '
+                      'El giro está sujeto a crédito y condiciones comerciales aprobadas.',
                   style: TextStyle(
                     fontSize: 11,
                     height: 1.35,
                     color: Colors.grey.shade700,
                     fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              InkWell(
-                onTap: _openPaymentInfo,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Text(
-                    'Ver',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.primary,
-                      decoration: TextDecoration.underline,
-                    ),
                   ),
                 ),
               ),
@@ -1190,7 +1203,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   Widget _buildPaymentOption(
       _CheckoutPaymentMethod method,
-      double total,
       double disponible,
       ) {
     final selected = _paymentMethod == method.id;
@@ -1200,6 +1212,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       onTap: enabled
           ? () {
         HapticFeedback.selectionClick();
+
         setState(() {
           _paymentMethod = method.id;
         });
@@ -1290,10 +1303,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                       color: enabled ? Colors.grey.shade600 : Colors.grey,
                     ),
                   ),
-                  if (method.id == 'customer_credit') ...[
+                  if (method.requiresCredit) ...[
                     const SizedBox(height: 6),
                     Text(
-                      'Disponible: ${disponible.toStringAsFixed(2)} €',
+                      'Crédito disponible: ${disponible.toStringAsFixed(2)} €',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -1306,7 +1319,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   if (method.id == 'redsys') ...[
                     const SizedBox(height: 6),
                     Text(
-                      'La app generará el pedido. El pago se completará desde entorno web seguro.',
+                      'Se abrirá la página de pago del pedido en WooCommerce.',
                       style: TextStyle(
                         fontSize: 10.5,
                         height: 1.25,
@@ -1345,6 +1358,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     final notifier = ref.watch(cartProvider.notifier);
     final total = notifier.total;
     final disponible = _creditLimit - _creditUsed;
+    final creditBlocked =
+        _selectedPaymentMethod.requiresCredit && total > disponible;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1433,9 +1448,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               ],
             ),
           ],
-          if (_paymentMethod == 'customer_credit' &&
-              _creditLimit > 0 &&
-              total > disponible) ...[
+          if (creditBlocked) ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -1470,12 +1483,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: (_isLoading ||
-                  (_paymentMethod == 'customer_credit' &&
-                      _creditLimit > 0 &&
-                      total > disponible))
-                  ? null
-                  : _finalizarPedido,
+              onPressed: (_isLoading || creditBlocked) ? null : _finalizarPedido,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -1494,9 +1502,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   color: Colors.white,
                 ),
               )
-                  : const Text(
-                "CONFIRMAR PEDIDO",
-                style: TextStyle(
+                  : Text(
+                _paymentMethod == 'redsys'
+                    ? 'PAGAR CON TARJETA'
+                    : 'CONFIRMAR PEDIDO',
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                 ),
