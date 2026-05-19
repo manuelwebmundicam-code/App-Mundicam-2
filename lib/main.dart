@@ -4,15 +4,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'theme.dart';
-import 'services/category_cache_service.dart';
-import 'services/storage_cache_service.dart';
-import 'services/notification_service.dart';
-import 'services/api_service.dart';
-import 'pages/login_page.dart';
-import 'pages/main_screen.dart';
-import 'providers/category_provider.dart';
-import 'providers/academy_provider.dart';
+import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/core/cache/category_cache_service.dart';
+import 'package:mundicam/core/cache/storage_cache_service.dart';
+import 'package:mundicam/core/notifications/notification_service.dart';
+import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
+import 'package:mundicam/app/main_screen.dart';
+import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
+import 'package:mundicam/features/training/presentation/providers/academy_provider.dart';
 
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
