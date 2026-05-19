@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class Footer extends StatelessWidget {
   const Footer({super.key});
-//USAR EN PERFIL NO EN EL MAINNNN
+  //USAR EN PERFIL NO EN EL MAINNNN
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -11,10 +11,12 @@ class Footer extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: const [
-
           Text("+34 968 629 383", style: TextStyle(color: Colors.white)),
           SizedBox(height: 5),
-          Text("MundiCam Security Distribution", style: TextStyle(color: Colors.white)),
+          Text(
+            "MundiCam Security Distribution",
+            style: TextStyle(color: Colors.white),
+          ),
 
           SizedBox(height: 10),
           Text(
@@ -27,15 +29,25 @@ class Footer extends StatelessWidget {
 
           SizedBox(height: 20),
 
-          Text("CATEGORÍAS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          Text("Video CCTV\nVideo IP\nIntrusión\nNetworking\nDrones PRO",
-              style: TextStyle(color: Colors.white70)),
+          Text(
+            "CATEGORÍAS",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          Text(
+            "Video CCTV\nVideo IP\nIntrusión\nNetworking\nDrones PRO",
+            style: TextStyle(color: Colors.white70),
+          ),
 
           SizedBox(height: 20),
 
-          Text("EMPRESA", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          Text("Quiénes somos\nContacto\nTrabaja con nosotros",
-              style: TextStyle(color: Colors.white70)),
+          Text(
+            "EMPRESA",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          Text(
+            "Quiénes somos\nContacto\nTrabaja con nosotros",
+            style: TextStyle(color: Colors.white70),
+          ),
 
           SizedBox(height: 20),
 

@@ -52,8 +52,12 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover)),
-          Positioned.fill(child: Container(color: Colors.black.withOpacity(0.6))),
+          Positioned.fill(
+            child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover),
+          ),
+          Positioned.fill(
+            child: Container(color: Colors.black.withOpacity(0.6)),
+          ),
           Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -68,8 +72,15 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('RECUPERAR ACCESO',
-                          style: TextStyle(fontFamily: 'Oswald', fontSize: 22, color: AppColors.primary, fontWeight: FontWeight.bold)),
+                      Text(
+                        'RECUPERAR ACCESO',
+                        style: TextStyle(
+                          fontFamily: 'Oswald',
+                          fontSize: 22,
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 10),
                       const Text(
                         'Te redirigiremos a la web de Mundicam para que puedas restablecer tu contraseña.',
@@ -83,27 +94,50 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         style: const TextStyle(fontFamily: 'Oswald'),
                         decoration: InputDecoration(
                           labelText: 'Email',
-                          prefixIcon: const Icon(Icons.email, color: AppColors.primary),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(
+                            Icons.email,
+                            color: AppColors.primary,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
-                        validator: (v) => (v == null || v.isEmpty) ? 'Campo obligatorio' : null,
+                        validator: (v) => (v == null || v.isEmpty)
+                            ? 'Campo obligatorio'
+                            : null,
                       ),
                       const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
                         height: 50,
                         child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                          ),
                           onPressed: _isLoading ? null : _abrirRecuperacion,
                           child: _isLoading
-                              ? const CircularProgressIndicator(color: Colors.white)
-                              : const Text('RECUPERAR CONTRASEÑA', style: TextStyle(color: Colors.white, fontFamily: 'Oswald')),
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white,
+                                )
+                              : const Text(
+                                  'RECUPERAR CONTRASEÑA',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontFamily: 'Oswald',
+                                  ),
+                                ),
                         ),
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('Volver al inicio de sesión', style: TextStyle(color: Colors.grey, fontFamily: 'Oswald')),
-                      )
+                        child: const Text(
+                          'Volver al inicio de sesión',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontFamily: 'Oswald',
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

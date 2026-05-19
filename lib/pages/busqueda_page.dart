@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/producto.dart';
 import '../providers/products_provider.dart';
 import '../services/firebase_service.dart';
-import 'productos_por_categoria.dart'; // Asegúrate de que este import es correcto
+import 'productos_por_categoria.dart';
 import '../theme.dart';
 
 class BusquedaResultadosPage extends ConsumerWidget {
@@ -40,7 +39,10 @@ class BusquedaResultadosPage extends ConsumerWidget {
             children: [
               CircularProgressIndicator(color: AppColors.primary),
               SizedBox(height: 16),
-              Text("Buscando productos...", style: TextStyle(color: Colors.grey)),
+              Text(
+                "Buscando productos...",
+                style: TextStyle(color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -52,10 +54,14 @@ class BusquedaResultadosPage extends ConsumerWidget {
               children: [
                 const Icon(Icons.error_outline, size: 60, color: Colors.red),
                 const SizedBox(height: 16),
-                Text('Error en la búsqueda:\n$error', textAlign: TextAlign.center),
+                Text(
+                  'Error en la búsqueda:\n$error',
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: () => ref.invalidate(searchProductsProvider(query)),
+                  onPressed: () =>
+                      ref.invalidate(searchProductsProvider(query)),
                   child: const Text("Reintentar"),
                 ),
               ],
@@ -70,17 +76,29 @@ class BusquedaResultadosPage extends ConsumerWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.search_off_rounded, size: 90, color: Colors.grey[350]),
+                    Icon(
+                      Icons.search_off_rounded,
+                      size: 90,
+                      color: Colors.grey[350],
+                    ),
                     const SizedBox(height: 20),
                     Text(
                       'No encontramos "$query"',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     const Text(
                       'Prueba con:\n• Palabras más generales\n• Sinónimos o marcas\n• Revisa la ortografía',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                        height: 1.5,
+                      ),
                     ),
                     const SizedBox(height: 24),
                     OutlinedButton.icon(
@@ -97,15 +115,26 @@ class BusquedaResultadosPage extends ConsumerWidget {
           return Column(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
                 color: Colors.white,
                 child: Row(
                   children: [
-                    Icon(Icons.search_rounded, size: 16, color: Colors.grey[600]),
+                    Icon(
+                      Icons.search_rounded,
+                      size: 16,
+                      color: Colors.grey[600],
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       '${productos.length} producto${productos.length != 1 ? 's' : ''} encontrados',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.grey[700]),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: Colors.grey[700],
+                      ),
                     ),
                   ],
                 ),
@@ -115,10 +144,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   itemCount: productos.length,
                   itemBuilder: (context, index) {
-                    return ProductTile(
-                      p: productos[index],
-                      firebase: firebase,
-                    );
+                    return ProductTile(p: productos[index], firebase: firebase);
                   },
                 ),
               ),

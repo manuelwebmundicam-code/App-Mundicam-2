@@ -11,10 +11,7 @@ import 'home_page.dart';
 class CartPage extends ConsumerWidget {
   final VoidCallback? onGoHome;
 
-  const CartPage({
-    super.key,
-    this.onGoHome,
-  });
+  const CartPage({super.key, this.onGoHome});
 
   void _goToHome(BuildContext context) {
     if (onGoHome != null) {
@@ -25,7 +22,7 @@ class CartPage extends ConsumerWidget {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const HomePage()),
-          (route) => false,
+      (route) => false,
     );
   }
 
@@ -44,22 +41,29 @@ class CartPage extends ConsumerWidget {
       body: cartItems.isEmpty
           ? _buildEmptyCart(context)
           : Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              physics: const BouncingScrollPhysics(),
-              itemCount: cartItems.length,
-              itemBuilder: (context, index) {
-                final item = cartItems[index];
-                final price = double.tryParse(item.product.price.replaceAll(',', '.')) ?? 0;
-                return _buildProductItem(ref, item, price);
-              },
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 20,
+                    ),
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: cartItems.length,
+                    itemBuilder: (context, index) {
+                      final item = cartItems[index];
+                      final price =
+                          double.tryParse(
+                            item.product.price.replaceAll(',', '.'),
+                          ) ??
+                          0;
+                      return _buildProductItem(ref, item, price);
+                    },
+                  ),
+                ),
+                _buildCheckoutSection(ref, context),
+              ],
             ),
-          ),
-          _buildCheckoutSection(ref, context),
-        ],
-      ),
     );
   }
 
@@ -91,7 +95,8 @@ class CartPage extends ConsumerWidget {
                     width: 80,
                     height: 80,
                     fit: BoxFit.cover,
-                    placeholder: (context, url) => Container(color: Colors.grey[100]),
+                    placeholder: (context, url) =>
+                        Container(color: Colors.grey[100]),
                   ),
                 ),
                 Positioned(
@@ -99,7 +104,9 @@ class CartPage extends ConsumerWidget {
                   left: 0,
                   child: GestureDetector(
                     onTap: () {
-                      ref.read(cartProvider.notifier).removeProduct(item.product.id);
+                      ref
+                          .read(cartProvider.notifier)
+                          .removeProduct(item.product.id);
                       HapticFeedback.lightImpact();
                     },
                     child: Container(
@@ -107,9 +114,18 @@ class CartPage extends ConsumerWidget {
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(6),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4)],
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 4,
+                          ),
+                        ],
                       ),
-                      child: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                      child: const Icon(
+                        Icons.delete_outline,
+                        size: 16,
+                        color: Colors.red,
+                      ),
                     ),
                   ),
                 ),
@@ -122,7 +138,11 @@ class CartPage extends ConsumerWidget {
                 children: [
                   Text(
                     item.product.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: AppColors.textPrimary,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -149,15 +169,25 @@ class CartPage extends ConsumerWidget {
               children: [
                 _qtyBtn(
                   icon: Icons.add,
-                  onTap: () => ref.read(cartProvider.notifier).updateQuantity(item.product.id, item.quantity + 1),
+                  onTap: () => ref
+                      .read(cartProvider.notifier)
+                      .updateQuantity(item.product.id, item.quantity + 1),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text("${item.quantity}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  child: Text(
+                    "${item.quantity}",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
                 ),
                 _qtyBtn(
                   icon: Icons.remove,
-                  onTap: () => ref.read(cartProvider.notifier).updateQuantity(item.product.id, item.quantity - 1),
+                  onTap: () => ref
+                      .read(cartProvider.notifier)
+                      .updateQuantity(item.product.id, item.quantity - 1),
                 ),
               ],
             ),
@@ -186,7 +216,11 @@ class CartPage extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.shopping_cart_outlined, size: 80, color: Colors.grey.shade300),
+          Icon(
+            Icons.shopping_cart_outlined,
+            size: 80,
+            color: Colors.grey.shade300,
+          ),
           const SizedBox(height: 16),
           const Text(
             "Tu cesta está vacía",
@@ -233,14 +267,23 @@ class CartPage extends ConsumerWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _priceRow("Base Imponible", "${notifier.subtotal.toStringAsFixed(2)} €"),
+          _priceRow(
+            "Base Imponible",
+            "${notifier.subtotal.toStringAsFixed(2)} €",
+          ),
           const SizedBox(height: 4),
-          _priceRow("IVA (21%) incluido", "${notifier.iva.toStringAsFixed(2)} €"),
+          _priceRow(
+            "IVA (21%) incluido",
+            "${notifier.iva.toStringAsFixed(2)} €",
+          ),
           const Divider(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("TOTAL", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const Text(
+                "TOTAL",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
               Text(
                 "${notifier.total.toStringAsFixed(2)} €",
                 style: const TextStyle(
@@ -263,7 +306,7 @@ class CartPage extends ConsumerWidget {
               ),
               child: const Text("TRAMITAR PEDIDO"),
             ),
-          )
+          ),
         ],
       ),
     );
@@ -273,8 +316,18 @@ class CartPage extends ConsumerWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-        Text(value, style: const TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ],
     );
   }

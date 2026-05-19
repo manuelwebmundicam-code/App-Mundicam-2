@@ -1,17 +1,18 @@
-import 'package:Mundicam/services/category_cache_service.dart';
-import 'package:Mundicam/services/storage_cache_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:Mundicam/theme.dart';
+
+import 'theme.dart';
+import 'services/category_cache_service.dart';
+import 'services/storage_cache_service.dart';
 import 'services/notification_service.dart';
+import 'services/api_service.dart';
 import 'pages/login_page.dart';
 import 'pages/main_screen.dart';
 import 'providers/category_provider.dart';
 import 'providers/academy_provider.dart';
-import 'services/api_service.dart';
 
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
@@ -30,32 +31,35 @@ void main() async {
         storageBucket: 'mundicam-app.firebasestorage.app',
       ),
     );
-    debugPrint("✅ Firebase inicializado correctamente");
+    debugPrint('✅ Firebase inicializado correctamente');
   } catch (e) {
-    debugPrint("❌ Error al conectar Firebase: $e");
+    debugPrint('❌ Error al conectar Firebase: $e');
   }
 
   try {
     final remoteConfig = FirebaseRemoteConfig.instance;
-    await remoteConfig.setConfigSettings(RemoteConfigSettings(
-      fetchTimeout: const Duration(seconds: 10),
-      minimumFetchInterval: const Duration(hours: 12),
-    ));
+
+    await remoteConfig.setConfigSettings(
+      RemoteConfigSettings(
+        fetchTimeout: const Duration(seconds: 10),
+        minimumFetchInterval: const Duration(hours: 12),
+      ),
+    );
+
     await remoteConfig.setDefaults({
       'wc_consumer_key': '',
       'wc_consumer_secret': '',
       'api_base_url': 'https://www.mundicam.com',
     });
+
     await remoteConfig.fetchAndActivate();
-    debugPrint("✅ Remote Config inicializado correctamente");
+    debugPrint('✅ Remote Config inicializado correctamente');
   } catch (e) {
-    debugPrint("⚠️ Error al inicializar Remote Config: $e");
+    debugPrint('⚠️ Error al inicializar Remote Config: $e');
   }
 
-  // Inicializar notificaciones push
   await NotificationService().initialize();
 
-  // Precargar categorías (disco + RAM)
   _precargarDatos();
 
   runApp(const ProviderScope(child: MyApp()));
@@ -66,21 +70,33 @@ Future<void> _precargarDatos() async {
     final apiService = ApiService();
     final cache = CategoryCacheService();
 
-    // Intentar desde disco primero
     final catDisco = await StorageCacheService.getCachedData('categorias');
+
     if (catDisco != null) {
       debugPrint('⚡ Categorías desde disco');
       return;
     }
 
-    // Descargar y guardar en RAM + Disco
     if (cache.getCachedCategories() == null) {
       debugPrint('📦 Precargando categorías...');
+
       final categorias = await apiService.getCategorias();
+
       cache.cacheCategories(categorias);
-      await StorageCacheService.cacheData('categorias', categorias.map((c) {
-        return {'id': c.id, 'name': c.name, 'slug': c.slug, 'parent': c.parent, 'count': c.count};
-      }).toList());
+
+      await StorageCacheService.cacheData(
+        'categorias',
+        categorias.map((c) {
+          return {
+            'id': c.id,
+            'name': c.name,
+            'slug': c.slug,
+            'parent': c.parent,
+            'count': c.count,
+          };
+        }).toList(),
+      );
+
       debugPrint('✅ Categorías precargadas: ${categorias.length}');
     } else {
       debugPrint('📦 Categorías ya en caché');
@@ -128,6 +144,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
         if (user != null) {
           return const MainScreen();
         }
+
         return const LoginPage();
       },
       loading: () => const Scaffold(
@@ -135,11 +152,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
           child: CircularProgressIndicator(color: AppColors.primary),
         ),
       ),
-      error: (e, stack) => Scaffold(
-        body: Center(
-          child: Text("Error: $e"),
-        ),
-      ),
+      error: (e, stack) => Scaffold(body: Center(child: Text('Error: $e'))),
     );
   }
 }

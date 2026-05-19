@@ -8,10 +8,7 @@ class SubcategoriaCCTV {
   final String titulo;
   final List<String> items;
 
-  const SubcategoriaCCTV({
-    required this.titulo,
-    required this.items,
-  });
+  const SubcategoriaCCTV({required this.titulo, required this.items});
 }
 
 // ---------------------------------------------------------
@@ -30,7 +27,7 @@ class DataCCTV {
         "Cámaras Fisheye 360º",
         "Cámaras Panorámicas",
         "Cámaras Miniatura HD",
-        "Cámaras Térmicas HD"
+        "Cámaras Térmicas HD",
       ],
     ),
     SubcategoriaCCTV(
@@ -38,7 +35,7 @@ class DataCCTV {
       items: [
         "KITS CCTV BASIC 4CH-8CH-16CH",
         "KITS CCTV MASTER 4CH-8CH-16CH",
-        "KITS CCTV ELITE 4CH-8CH-16CH"
+        "KITS CCTV ELITE 4CH-8CH-16CH",
       ],
     ),
     SubcategoriaCCTV(
@@ -50,7 +47,7 @@ class DataCCTV {
         "Grabadores XVR HD 32CH",
         "Grabadores XVR HD 64CH",
         "Grabadores XVR HD 128CH",
-        "Grabadores XVR HD Vehículos"
+        "Grabadores XVR HD Vehículos",
       ],
     ),
     SubcategoriaCCTV(
@@ -64,7 +61,7 @@ class DataCCTV {
         "Teclados PTZ",
         "Cajas",
         "Soportes",
-        "Resto Accesorios"
+        "Resto Accesorios",
       ],
     ),
   ];
@@ -89,7 +86,8 @@ class SubCategoriasCCTVPage extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         itemCount: DataCCTV.categorias.length,
         separatorBuilder: (_, __) => const SizedBox(height: 20),
-        itemBuilder: (context, index) => _buildCategoryCard(DataCCTV.categorias[index]),
+        itemBuilder: (context, index) =>
+            _buildCategoryCard(DataCCTV.categorias[index]),
       ),
     );
   }

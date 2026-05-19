@@ -1,5 +1,5 @@
 // services/category_cache_service.dart
-import '../models/category_model.dart';
+import '../features/catalog/data/models/category_model.dart';
 
 class CategoryCacheService {
   static final CategoryCacheService _instance = CategoryCacheService._();

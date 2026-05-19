@@ -118,7 +118,10 @@ class FirebaseService {
       if (assignedManager != null) data['assigned_manager'] = assignedManager;
       if (wooCommerceId != null) data['woocommerce_id'] = wooCommerceId;
 
-      await _db.collection('users').doc(user.uid).set(data, SetOptions(merge: true));
+      await _db
+          .collection('users')
+          .doc(user.uid)
+          .set(data, SetOptions(merge: true));
       debugPrint('✅ Perfil guardado en Firestore');
     } catch (e) {
       debugPrint('Error al guardar perfil: $e');
@@ -232,10 +235,12 @@ class FirebaseService {
     if (user == null) return;
 
     try {
-      await _db.collection('users').doc(user.uid).collection('cart').doc('current').set({
-        'items': cartItems,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      await _db
+          .collection('users')
+          .doc(user.uid)
+          .collection('cart')
+          .doc('current')
+          .set({'items': cartItems, 'updatedAt': FieldValue.serverTimestamp()});
     } catch (e) {
       debugPrint('Error al guardar carrito: $e');
     }
@@ -292,11 +297,7 @@ class FirebaseService {
     if (user == null) return;
 
     try {
-      await _db
-          .collection('users')
-          .doc(user.uid)
-          .collection('orders')
-          .add({
+      await _db.collection('users').doc(user.uid).collection('orders').add({
         ...orderData,
         'createdAt': FieldValue.serverTimestamp(),
         'status': 'pending',

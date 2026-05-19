@@ -142,36 +142,28 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
             _loadedTabs[2]
                 ? _buildNavigator(
-              2,
-              OrdersPage(
-                onGoHome: () => _onItemTapped(0),
-              ),
-            )
+                    2,
+                    OrdersPage(onGoHome: () => _onItemTapped(0)),
+                  )
                 : const SizedBox.shrink(),
 
             _loadedTabs[3]
                 ? _buildNavigator(
-              3,
-              QuotesPage(
-                onGoHome: () => _onItemTapped(0),
-              ),
-            )
+                    3,
+                    QuotesPage(onGoHome: () => _onItemTapped(0)),
+                  )
                 : const SizedBox.shrink(),
 
             _loadedTabs[4]
-                ? _buildNavigator(
-              4,
-              CartPage(
-                onGoHome: () => _onItemTapped(0),
-              ),
-            )
+                ? _buildNavigator(4, CartPage(onGoHome: () => _onItemTapped(0)))
                 : const SizedBox.shrink(),
           ],
         ),
         bottomNavigationBar: Container(
           padding: EdgeInsets.only(bottom: bottomPadding),
           decoration: BoxDecoration(
-            color: Theme.of(context).bottomNavigationBarTheme.backgroundColor ??
+            color:
+                Theme.of(context).bottomNavigationBarTheme.backgroundColor ??
                 Colors.white,
             boxShadow: [
               BoxShadow(

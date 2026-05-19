@@ -1,6 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/category_model.dart';
+import '../features/catalog/data/models/category_model.dart';
 import '../services/api_service.dart';
 import '../services/category_cache_service.dart';
 

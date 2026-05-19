@@ -11,10 +11,7 @@ class MenuBarWidget extends ConsumerWidget {
   const MenuBarWidget({super.key});
 
   void _navigateTo(BuildContext context, Widget page) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => page),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (context) => page));
   }
 
   /// Busca el ID de la categoría Outlet desde las categorías cargadas
@@ -23,7 +20,7 @@ class MenuBarWidget extends ConsumerWidget {
     return categoriasAsync.when(
       data: (categorias) {
         final outlet = categorias.where(
-              (c) => c.name.toLowerCase().contains('outlet'),
+          (c) => c.name.toLowerCase().contains('outlet'),
         );
         return outlet.isNotEmpty ? outlet.first.id : null;
       },
@@ -59,7 +56,10 @@ class MenuBarWidget extends ConsumerWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -79,7 +79,9 @@ class MenuBarWidget extends ConsumerWidget {
                   );
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("No se encontró la categoría Outlet")),
+                    const SnackBar(
+                      content: Text("No se encontró la categoría Outlet"),
+                    ),
                   );
                 }
               },
@@ -99,11 +101,7 @@ class MenuItem extends StatelessWidget {
   final String title;
   final VoidCallback onTap;
 
-  const MenuItem({
-    super.key,
-    required this.title,
-    required this.onTap,
-  });
+  const MenuItem({super.key, required this.title, required this.onTap});
 
   @override
   Widget build(BuildContext context) {

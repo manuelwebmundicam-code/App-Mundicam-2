@@ -32,7 +32,6 @@ class Product {
   // =========================
 
   bool get hasStock {
-
     // WooCommerce stock numérico
     if (stockQuantity > 0) {
       return true;
@@ -51,7 +50,6 @@ class Product {
   // =========================
 
   int get maxPurchaseQty {
-
     // Si WooCommerce controla stock real
     if (stockQuantity > 0) {
       return stockQuantity;
@@ -67,29 +65,23 @@ class Product {
   }
 
   factory Product.fromJson(Map<String, dynamic> json) {
-
     // =========================
     // IMAGEN
     // =========================
 
     String firstImage = 'https://via.placeholder.com/150';
 
-    if (json['images'] != null &&
-        (json['images'] as List).isNotEmpty) {
-
-      firstImage =
-          json['images'][0]['src'] ?? firstImage;
+    if (json['images'] != null && (json['images'] as List).isNotEmpty) {
+      firstImage = json['images'][0]['src'] ?? firstImage;
     }
 
     // =========================
     // DESCRIPCIÓN CORTA
     // =========================
 
-    final String rawShort =
-        json['short_description']?.toString() ?? '';
+    final String rawShort = json['short_description']?.toString() ?? '';
 
-    final String cleanShort =
-    rawShort.replaceAll(
+    final String cleanShort = rawShort.replaceAll(
       RegExp(r'<[^>]*>|&[^;]+;'),
       '',
     );
@@ -98,62 +90,44 @@ class Product {
     // DESCRIPCIÓN LARGA
     // =========================
 
-    final String rawLong =
-        json['description']?.toString() ?? '';
+    final String rawLong = json['description']?.toString() ?? '';
 
-    final String cleanLong =
-    rawLong.replaceAll(
-      RegExp(r'<[^>]*>|&[^;]+;'),
-      '',
-    );
+    final String cleanLong = rawLong.replaceAll(RegExp(r'<[^>]*>|&[^;]+;'), '');
 
     return Product(
       id: json['id'] ?? 0,
 
       name: json['name'] ?? 'Sin nombre',
 
-      price:
-      (json['price'] ?? '0.00').toString(),
+      price: (json['price'] ?? '0.00').toString(),
 
-      regularPrice:
-      (json['regular_price'] ?? '').toString(),
+      regularPrice: (json['regular_price'] ?? '').toString(),
 
       imageUrl: firstImage,
 
-      sku:
-      (json['sku'] ?? '').toString(),
+      sku: (json['sku'] ?? '').toString(),
 
       // =========================
       // STOCK SEGURO
       // =========================
+      stockQuantity: (json['stock_quantity'] ?? 0) as int,
 
-      stockQuantity:
-      (json['stock_quantity'] ?? 0) as int,
+      onSale: json['on_sale'] ?? false,
 
-      onSale:
-      json['on_sale'] ?? false,
+      isInstock: json['stock_status']?.toString() == 'instock',
 
-      isInstock:
-      json['stock_status']?.toString() ==
-          'instock',
-
-      shortDescription:
-      cleanShort.trim().isEmpty
+      shortDescription: cleanShort.trim().isEmpty
           ? 'Sin descripción'
           : cleanShort.trim(),
 
-      description:
-      cleanLong.trim().isEmpty
+      description: cleanLong.trim().isEmpty
           ? 'Sin descripción detallada'
           : cleanLong.trim(),
 
       attributes:
-      (json['attributes'] as List?)
-          ?.map(
-            (attr) =>
-            ProductAttribute.fromJson(attr),
-      )
-          .toList() ??
+          (json['attributes'] as List?)
+              ?.map((attr) => ProductAttribute.fromJson(attr))
+              .toList() ??
           [],
     );
   }
@@ -164,48 +138,29 @@ class Product {
     'price': price,
     'regular_price': regularPrice,
     'images': [
-      {'src': imageUrl}
+      {'src': imageUrl},
     ],
     'sku': sku,
     'on_sale': onSale,
-    'stock_status':
-    isInstock
-        ? 'instock'
-        : 'outofstock',
-    'short_description':
-    shortDescription,
-    'description':
-    description,
-    'attributes':
-    attributes
-        .map((a) => a.toJson())
-        .toList(),
+    'stock_status': isInstock ? 'instock' : 'outofstock',
+    'short_description': shortDescription,
+    'description': description,
+    'attributes': attributes.map((a) => a.toJson()).toList(),
   };
 }
 
 class ProductAttribute {
-
   final String name;
   final List<String> options;
 
-  ProductAttribute({
-    required this.name,
-    required this.options,
-  });
+  ProductAttribute({required this.name, required this.options});
 
-  factory ProductAttribute.fromJson(
-      Map<String, dynamic> json) {
-
+  factory ProductAttribute.fromJson(Map<String, dynamic> json) {
     return ProductAttribute(
       name: json['name'] ?? '',
-      options: List<String>.from(
-        json['options'] ?? [],
-      ),
+      options: List<String>.from(json['options'] ?? []),
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'name': name,
-    'options': options,
-  };
+  Map<String, dynamic> toJson() => {'name': name, 'options': options};
 }

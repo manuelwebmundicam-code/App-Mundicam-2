@@ -26,8 +26,11 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
         onBack: () => Navigator.of(context).pop(),
       ),
       body: categoriasAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
-        error: (err, stack) => Center(child: Text("Error al cargar categorías: $err")),
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+        error: (err, stack) =>
+            Center(child: Text("Error al cargar categorías: $err")),
         data: (categorias) {
           return GridView.builder(
             padding: const EdgeInsets.all(20),
@@ -53,16 +56,19 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 
   IconData _getIconForCategory(String name) {
     final n = name.toLowerCase();
-    if (n.contains("video") || n.contains("cctv")) return Icons.videocam_rounded;
+    if (n.contains("video") || n.contains("cctv"))
+      return Icons.videocam_rounded;
     if (n.contains("ip")) return Icons.settings_remote_rounded;
     if (n.contains("antihurto")) return Icons.lock_outline_rounded;
     if (n.contains("complementos")) return Icons.extension_rounded;
-    if (n.contains("intrusión") || n.contains("alarma")) return Icons.notifications_active_rounded;
+    if (n.contains("intrusión") || n.contains("alarma"))
+      return Icons.notifications_active_rounded;
     if (n.contains("acceso")) return Icons.badge_rounded;
     if (n.contains("incendio")) return Icons.local_fire_department_rounded;
     if (n.contains("net")) return Icons.hub_outlined;
     if (n.contains("drone")) return Icons.flight_takeoff_rounded;
-    if (n.contains("energía") || n.contains("solar")) return Icons.wb_sunny_rounded;
+    if (n.contains("energía") || n.contains("solar"))
+      return Icons.wb_sunny_rounded;
     if (n.contains("outlet")) return Icons.loyalty_rounded;
     return Icons.health_and_safety_rounded;
   }
@@ -81,7 +87,11 @@ class _CategoryCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 5)),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
         ],
       ),
       child: Material(
@@ -127,14 +137,21 @@ class _CategoryCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 5),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF0F2F5),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     "${cat.count} Refs",
-                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Colors.grey[600]),
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[600],
+                    ),
                   ),
                 ),
               ],

@@ -1,24 +1,20 @@
-import 'package:Mundicam/pages/producto_detalles_page.dart';
+import 'package:mundicam/pages/producto_detalles_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
-import '../models/producto.dart';
+import '../features/catalog/data/models/producto.dart';
 import '../providers/products_provider.dart';
 import '../providers/cart_provider.dart';
 import '../providers/quote_provider.dart';
 import '../providers/user_provider.dart';
 import '../services/firebase_service.dart';
 import '../theme.dart';
-import 'cart_page.dart';
 
 class BusquedaResultadosPage extends ConsumerWidget {
   final String query;
 
-  const BusquedaResultadosPage({
-    super.key,
-    required this.query,
-  });
+  const BusquedaResultadosPage({super.key, required this.query});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -31,10 +27,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
       appBar: AppBar(
         title: Text(
           'Resultados: "$cleanedQuery"',
-          style: const TextStyle(
-            fontSize: 16,
-            fontFamily: 'Oswald',
-          ),
+          style: const TextStyle(fontSize: 16, fontFamily: 'Oswald'),
         ),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
@@ -56,15 +49,17 @@ class BusquedaResultadosPage extends ConsumerWidget {
         ),
         error: (error, stack) => _buildErrorState(context, error),
         data: (productosOriginales) {
-          final List<Product> productos =
-          _SearchEngine.sortByRelevance(productosOriginales, cleanedQuery);
+          final List<Product> productos = _SearchEngine.sortByRelevance(
+            productosOriginales,
+            cleanedQuery,
+          );
 
           if (productos.isEmpty) {
             return _buildEmptyState(context, cleanedQuery);
           }
 
           final List<String> detectedTerms =
-          _SearchEngine.detectedReadableTerms(cleanedQuery);
+              _SearchEngine.detectedReadableTerms(cleanedQuery);
 
           return Column(
             children: [
@@ -154,11 +149,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.error_outline,
-              size: 60,
-              color: Colors.red,
-            ),
+            const Icon(Icons.error_outline, size: 60, color: Colors.red),
             const SizedBox(height: 16),
             const Text(
               'Error al buscar productos',
@@ -173,10 +164,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
             Text(
               '$error',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 13,
-              ),
+              style: TextStyle(color: Colors.grey[600], fontSize: 13),
             ),
             const SizedBox(height: 18),
             OutlinedButton.icon(
@@ -203,11 +191,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 90,
-              color: Colors.grey[350],
-            ),
+            Icon(Icons.search_off_rounded, size: 90, color: Colors.grey[350]),
             const SizedBox(height: 20),
             Text(
               'No encontramos "$cleanedQuery"',
@@ -247,9 +231,8 @@ class BusquedaResultadosPage extends ConsumerWidget {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => BusquedaResultadosPage(
-                            query: suggestion,
-                          ),
+                          builder: (_) =>
+                              BusquedaResultadosPage(query: suggestion),
                         ),
                       );
                     },
@@ -350,15 +333,7 @@ class _SearchEngine {
       'tplink',
       'tp-link',
     ],
-    '4g': [
-      '4g',
-      'lte',
-      'sim',
-      'm2m',
-      'iot',
-      'router 4g',
-      'multioperador',
-    ],
+    '4g': ['4g', 'lte', 'sim', 'm2m', 'iot', 'router 4g', 'multioperador'],
     'solar': [
       'solar',
       'panel solar',
@@ -472,7 +447,8 @@ class _SearchEngine {
     if (name.contains('wifi') && normalizedQuery.contains('wifi')) score += 35;
     if (name.contains('4g') && normalizedQuery.contains('4g')) score += 35;
     if (name.contains('en54') && normalizedQuery.contains('en54')) score += 45;
-    if (name.contains('grado') && normalizedQuery.contains('grado')) score += 30;
+    if (name.contains('grado') && normalizedQuery.contains('grado'))
+      score += 30;
 
     return score;
   }
@@ -531,7 +507,15 @@ class _SearchEngine {
       }
     }
 
-    if (_containsAny(normalized, ['camara', 'camaras', 'cctv', 'turret', 'bullet', 'domo', 'ptz'])) {
+    if (_containsAny(normalized, [
+      'camara',
+      'camaras',
+      'cctv',
+      'turret',
+      'bullet',
+      'domo',
+      'ptz',
+    ])) {
       detected.add('CCTV / Cámaras');
     }
 
@@ -539,7 +523,13 @@ class _SearchEngine {
       detected.add('Grabadores');
     }
 
-    if (_containsAny(normalized, ['alarma', 'intrusion', 'hub', 'detector', 'sirena'])) {
+    if (_containsAny(normalized, [
+      'alarma',
+      'intrusion',
+      'hub',
+      'detector',
+      'sirena',
+    ])) {
       detected.add('Intrusión');
     }
 
@@ -547,7 +537,14 @@ class _SearchEngine {
       detected.add('Incendio');
     }
 
-    if (_containsAny(normalized, ['poe', 'switch', 'router', 'wifi', 'networking', 'red'])) {
+    if (_containsAny(normalized, [
+      'poe',
+      'switch',
+      'router',
+      'wifi',
+      'networking',
+      'red',
+    ])) {
       detected.add('Networking');
     }
 
@@ -581,14 +578,7 @@ class _SearchEngine {
       return ['switch PoE', 'router 4G', 'Omada', 'VIGI'];
     }
 
-    return [
-      'Dahua',
-      'Ajax',
-      'Hikvision',
-      'cámara IP',
-      'NVR',
-      'switch PoE',
-    ];
+    return ['Dahua', 'Ajax', 'Hikvision', 'cámara IP', 'NVR', 'switch PoE'];
   }
 
   static String _normalize(String value) {
@@ -679,10 +669,7 @@ class _ScoredProduct {
   final Product product;
   final int score;
 
-  const _ScoredProduct({
-    required this.product,
-    required this.score,
-  });
+  const _ScoredProduct({required this.product, required this.score});
 }
 
 // ------------------------------------------------------------
@@ -700,7 +687,8 @@ class ProductTileBusqueda extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductTileBusqueda> createState() => _ProductTileBusquedaState();
+  ConsumerState<ProductTileBusqueda> createState() =>
+      _ProductTileBusquedaState();
 }
 
 class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
@@ -829,10 +817,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   child: ElevatedButton(
                     onPressed: p.isInstock
                         ? () {
-                      ref
-                          .read(cartProvider.notifier)
-                          .addProduct(p, cantidad);
-                    }
+                            ref
+                                .read(cartProvider.notifier)
+                                .addProduct(p, cantidad);
+                          }
                         : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
@@ -864,14 +852,11 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      _qtyBtn(
-                        Icons.remove,
-                            () {
-                          if (cantidad > 1) {
-                            setState(() => cantidad--);
-                          }
-                        },
-                      ),
+                      _qtyBtn(Icons.remove, () {
+                        if (cantidad > 1) {
+                          setState(() => cantidad--);
+                        }
+                      }),
                       Text(
                         '$cantidad',
                         style: const TextStyle(
@@ -879,13 +864,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      _qtyBtn(
-                        Icons.add,
-                            () {
-                          setState(() => cantidad++);
-                        },
-                        isPrimary: true,
-                      ),
+                      _qtyBtn(Icons.add, () {
+                        setState(() => cantidad++);
+                      }, isPrimary: true),
                     ],
                   ),
                 ),
@@ -901,20 +882,20 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   child: OutlinedButton(
                     onPressed: p.isInstock
                         ? () {
-                      ref
-                          .read(cartProvider.notifier)
-                          .addProduct(p, cantidad);
+                            ref
+                                .read(cartProvider.notifier)
+                                .addProduct(p, cantidad);
 
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('${p.name} añadido al carrito'),
-                          backgroundColor: AppColors.primary,
-                          duration: const Duration(seconds: 1),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('${p.name} añadido al carrito'),
+                                backgroundColor: AppColors.primary,
+                                duration: const Duration(seconds: 1),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
                         : null,
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(
@@ -945,17 +926,14 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                     onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
                     icon: _isAddingToQuote
                         ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.orange,
-                      ),
-                    )
-                        : const Icon(
-                      Icons.description_outlined,
-                      size: 14,
-                    ),
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.orange,
+                            ),
+                          )
+                        : const Icon(Icons.description_outlined, size: 14),
                     label: Text(
                       _isAddingToQuote ? '...' : 'PRESUPUESTO',
                       style: const TextStyle(
@@ -984,11 +962,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     );
   }
 
-  Widget _qtyBtn(
-      IconData icon,
-      VoidCallback onTap, {
-        bool isPrimary = false,
-      }) {
+  Widget _qtyBtn(IconData icon, VoidCallback onTap, {bool isPrimary = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1063,10 +1037,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 class ProductImageBusqueda extends StatelessWidget {
   final Product p;
 
-  const ProductImageBusqueda({
-    super.key,
-    required this.p,
-  });
+  const ProductImageBusqueda({super.key, required this.p});
 
   @override
   Widget build(BuildContext context) {
@@ -1083,13 +1054,9 @@ class ProductImageBusqueda extends StatelessWidget {
         child: CachedNetworkImage(
           imageUrl: p.imageUrl,
           fit: BoxFit.contain,
-          placeholder: (context, url) => Container(
-            color: Colors.grey[100],
-          ),
-          errorWidget: (context, url, error) => const Icon(
-            Icons.broken_image,
-            color: Colors.grey,
-          ),
+          placeholder: (context, url) => Container(color: Colors.grey[100]),
+          errorWidget: (context, url, error) =>
+              const Icon(Icons.broken_image, color: Colors.grey),
         ),
       ),
     );

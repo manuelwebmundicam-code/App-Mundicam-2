@@ -31,26 +31,31 @@ class _RegisterPageState extends State<RegisterPage> {
 
     try {
       // 1. Crear usuario en Auth
-      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
+      UserCredential userCredential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text.trim(),
+          );
 
       // 2. ENVIAR EMAIL DE VERIFICACIÓN
       await userCredential.user!.sendEmailVerification();
 
       // 3. Guardar en Firestore
-      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-        'uid': userCredential.user!.uid,
-        'nombre_contacto': _nameController.text.trim(),
-        'razon_social': _companyController.text.trim(),
-        'cif_nif': _taxIdController.text.trim().toUpperCase(),
-        'telefono': _phoneController.text.trim(),
-        'email': _emailController.text.trim(),
-        'isBlocked': false, // CAMBIADO A FALSE: Para que no de error fiscal al entrar tras verificar email
-        'role': 'client',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .set({
+            'uid': userCredential.user!.uid,
+            'nombre_contacto': _nameController.text.trim(),
+            'razon_social': _companyController.text.trim(),
+            'cif_nif': _taxIdController.text.trim().toUpperCase(),
+            'telefono': _phoneController.text.trim(),
+            'email': _emailController.text.trim(),
+            'isBlocked':
+                false, // CAMBIADO A FALSE: Para que no de error fiscal al entrar tras verificar email
+            'role': 'client',
+            'createdAt': FieldValue.serverTimestamp(),
+          });
 
       if (mounted) {
         _showSnackBar("Registro casi listo. Verifica tu email para continuar.");
@@ -125,23 +130,52 @@ class _RegisterPageState extends State<RegisterPage> {
                       const SizedBox(height: 8),
                       const Text(
                         'Datos requeridos para validación B2B',
-                        style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 12,
+                        ),
                       ),
                       const SizedBox(height: 20),
 
-                      _buildInput(_companyController, 'Razón Social / Empresa', Icons.business),
+                      _buildInput(
+                        _companyController,
+                        'Razón Social / Empresa',
+                        Icons.business,
+                      ),
                       const SizedBox(height: 12),
-                      _buildInput(_taxIdController, 'CIF / NIF', Icons.featured_video_outlined),
+                      _buildInput(
+                        _taxIdController,
+                        'CIF / NIF',
+                        Icons.featured_video_outlined,
+                      ),
                       const SizedBox(height: 12),
-                      _buildInput(_nameController, 'Persona de Contacto', Icons.person),
+                      _buildInput(
+                        _nameController,
+                        'Persona de Contacto',
+                        Icons.person,
+                      ),
                       const SizedBox(height: 12),
-                      _buildInput(_phoneController, 'Teléfono', Icons.phone, type: TextInputType.phone),
+                      _buildInput(
+                        _phoneController,
+                        'Teléfono',
+                        Icons.phone,
+                        type: TextInputType.phone,
+                      ),
                       const SizedBox(height: 12),
-                      _buildInput(_emailController, 'Email Profesional', Icons.email, type: TextInputType.emailAddress),
+                      _buildInput(
+                        _emailController,
+                        'Email Profesional',
+                        Icons.email,
+                        type: TextInputType.emailAddress,
+                      ),
                       const SizedBox(height: 12),
                       _buildPasswordInput(_passwordController, 'Contraseña'),
                       const SizedBox(height: 12),
-                      _buildPasswordInput(_confirmPassController, 'Confirmar Contraseña', isConfirm: true),
+                      _buildPasswordInput(
+                        _confirmPassController,
+                        'Confirmar Contraseña',
+                        isConfirm: true,
+                      ),
 
                       const SizedBox(height: 24),
 
@@ -152,10 +186,13 @@ class _RegisterPageState extends State<RegisterPage> {
                           onPressed: _isLoading ? null : _handleRegister,
                           child: _isLoading
                               ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                          )
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
                               : const Text('SOLICITAR ALTA'),
                         ),
                       ),
@@ -163,10 +200,13 @@ class _RegisterPageState extends State<RegisterPage> {
                       TextButton(
                         onPressed: () => Navigator.pop(context),
                         child: const Text(
-                            '¿Ya tienes cuenta? Inicia sesión',
-                            style: TextStyle(color: AppColors.textSecondary, fontFamily: 'Oswald')
+                          '¿Ya tienes cuenta? Inicia sesión',
+                          style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontFamily: 'Oswald',
+                          ),
                         ),
-                      )
+                      ),
                     ],
                   ),
                 ),
@@ -178,11 +218,20 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
-  Widget _buildInput(TextEditingController ctrl, String label, IconData icon, {TextInputType type = TextInputType.text}) {
+  Widget _buildInput(
+    TextEditingController ctrl,
+    String label,
+    IconData icon, {
+    TextInputType type = TextInputType.text,
+  }) {
     return TextFormField(
       controller: ctrl,
       keyboardType: type,
-      style: const TextStyle(fontFamily: 'Oswald', fontSize: 14, color: AppColors.textPrimary),
+      style: const TextStyle(
+        fontFamily: 'Oswald',
+        fontSize: 14,
+        color: AppColors.textPrimary,
+      ),
       decoration: InputDecoration(
         labelText: label,
         labelStyle: const TextStyle(color: AppColors.primary),
@@ -197,15 +246,24 @@ class _RegisterPageState extends State<RegisterPage> {
           borderSide: const BorderSide(color: AppColors.accent, width: 2),
         ),
       ),
-      validator: (v) => (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null,
+      validator: (v) =>
+          (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null,
     );
   }
 
-  Widget _buildPasswordInput(TextEditingController ctrl, String label, {bool isConfirm = false}) {
+  Widget _buildPasswordInput(
+    TextEditingController ctrl,
+    String label, {
+    bool isConfirm = false,
+  }) {
     return TextFormField(
       controller: ctrl,
       obscureText: _obscurePassword,
-      style: const TextStyle(fontFamily: 'Oswald', fontSize: 14, color: AppColors.textPrimary),
+      style: const TextStyle(
+        fontFamily: 'Oswald',
+        fontSize: 14,
+        color: AppColors.textPrimary,
+      ),
       decoration: InputDecoration(
         labelText: label,
         labelStyle: const TextStyle(color: AppColors.primary),
@@ -221,9 +279,9 @@ class _RegisterPageState extends State<RegisterPage> {
         ),
         suffixIcon: IconButton(
           icon: Icon(
-              _obscurePassword ? Icons.visibility_off : Icons.visibility,
-              size: 20,
-              color: AppColors.primary
+            _obscurePassword ? Icons.visibility_off : Icons.visibility,
+            size: 20,
+            color: AppColors.primary,
           ),
           onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
         ),

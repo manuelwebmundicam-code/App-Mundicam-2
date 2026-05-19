@@ -3,10 +3,7 @@ import 'package:flutter/material.dart';
 class ChatbotButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  const ChatbotButton({
-    super.key,
-    required this.onTap,
-  });
+  const ChatbotButton({super.key, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -74,12 +71,7 @@ class SpeechBubblePainter extends CustomPainter {
 
     path.addRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          0,
-          0,
-          size.width,
-          size.height - tailHeight,
-        ),
+        Rect.fromLTWH(0, 0, size.width, size.height - tailHeight),
         const Radius.circular(radius),
       ),
     );

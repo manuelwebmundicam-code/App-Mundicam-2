@@ -1,4 +1,3 @@
-
 class CategoryModel {
   final int id;
   final String name;

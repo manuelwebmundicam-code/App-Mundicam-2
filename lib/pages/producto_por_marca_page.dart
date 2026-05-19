@@ -1,7 +1,7 @@
-import 'package:Mundicam/pages/productos_por_categoria.dart';
+import 'package:mundicam/pages/productos_por_categoria.dart';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import '../models/producto.dart';
+import '../features/catalog/data/models/producto.dart';
 import '../services/firebase_service.dart';
 
 class ProductoPorMarca extends StatefulWidget {
@@ -73,10 +73,7 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
             itemCount: productos.length,
             itemBuilder: (context, index) {
               // Reutilizamos tu ProductTile público
-              return ProductTile(
-                p: productos[index],
-                firebase: _firebase,
-              );
+              return ProductTile(p: productos[index], firebase: _firebase);
             },
           );
         },

@@ -16,9 +16,7 @@ class CourseModel {
   factory CourseModel.fromWordPress(Map<String, dynamic> json) {
     // Función interna para limpiar HTML y espacios del JSON
     String cleanHtml(String html) {
-      return html
-          .replaceAll(RegExp(r'<[^>]*>|&[^;]+;'), '')
-          .trim();
+      return html.replaceAll(RegExp(r'<[^>]*>|&[^;]+;'), '').trim();
     }
 
     // Buscamos la imagen en el contenido si no hay destacada

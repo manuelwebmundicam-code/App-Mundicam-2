@@ -1,21 +1,20 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/producto.dart';
+import '../features/catalog/data/models/producto.dart';
 import '../services/api_service.dart';
 import 'banner_mix_provider.dart';
 import 'filter_provider.dart';
 
 /// Provider para productos con scroll infinito
-final productsPaginatedProvider = StateNotifierProvider.family<
-    ProductsPaginatedNotifier,
-    List<Product>,
-    int
->((ref, categoryId) {
-  return ProductsPaginatedNotifier(
-    apiService: ref.read(apiServiceProvider),
-    categoryId: categoryId,
-    ref: ref,
-  );
-});
+final productsPaginatedProvider =
+    StateNotifierProvider.family<ProductsPaginatedNotifier, List<Product>, int>(
+      (ref, categoryId) {
+        return ProductsPaginatedNotifier(
+          apiService: ref.read(apiServiceProvider),
+          categoryId: categoryId,
+          ref: ref,
+        );
+      },
+    );
 
 class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   final ApiService apiService;

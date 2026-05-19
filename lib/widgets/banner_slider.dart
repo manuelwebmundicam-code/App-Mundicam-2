@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/banner_mix.dart';
+import '../features/home/data/models/banner_mix.dart';
 import '../providers/banner_mix_provider.dart';
 
 class BannerMix extends ConsumerStatefulWidget {
@@ -29,8 +29,8 @@ class _BannerMixState extends ConsumerState<BannerMix> {
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_controller != null && _controller!.hasClients) {
         _controller!.nextPage(
-            duration: const Duration(milliseconds: 800),
-            curve: Curves.easeInOutCubic
+          duration: const Duration(milliseconds: 800),
+          curve: Curves.easeInOutCubic,
         );
       }
     });
@@ -89,7 +89,9 @@ class _BannerMixState extends ConsumerState<BannerMix> {
           if (loadingProgress == null) return child;
           return Container(
             color: Colors.grey.shade200,
-            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            child: const Center(
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
           );
         },
         errorBuilder: (c, e, s) => _buildInternalDesign(tagColor),
@@ -109,7 +111,8 @@ class _BannerMixState extends ConsumerState<BannerMix> {
     if (titleUpper.contains("OFERTA")) {
       tagColor = const Color(0xFFE65100);
       tagText = "OFERTA";
-    } else if (titleUpper.contains("UNIDADES") || titleUpper.contains("OUTLET")) {
+    } else if (titleUpper.contains("UNIDADES") ||
+        titleUpper.contains("OUTLET")) {
       tagColor = theme.hintColor;
       tagText = "OUTLET";
     } else if (titleUpper.contains("VENDIDOS")) {
@@ -123,9 +126,9 @@ class _BannerMixState extends ConsumerState<BannerMix> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.15),
-              blurRadius: 8,
-              offset: const Offset(0, 4)
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -152,16 +155,16 @@ class _BannerMixState extends ConsumerState<BannerMix> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                  color: tagColor,
-                  borderRadius: BorderRadius.circular(4)
+                color: tagColor,
+                borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 tagText,
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 10,
-                    letterSpacing: 0.8
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 10,
+                  letterSpacing: 0.8,
                 ),
               ),
             ),
@@ -244,14 +247,14 @@ class _BannerMixState extends ConsumerState<BannerMix> {
       height: 200,
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-          color: Colors.grey.shade200,
-          borderRadius: BorderRadius.circular(12)
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Center(
-          child: CircularProgressIndicator(
-              color: theme.primaryColor,
-              strokeWidth: 2
-          )
+        child: CircularProgressIndicator(
+          color: theme.primaryColor,
+          strokeWidth: 2,
+        ),
       ),
     );
   }

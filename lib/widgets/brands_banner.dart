@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../pages/producto_por_marca_page.dart';
 
 class BrandsBanner extends StatefulWidget {
@@ -46,7 +44,9 @@ class _BrandsBannerState extends State<BrandsBanner> {
     _infiniteLogos = [..._logos, ..._logos, ..._logos];
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent / 2);
+        _scrollController.jumpTo(
+          _scrollController.position.maxScrollExtent / 2,
+        );
         _startAutoScroll();
       }
     });
@@ -76,13 +76,17 @@ class _BrandsBannerState extends State<BrandsBanner> {
   Widget build(BuildContext context) {
     // 1. Usamos Padding para el desplazamiento hacia arriba (evita errores de Container)
     return Padding(
-      padding: const EdgeInsets.only(top: 0), // Cambia a -10 si quieres probar subirlo
+      padding: const EdgeInsets.only(
+        top: 0,
+      ), // Cambia a -10 si quieres probar subirlo
       child: SizedBox(
         height: 70,
         child: NotificationListener<ScrollNotification>(
           onNotification: (notification) {
-            if (notification is ScrollStartNotification) _isUserInteracting = true;
-            if (notification is ScrollEndNotification) _isUserInteracting = false;
+            if (notification is ScrollStartNotification)
+              _isUserInteracting = true;
+            if (notification is ScrollEndNotification)
+              _isUserInteracting = false;
             return false;
           },
           child: ListView.builder(
@@ -94,12 +98,14 @@ class _BrandsBannerState extends State<BrandsBanner> {
               final brand = _infiniteLogos[index];
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-                child: GestureDetector( // GestureDetector es más ligero que InkWell
+                child: GestureDetector(
+                  // GestureDetector es más ligero que InkWell
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => ProductoPorMarca(brandName: brand['name']!),
+                        builder: (context) =>
+                            ProductoPorMarca(brandName: brand['name']!),
                       ),
                     );
                   },
@@ -111,9 +117,9 @@ class _BrandsBannerState extends State<BrandsBanner> {
                       borderRadius: BorderRadius.circular(8),
                       boxShadow: const [
                         BoxShadow(
-                            color: Colors.black12,
-                            blurRadius: 2,
-                            offset: Offset(0, 1)
+                          color: Colors.black12,
+                          blurRadius: 2,
+                          offset: Offset(0, 1),
                         ),
                       ],
                     ),
@@ -123,7 +129,8 @@ class _BrandsBannerState extends State<BrandsBanner> {
                         brand['img']!,
                         fit: BoxFit.contain,
                         // Añadimos esto por si alguna imagen falla
-                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.business, color: Colors.grey),
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Icon(Icons.business, color: Colors.grey),
                       ),
                     ),
                   ),

@@ -5,11 +5,7 @@ class ProductCard extends StatelessWidget {
   final String name;
   final String imageUrl; // Ruta local de la imagen
 
-  const ProductCard({
-    super.key,
-    required this.name,
-    required this.imageUrl,
-  });
+  const ProductCard({super.key, required this.name, required this.imageUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -24,14 +20,21 @@ class ProductCard extends StatelessWidget {
           children: [
             Expanded(
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(12),
+                ),
                 child: Image.asset(
                   imageUrl,
                   fit: BoxFit.cover,
                   width: double.infinity,
                   errorBuilder: (context, error, stackTrace) {
                     return const Center(
-                        child: Icon(Icons.broken_image, size: 50, color: Colors.white));
+                      child: Icon(
+                        Icons.broken_image,
+                        size: 50,
+                        color: Colors.white,
+                      ),
+                    );
                   },
                 ),
               ),

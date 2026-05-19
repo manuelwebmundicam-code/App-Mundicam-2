@@ -28,10 +28,14 @@ class BannerMixModel {
 
   static BannerMixType _parseType(dynamic type) {
     switch (type?.toString().toLowerCase()) {
-      case 'product': return BannerMixType.producto;
-      case 'course': return BannerMixType.curso;
-      case 'offer': return BannerMixType.oferta;
-      default: return BannerMixType.web;
+      case 'product':
+        return BannerMixType.producto;
+      case 'course':
+        return BannerMixType.curso;
+      case 'offer':
+        return BannerMixType.oferta;
+      default:
+        return BannerMixType.web;
     }
   }
 }

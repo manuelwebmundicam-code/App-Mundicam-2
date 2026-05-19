@@ -64,10 +64,15 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
   Future<void> _enviarRma() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final motivo = _selectedMotivo == 'Otro' ? _motivoController.text : _selectedMotivo;
+    final motivo = _selectedMotivo == 'Otro'
+        ? _motivoController.text
+        : _selectedMotivo;
     if (motivo == null || motivo.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Selecciona un motivo"), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text("Selecciona un motivo"),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -138,126 +143,221 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           physics: const ClampingScrollPhysics(),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Producto
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey.shade200),
-              ),
-              child: Row(children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 22),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Producto
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade200),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const Text("Producto seleccionado", style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(widget.productName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1A1A1A))),
-                    const SizedBox(height: 4),
-                    Text("Pedido #${widget.orderId}", style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-                  ]),
-                ),
-              ]),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Motivo
-            const Text("MOTIVO DE LA DEVOLUCIÓN", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.grey, letterSpacing: 0.8)),
-            const SizedBox(height: 12),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey.shade200),
-              ),
-              child: Column(
-                children: _motivos.map((motivo) {
-                  final isSelected = _selectedMotivo == motivo;
-                  return InkWell(
-                    onTap: () => setState(() => _selectedMotivo = motivo),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                          color: isSelected ? AppColors.primary.withOpacity(0.05) : Colors.transparent,
-                          border: Border(bottom: BorderSide(color: Colors.grey.shade100))),
-                      child: Row(children: [
-                        Icon(
-                          isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-                          size: 20,
-                          color: isSelected ? AppColors.primary : Colors.grey,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(motivo, style: TextStyle(fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500, color: isSelected ? AppColors.primary : Colors.black87)),
-                      ]),
+                        color: AppColors.primary.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.inventory_2_outlined,
+                        color: AppColors.primary,
+                        size: 22,
+                      ),
                     ),
-                  );
-                }).toList(),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Producto seleccionado",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.productName,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1A1A1A),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "Pedido #${widget.orderId}",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
 
-            if (_selectedMotivo == 'Otro') ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
+
+              // Motivo
+              const Text(
+                "MOTIVO DE LA DEVOLUCIÓN",
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.grey,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  children: _motivos.map((motivo) {
+                    final isSelected = _selectedMotivo == motivo;
+                    return InkWell(
+                      onTap: () => setState(() => _selectedMotivo = motivo),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppColors.primary.withOpacity(0.05)
+                              : Colors.transparent,
+                          border: Border(
+                            bottom: BorderSide(color: Colors.grey.shade100),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isSelected
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_off,
+                              size: 20,
+                              color: isSelected
+                                  ? AppColors.primary
+                                  : Colors.grey,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              motivo,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: isSelected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                color: isSelected
+                                    ? AppColors.primary
+                                    : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+
+              if (_selectedMotivo == 'Otro') ...[
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _motivoController,
+                  decoration: InputDecoration(
+                    labelText: "Especifica el motivo",
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                  ),
+                  validator: (v) => v!.isEmpty ? "Campo requerido" : null,
+                ),
+              ],
+
+              const SizedBox(height: 24),
+
+              // Descripción
+              const Text(
+                "DESCRIPCIÓN DEL PROBLEMA",
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.grey,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 12),
               TextFormField(
-                controller: _motivoController,
+                controller: _descripcionController,
+                maxLines: 5,
                 decoration: InputDecoration(
-                  labelText: "Especifica el motivo",
+                  hintText:
+                      "Describe el problema que tienes con el producto...",
                   filled: true,
                   fillColor: Colors.white,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
                 ),
                 validator: (v) => v!.isEmpty ? "Campo requerido" : null,
               ),
-            ],
 
-            const SizedBox(height: 24),
+              const SizedBox(height: 32),
 
-            // Descripción
-            const Text("DESCRIPCIÓN DEL PROBLEMA", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.grey, letterSpacing: 0.8)),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _descripcionController,
-              maxLines: 5,
-              decoration: InputDecoration(
-                hintText: "Describe el problema que tienes con el producto...",
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-              ),
-              validator: (v) => v!.isEmpty ? "Campo requerido" : null,
-            ),
-
-            const SizedBox(height: 32),
-
-            // Botón enviar
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _enviarRma,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              // Botón enviar
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _enviarRma,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          "ENVIAR SOLICITUD",
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                 ),
-                child: _isLoading
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text("ENVIAR SOLICITUD", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
               ),
-            ),
 
-            const SizedBox(height: 40),
-          ]),
+              const SizedBox(height: 40),
+            ],
+          ),
         ),
       ),
     );

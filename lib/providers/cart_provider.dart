@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/producto.dart';
+import '../features/catalog/data/models/producto.dart';
 
 class CartItem {
   final Product product;
@@ -29,7 +29,9 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
   Future<void> _saveCart() async {
     final prefs = await SharedPreferences.getInstance();
-    final String encodedData = jsonEncode(state.map((item) => item.toJson()).toList());
+    final String encodedData = jsonEncode(
+      state.map((item) => item.toJson()).toList(),
+    );
     await prefs.setString('cart_mundicam_data', encodedData);
   }
 
@@ -91,7 +93,8 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
   /// El TOTAL es la suma directa de los precios de los productos multiplicados por su cantidad.
   double get total => state.fold(0, (sum, item) {
-    double price = double.tryParse(item.product.price.replaceAll(',', '.')) ?? 0;
+    double price =
+        double.tryParse(item.product.price.replaceAll(',', '.')) ?? 0;
     return sum + (price * item.quantity);
   });
 

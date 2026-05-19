@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/category_model.dart';
+import '../features/catalog/data/models/category_model.dart';
 import '../pages/productos_por_categoria.dart';
 import '../providers/category_provider.dart';
 import '../theme.dart';
@@ -15,7 +15,9 @@ class CategoryGrid extends ConsumerWidget {
     return categoriesAsync.when(
       loading: () => const SizedBox(
         height: 200,
-        child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        child: Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
       ),
       error: (error, stack) => const SizedBox(
         height: 100,
@@ -30,12 +32,12 @@ class CategoryGrid extends ConsumerWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: visibleCategories.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.6,
-              ),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 1.6,
+            ),
             itemBuilder: (context, index) {
               final category = visibleCategories[index];
               return CategoryCard(
@@ -68,7 +70,8 @@ class CategoryCard extends StatelessWidget {
 
   String _mapNameToAsset(String name) {
     String n = name.toUpperCase();
-    if (n.contains('TARJETA') || n.contains('M2M') || n.contains('WISM')) return 'TARJETAS';
+    if (n.contains('TARJETA') || n.contains('M2M') || n.contains('WISM'))
+      return 'TARJETAS';
     if (n.contains('CCTV')) return 'CCTV';
     if (n.contains('IP HD')) return 'IP HD';
     if (n.contains('INTRUSION')) return 'INTRUSION';
@@ -96,7 +99,7 @@ class CategoryCard extends StatelessWidget {
               color: Colors.black.withOpacity(0.08),
               blurRadius: 10,
               offset: const Offset(0, 4),
-            )
+            ),
           ],
         ),
         child: ClipRRect(
@@ -110,7 +113,10 @@ class CategoryCard extends StatelessWidget {
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) => Container(
                     color: Colors.grey[200],
-                    child: const Icon(Icons.image_not_supported, color: Colors.grey),
+                    child: const Icon(
+                      Icons.image_not_supported,
+                      color: Colors.grey,
+                    ),
                   ),
                 ),
               ),

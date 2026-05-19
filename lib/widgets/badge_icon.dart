@@ -40,10 +40,7 @@ class BadgeIcon extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.red.shade600,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: Colors.white,
-                  width: 2,
-                ),
+                border: Border.all(color: Colors.white, width: 2),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.red.withOpacity(0.3),
@@ -52,10 +49,7 @@ class BadgeIcon extends StatelessWidget {
                   ),
                 ],
               ),
-              constraints: const BoxConstraints(
-                minWidth: 18,
-                minHeight: 18,
-              ),
+              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
               child: Text(
                 count > 99 ? '99+' : '$count',
                 style: const TextStyle(

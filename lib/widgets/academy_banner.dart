@@ -11,7 +11,6 @@ class AcademyBanner extends StatelessWidget {
     final Uri url = Uri.parse(academyUrl);
 
     try {
-
       bool launched = await launchUrl(
         url,
         mode: LaunchMode.externalApplication,
@@ -50,11 +49,7 @@ class AcademyBanner extends StatelessWidget {
               color: AppColors.primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(
-              Icons.school,
-              color: AppColors.primary,
-              size: 32,
-            ),
+            child: const Icon(Icons.school, color: AppColors.primary, size: 32),
           ),
 
           const SizedBox(width: 16),

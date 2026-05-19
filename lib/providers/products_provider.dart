@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/producto.dart';
+import '../features/catalog/data/models/producto.dart';
 import '../services/api_service.dart';
 // 1. IMPORTANTE: Importa el archivo donde definas el StateProvider de filtros
 import 'filter_provider.dart';
@@ -10,8 +10,10 @@ final apiServiceProvider = Provider<ApiService>((ref) {
 });
 
 /// Provider para obtener productos filtrados por categoría
-final productsByCategoryProvider =
-FutureProvider.family<List<Product>, int>((ref, categoryId) async {
+final productsByCategoryProvider = FutureProvider.family<List<Product>, int>((
+  ref,
+  categoryId,
+) async {
   final apiService = ref.watch(apiServiceProvider);
 
   // 2. ESCUCHA DE FILTROS:
@@ -30,8 +32,10 @@ FutureProvider.family<List<Product>, int>((ref, categoryId) async {
 
 /// Provider para realizar búsquedas de productos
 /// Se utiliza en BusquedaPage para obtener resultados en tiempo real
-final searchProductsProvider =
-FutureProvider.family<List<Product>, String>((ref, query) async {
+final searchProductsProvider = FutureProvider.family<List<Product>, String>((
+  ref,
+  query,
+) async {
   if (query.trim().isEmpty) {
     return [];
   }

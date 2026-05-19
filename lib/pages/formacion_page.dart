@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../models/cursos_model.dart';
+import '../features/training/data/models/cursos_model.dart';
 import '../theme.dart';
 import '../providers/academy_provider.dart';
 
@@ -26,7 +26,10 @@ class FormacionPage extends ConsumerWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: const Text("MUNDICAM ACADEMY", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          "MUNDICAM ACADEMY",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: AppColors.primary,
         elevation: 0,
         centerTitle: true,
@@ -46,19 +49,29 @@ class FormacionPage extends ConsumerWidget {
                     children: [
                       const Text(
                         "CONOCIMIENTO TÉCNICO",
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primary,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       const Text(
                         "Cursos Disponibles",
-                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.textPrimary),
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textPrimary,
+                        ),
                       ),
                       const SizedBox(height: 24),
 
                       if (courses.isEmpty)
                         const Center(child: Text("No hay cursos disponibles"))
                       else
-                        ...courses.map((course) => _buildCourseCard(course)).toList(),
+                        ...courses
+                            .map((course) => _buildCourseCard(course))
+                            .toList(),
 
                       const SizedBox(height: 20),
                       const Divider(),
@@ -70,8 +83,11 @@ class FormacionPage extends ConsumerWidget {
             ),
           ),
         ),
-        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
-        error: (err, stack) => Center(child: Text("Error al cargar datos: $err")),
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+        error: (err, stack) =>
+            Center(child: Text("Error al cargar datos: $err")),
       ),
     );
   }
@@ -82,7 +98,10 @@ class FormacionPage extends ConsumerWidget {
         Container(
           height: 160,
           decoration: const BoxDecoration(
-            image: DecorationImage(image: AssetImage('assets/banners/banner5.png'), fit: BoxFit.cover),
+            image: DecorationImage(
+              image: AssetImage('assets/banners/banner5.png'),
+              fit: BoxFit.cover,
+            ),
           ),
         ),
         Container(
@@ -91,7 +110,10 @@ class FormacionPage extends ConsumerWidget {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [AppColors.primary.withOpacity(0.8), AppColors.primary.withOpacity(0.6)],
+              colors: [
+                AppColors.primary.withOpacity(0.8),
+                AppColors.primary.withOpacity(0.6),
+              ],
             ),
           ),
           child: const Center(
@@ -99,7 +121,14 @@ class FormacionPage extends ConsumerWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(Icons.school, color: Colors.white, size: 40),
-                Text("IMPULSA TU CARRERA", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                Text(
+                  "IMPULSA TU CARRERA",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ],
             ),
           ),
@@ -114,7 +143,13 @@ class FormacionPage extends ConsumerWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: InkWell(
         onTap: () => _launchUrl(course.url),
@@ -123,30 +158,49 @@ class FormacionPage extends ConsumerWidget {
           children: [
             // Imagen dinámica del post
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(15),
+              ),
               child: Image.network(
                 course.imageUrl,
                 height: 150,
                 width: double.infinity,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(height: 150, color: Colors.grey[200], child: const Icon(Icons.image)),
+                errorBuilder: (_, __, ___) => Container(
+                  height: 150,
+                  color: Colors.grey[200],
+                  child: const Icon(Icons.image),
+                ),
               ),
             ),
             Padding(
               padding: const EdgeInsets.all(15),
               child: Row(
                 children: [
-                  const Icon(Icons.play_circle_fill, color: AppColors.primary, size: 30),
+                  const Icon(
+                    Icons.play_circle_fill,
+                    color: AppColors.primary,
+                    size: 30,
+                  ),
                   const SizedBox(width: 15),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(course.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        Text(
+                          course.title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         // Usamos excerpt que ya viene limpia del modelo
                         Text(
                           course.excerpt,
-                          style: const TextStyle(fontSize: 13, color: Colors.black54),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black54,
+                          ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -187,7 +241,10 @@ class FormacionPage extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(pais, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          Text(
+            pais,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          ),
           Text(telf, style: const TextStyle(fontSize: 11, color: Colors.grey)),
         ],
       ),

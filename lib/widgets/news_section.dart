@@ -33,17 +33,12 @@ class NewsBanner extends ConsumerWidget {
     return SizedBox(
       height: 180,
       child: noticiasAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(),
-        ),
-        error: (error, stack) => const Center(
-          child: Text('Error al cargar noticias'),
-        ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) =>
+            const Center(child: Text('Error al cargar noticias')),
         data: (noticias) {
           if (noticias.isEmpty) {
-            return const Center(
-              child: Text('No hay noticias disponibles'),
-            );
+            return const Center(child: Text('No hay noticias disponibles'));
           }
 
           return PageView.builder(
@@ -62,32 +57,31 @@ class NewsBanner extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(15),
                         child: item.imagenUrl.isNotEmpty
                             ? CachedNetworkImage(
-                          imageUrl: item.imagenUrl,
-                          width: double.infinity,
-                          height: 180,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(
-                            color: Colors.grey.shade200,
-                            child: const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                          ),
-                          errorWidget: (context, url, error) =>
-                              Container(
+                                imageUrl: item.imagenUrl,
+                                width: double.infinity,
+                                height: 180,
+                                fit: BoxFit.cover,
+                                placeholder: (context, url) => Container(
+                                  color: Colors.grey.shade200,
+                                  child: const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) => Container(
+                                  color: Colors.grey.shade200,
+                                  child: const Center(
+                                    child: Icon(Icons.broken_image),
+                                  ),
+                                ),
+                              )
+                            : Container(
+                                width: double.infinity,
+                                height: 180,
                                 color: Colors.grey.shade200,
                                 child: const Center(
-                                  child: Icon(Icons.broken_image),
+                                  child: Icon(Icons.image_not_supported),
                                 ),
                               ),
-                        )
-                            : Container(
-                          width: double.infinity,
-                          height: 180,
-                          color: Colors.grey.shade200,
-                          child: const Center(
-                            child: Icon(Icons.image_not_supported),
-                          ),
-                        ),
                       ),
                       Container(
                         decoration: BoxDecoration(

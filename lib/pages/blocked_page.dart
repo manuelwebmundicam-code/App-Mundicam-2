@@ -18,21 +18,17 @@ class BlockedPage extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             // Icono de error usando el color primario (rojo Mundicam)
-            const Icon(
-                Icons.gpp_bad,
-                color: AppColors.primary,
-                size: 120
-            ),
+            const Icon(Icons.gpp_bad, color: AppColors.primary, size: 120),
             const SizedBox(height: 20),
 
             Text(
               'ACCESO RESTRINGIDO',
               textAlign: TextAlign.center,
               style: TextStyle(
-                  fontFamily: 'Oswald',
-                  fontSize: 28,
-                  color: AppColors.primary, // Rojo Mundicam
-                  fontWeight: FontWeight.bold
+                fontFamily: 'Oswald',
+                fontSize: 28,
+                color: AppColors.primary, // Rojo Mundicam
+                fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 15),
@@ -41,9 +37,10 @@ class BlockedPage extends StatelessWidget {
               'Tu cuenta ha sido bloqueada por la administración. Si crees que es un error, contacta con soporte técnico.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                  fontFamily: 'Oswald',
-                  fontSize: 16,
-                  color: AppColors.textSecondary // Gris oscuro definido en tu AppColors
+                fontFamily: 'Oswald',
+                fontSize: 16,
+                color: AppColors
+                    .textSecondary, // Gris oscuro definido en tu AppColors
               ),
             ),
             const SizedBox(height: 40),
@@ -54,7 +51,7 @@ class BlockedPage extends StatelessWidget {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary, // Fondo rojo
-                  foregroundColor: Colors.white,      // Texto blanco
+                  foregroundColor: Colors.white, // Texto blanco
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -68,7 +65,7 @@ class BlockedPage extends StatelessWidget {
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(builder: (_) => const LoginPage()),
-                          (route) => false,
+                      (route) => false,
                     );
                   }
                 },

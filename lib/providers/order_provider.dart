@@ -2,8 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
-import '../models/order_model.dart';
+import '../features/orders/data/models/order_model.dart';
 import 'banner_mix_provider.dart';
 
 /// Provider que obtiene los pedidos del usuario

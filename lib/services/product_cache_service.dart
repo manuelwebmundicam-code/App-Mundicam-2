@@ -1,5 +1,5 @@
 // services/product_cache_service.dart
-import '../models/producto.dart';
+import '../features/catalog/data/models/producto.dart';
 
 class ProductCacheService {
   static final ProductCacheService _instance = ProductCacheService._();
@@ -40,5 +40,6 @@ class CacheEntry<T> {
   final T data;
   final DateTime timestamp;
   CacheEntry(this.data) : timestamp = DateTime.now();
-  bool get isExpired => DateTime.now().difference(timestamp) > ProductCacheService._ttl;
+  bool get isExpired =>
+      DateTime.now().difference(timestamp) > ProductCacheService._ttl;
 }

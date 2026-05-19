@@ -71,14 +71,14 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       id: 'bacs',
       title: 'Transferencia bancaria',
       description:
-      'Pago mediante transferencia bancaria. El pedido será procesado por MundiCam.',
+          'Pago mediante transferencia bancaria. El pedido será procesado por MundiCam.',
       icon: Icons.account_balance_outlined,
     ),
     _CheckoutPaymentMethod(
       id: 'cheque',
       title: 'Giro / pago aplazado',
       description:
-      'Forma de pago vinculada a condiciones comerciales y crédito aprobado.',
+          'Forma de pago vinculada a condiciones comerciales y crédito aprobado.',
       icon: Icons.receipt_long_outlined,
       requiresCredit: true,
     ),
@@ -86,7 +86,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       id: 'redsys',
       title: '💳 Pago con Tarjeta (Redsys)',
       description:
-      'Pago seguro con tarjeta bancaria a través de la pasarela Redsys de WooCommerce.',
+          'Pago seguro con tarjeta bancaria a través de la pasarela Redsys de WooCommerce.',
       icon: Icons.credit_card_outlined,
     ),
   ];
@@ -144,7 +144,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   _CheckoutPaymentMethod get _selectedPaymentMethod {
     return _paymentMethods.firstWhere(
-          (method) => method.id == _paymentMethod,
+      (method) => method.id == _paymentMethod,
       orElse: () => _paymentMethods.first,
     );
   }
@@ -158,10 +158,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     return _creditLimit > 0 && disponible > 0;
   }
 
-  String _buildWooPaymentUrl({
-    required int orderId,
-    required String orderKey,
-  }) {
+  String _buildWooPaymentUrl({required int orderId, required String orderKey}) {
     return '$_baseUrl/checkout/order-pay/$orderId/?pay_for_order=true&key=${Uri.encodeComponent(orderKey)}';
   }
 
@@ -223,23 +220,29 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         _customerId = wooCustomer['id'];
         final billing = wooCustomer['billing'] as Map<String, dynamic>? ?? {};
 
-        _creditLimit = double.tryParse(
-          _getMetaValue(wooCustomer['meta_data'], 'credit_limit') ?? '0',
-        ) ??
+        _creditLimit =
+            double.tryParse(
+              _getMetaValue(wooCustomer['meta_data'], 'credit_limit') ?? '0',
+            ) ??
             0;
 
-        _creditUsed = double.tryParse(
-          _getMetaValue(wooCustomer['meta_data'], 'credit_used') ?? '0',
-        ) ??
+        _creditUsed =
+            double.tryParse(
+              _getMetaValue(wooCustomer['meta_data'], 'credit_used') ?? '0',
+            ) ??
             0;
 
-        final wooPaymentMethod =
-        _getMetaValue(wooCustomer['meta_data'], 'payment_method');
+        final wooPaymentMethod = _getMetaValue(
+          wooCustomer['meta_data'],
+          'payment_method',
+        );
 
-        final normalizedPaymentMethod = _normalizePaymentMethod(wooPaymentMethod);
+        final normalizedPaymentMethod = _normalizePaymentMethod(
+          wooPaymentMethod,
+        );
 
         final selectedMethod = _paymentMethods.firstWhere(
-              (method) => method.id == normalizedPaymentMethod,
+          (method) => method.id == normalizedPaymentMethod,
           orElse: () => _paymentMethods.first,
         );
 
@@ -251,18 +254,18 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         _assignedManager =
             _getMetaValue(wooCustomer['meta_data'], 'assigned_manager') ??
-                _getMetaValue(wooCustomer['meta_data'], '_assigned_manager') ??
-                _getMetaValue(wooCustomer['meta_data'], 'gestor_asignado') ??
-                _getMetaValue(wooCustomer['meta_data'], 'commercial_manager') ??
-                _getMetaValue(wooCustomer['meta_data'], 'sales_manager');
+            _getMetaValue(wooCustomer['meta_data'], '_assigned_manager') ??
+            _getMetaValue(wooCustomer['meta_data'], 'gestor_asignado') ??
+            _getMetaValue(wooCustomer['meta_data'], 'commercial_manager') ??
+            _getMetaValue(wooCustomer['meta_data'], 'sales_manager');
 
         if (mounted) {
           setState(() {
-            _nameController.text =
-                wooCustomer['first_name']?.toString() ?? '';
+            _nameController.text = wooCustomer['first_name']?.toString() ?? '';
             _lastNameController.text =
                 wooCustomer['last_name']?.toString() ?? '';
-            _emailController.text = (wooCustomer['email']?.toString() ?? email)!;
+            _emailController.text =
+                (wooCustomer['email']?.toString() ?? email)!;
             _companyController.text = billing['company']?.toString() ?? '';
             _phoneController.text = billing['phone']?.toString() ?? '';
             _nifController.text =
@@ -343,8 +346,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
     try {
       for (final item in cartItems) {
-        final productoActualizado =
-        await ApiService().getProductoById(item.product.id);
+        final productoActualizado = await ApiService().getProductoById(
+          item.product.id,
+        );
 
         if (productoActualizado == null) {
           _mostrarError(
@@ -366,8 +370,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         if (stockActual > 0 && item.quantity > stockActual) {
           _mostrarError(
             'Stock insuficiente para "${item.product.name}".\n'
-                'Disponible: $stockActual uds.\n'
-                'Solicitado: ${item.quantity} uds.',
+            'Disponible: $stockActual uds.\n'
+            'Solicitado: ${item.quantity} uds.',
           );
           return false;
         }
@@ -418,8 +422,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         _mostrarError(
           'Crédito insuficiente.\n'
-              'Disponible: ${disponible.toStringAsFixed(2)} €\n'
-              'Total pedido: ${total.toStringAsFixed(2)} €',
+          'Disponible: ${disponible.toStringAsFixed(2)} €\n'
+          'Total pedido: ${total.toStringAsFixed(2)} €',
         );
       }
 
@@ -427,10 +431,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
 
     final lineItems = cartItems.map((item) {
-      return {
-        'product_id': item.product.id,
-        'quantity': item.quantity,
-      };
+      return {'product_id': item.product.id, 'quantity': item.quantity};
     }).toList();
 
     final orderData = {
@@ -659,109 +660,105 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       ),
       body: _loadingProfile
           ? const Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
-      )
+              child: CircularProgressIndicator(color: AppColors.primary),
+            )
           : _errorMessage != null
           ? _buildErrorState()
           : Form(
-        key: _formKey,
-        child: ListView(
-          controller: _scrollController,
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            _buildSteps(),
-            const SizedBox(height: 20),
-            _buildSectionCard(
-              icon: Icons.person_outline_rounded,
-              title: "DATOS PERSONALES",
-              locked: true,
-              children: [
-                _buildLockedField("Nombre", _nameController),
-                _buildLockedField("Apellidos", _lastNameController),
-                _buildLockedField("Email", _emailController),
-                _buildLockedField("Teléfono", _phoneController),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildSectionCard(
-              icon: Icons.business_outlined,
-              title: "DATOS DE EMPRESA",
-              locked: true,
-              children: [
-                _buildLockedField("Empresa", _companyController),
-                _buildLockedField("NIF/CIF", _nifController),
-                _buildManagerInfo(),
-                _buildCreditInfo(),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildSectionCard(
-              icon: Icons.local_shipping_outlined,
-              title: "DIRECCIÓN DE ENVÍO",
-              subtitle: "Puedes modificar la dirección de entrega",
-              children: [
-                _buildField(
-                  "Dirección",
-                  _addressController,
-                  icon: Icons.home_outlined,
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: _buildField("Ciudad", _cityController),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 2,
-                      child: _buildField(
-                        "C.P.",
-                        _postCodeController,
-                        keyboard: TextInputType.number,
+              key: _formKey,
+              child: ListView(
+                controller: _scrollController,
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                children: [
+                  _buildSteps(),
+                  const SizedBox(height: 20),
+                  _buildSectionCard(
+                    icon: Icons.person_outline_rounded,
+                    title: "DATOS PERSONALES",
+                    locked: true,
+                    children: [
+                      _buildLockedField("Nombre", _nameController),
+                      _buildLockedField("Apellidos", _lastNameController),
+                      _buildLockedField("Email", _emailController),
+                      _buildLockedField("Teléfono", _phoneController),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionCard(
+                    icon: Icons.business_outlined,
+                    title: "DATOS DE EMPRESA",
+                    locked: true,
+                    children: [
+                      _buildLockedField("Empresa", _companyController),
+                      _buildLockedField("NIF/CIF", _nifController),
+                      _buildManagerInfo(),
+                      _buildCreditInfo(),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionCard(
+                    icon: Icons.local_shipping_outlined,
+                    title: "DIRECCIÓN DE ENVÍO",
+                    subtitle: "Puedes modificar la dirección de entrega",
+                    children: [
+                      _buildField(
+                        "Dirección",
+                        _addressController,
+                        icon: Icons.home_outlined,
                       ),
-                    ),
-                  ],
-                ),
-                _buildField(
-                  "Provincia",
-                  _stateController,
-                  required: false,
-                ),
-                _buildField(
-                  "País",
-                  _countryController,
-                  required: false,
-                ),
-              ],
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: _buildField("Ciudad", _cityController),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: _buildField(
+                              "C.P.",
+                              _postCodeController,
+                              keyboard: TextInputType.number,
+                            ),
+                          ),
+                        ],
+                      ),
+                      _buildField(
+                        "Provincia",
+                        _stateController,
+                        required: false,
+                      ),
+                      _buildField("País", _countryController, required: false),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionCard(
+                    icon: Icons.payment_outlined,
+                    title: "MÉTODO DE PAGO",
+                    subtitle: "Selecciona la forma de pago del pedido",
+                    children: [_buildPaymentInfo()],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSectionCard(
+                    icon: Icons.note_outlined,
+                    title: "NOTAS DEL PEDIDO",
+                    subtitle: "Opcional",
+                    children: [
+                      _buildField(
+                        "Instrucciones adicionales",
+                        _notesController,
+                        maxLines: 3,
+                        required: false,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  _buildSummary(),
+                  const SizedBox(height: 16),
+                ],
+              ),
             ),
-            const SizedBox(height: 16),
-            _buildSectionCard(
-              icon: Icons.payment_outlined,
-              title: "MÉTODO DE PAGO",
-              subtitle: "Selecciona la forma de pago del pedido",
-              children: [_buildPaymentInfo()],
-            ),
-            const SizedBox(height: 16),
-            _buildSectionCard(
-              icon: Icons.note_outlined,
-              title: "NOTAS DEL PEDIDO",
-              subtitle: "Opcional",
-              children: [
-                _buildField(
-                  "Instrucciones adicionales",
-                  _notesController,
-                  maxLines: 3,
-                  required: false,
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _buildSummary(),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
     );
   }
 
@@ -836,13 +833,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             child: active
                 ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
                 : Text(
-              "3",
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+                    "3",
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
           ),
         ),
         const SizedBox(height: 4),
@@ -923,8 +920,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               ),
               if (locked)
                 Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.red.shade700.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
@@ -948,13 +947,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   Widget _buildField(
-      String label,
-      TextEditingController controller, {
-        TextInputType keyboard = TextInputType.text,
-        IconData? icon,
-        bool required = true,
-        int maxLines = 1,
-      }) {
+    String label,
+    TextEditingController controller, {
+    TextInputType keyboard = TextInputType.text,
+    IconData? icon,
+    bool required = true,
+    int maxLines = 1,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextFormField(
@@ -985,9 +984,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         ),
         validator: required
             ? (v) {
-          if (v == null || v.trim().isEmpty) return "Campo requerido";
-          return null;
-        }
+                if (v == null || v.trim().isEmpty) return "Campo requerido";
+                return null;
+              }
             : null,
       ),
     );
@@ -1115,8 +1114,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
-                  color:
-                  disponible > 0 ? Colors.green.shade700 : Colors.red.shade700,
+                  color: disponible > 0
+                      ? Colors.green.shade700
+                      : Colors.red.shade700,
                 ),
               ),
             ],
@@ -1185,7 +1185,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               Expanded(
                 child: Text(
                   'El pago con tarjeta se realizará mediante Redsys en entorno seguro de WooCommerce. '
-                      'El giro está sujeto a crédito y condiciones comerciales aprobadas.',
+                  'El giro está sujeto a crédito y condiciones comerciales aprobadas.',
                   style: TextStyle(
                     fontSize: 11,
                     height: 1.35,
@@ -1201,22 +1201,19 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     );
   }
 
-  Widget _buildPaymentOption(
-      _CheckoutPaymentMethod method,
-      double disponible,
-      ) {
+  Widget _buildPaymentOption(_CheckoutPaymentMethod method, double disponible) {
     final selected = _paymentMethod == method.id;
     final enabled = _isPaymentMethodEnabled(method);
 
     return InkWell(
       onTap: enabled
           ? () {
-        HapticFeedback.selectionClick();
+              HapticFeedback.selectionClick();
 
-        setState(() {
-          _paymentMethod = method.id;
-        });
-      }
+              setState(() {
+                _paymentMethod = method.id;
+              });
+            }
           : null,
       borderRadius: BorderRadius.circular(14),
       child: Container(
@@ -1252,13 +1249,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               child: Center(
                 child: selected
                     ? Container(
-                  width: 12,
-                  height: 12,
-                  decoration: const BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
-                  ),
-                )
+                        width: 12,
+                        height: 12,
+                        decoration: const BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                        ),
+                      )
                     : null,
               ),
             ),
@@ -1333,8 +1330,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             ),
             if (!enabled)
               Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade200,
                   borderRadius: BorderRadius.circular(8),
@@ -1483,7 +1479,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: (_isLoading || creditBlocked) ? null : _finalizarPedido,
+              onPressed: (_isLoading || creditBlocked)
+                  ? null
+                  : _finalizarPedido,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -1495,22 +1493,22 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               ),
               child: _isLoading
                   ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : Text(
-                _paymentMethod == 'redsys'
-                    ? 'PAGAR CON TARJETA'
-                    : 'CONFIRMAR PEDIDO',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+                      _paymentMethod == 'redsys'
+                          ? 'PAGAR CON TARJETA'
+                          : 'CONFIRMAR PEDIDO',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
             ),
           ),
         ],

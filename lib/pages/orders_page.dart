@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../widgets/professional_page_app_bar.dart';
-import '../models/order_model.dart';
+import '../features/orders/data/models/order_model.dart';
 import '../theme.dart';
 import '../providers/order_provider.dart';
 import 'home_page.dart';
@@ -11,10 +11,7 @@ import 'rma_from_page.dart';
 class OrdersPage extends ConsumerWidget {
   final VoidCallback? onGoHome;
 
-  const OrdersPage({
-    super.key,
-    this.onGoHome,
-  });
+  const OrdersPage({super.key, this.onGoHome});
 
   void _goToHome(BuildContext context) {
     if (onGoHome != null) {
@@ -25,7 +22,7 @@ class OrdersPage extends ConsumerWidget {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const HomePage()),
-          (route) => false,
+      (route) => false,
     );
   }
 
@@ -49,10 +46,7 @@ class OrdersPage extends ConsumerWidget {
             children: [
               CircularProgressIndicator(color: AppColors.primary),
               SizedBox(height: 16),
-              Text(
-                "Cargando pedidos...",
-                style: TextStyle(color: Colors.grey),
-              ),
+              Text("Cargando pedidos...", style: TextStyle(color: Colors.grey)),
             ],
           ),
         ),
@@ -154,10 +148,7 @@ class OrdersPage extends ConsumerWidget {
         ),
         subtitle: Text(
           DateFormat('dd/MM/yyyy · HH:mm').format(order.dateCreated),
-          style: TextStyle(
-            color: Colors.grey[500],
-            fontSize: 12,
-          ),
+          style: TextStyle(color: Colors.grey[500], fontSize: 12),
         ),
         trailing: Text(
           "${order.total} €",
@@ -182,7 +173,7 @@ class OrdersPage extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           ...order.items.map(
-                (item) => Padding(
+            (item) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 children: [
@@ -274,10 +265,7 @@ class OrdersPage extends ConsumerWidget {
                 icon: const Icon(Icons.build_outlined, size: 16),
                 label: const Text(
                   "SOLICITAR RMA",
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
                 ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
@@ -394,11 +382,7 @@ class OrdersPage extends ConsumerWidget {
             const Text(
               "Tus pedidos aparecerán aquí cuando realices una compra.",
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey,
-                height: 1.5,
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
             ),
           ],
         ),
@@ -428,10 +412,7 @@ class OrdersPage extends ConsumerWidget {
             const SizedBox(height: 20),
             const Text(
               "No pudimos cargar tus pedidos",
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             const Text(

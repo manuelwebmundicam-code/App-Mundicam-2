@@ -25,13 +25,14 @@ class Header extends StatelessWidget {
         children: [
           // Logo: Ahora más grande (height: 35)
           GestureDetector(
-            onTap: () => Navigator.of(context).popUntil((route) => route.isFirst),
+            onTap: () =>
+                Navigator.of(context).popUntil((route) => route.isFirst),
             child: Image.asset(
               "assets/logo.png",
               height: 35,
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) =>
-              const Icon(Icons.security, size: 30),
+                  const Icon(Icons.security, size: 30),
             ),
           ),
 
@@ -50,7 +51,10 @@ class Header extends StatelessWidget {
     );
   }
 
-  Widget _headerButton({required IconData icon, required VoidCallback onPressed}) {
+  Widget _headerButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
     return IconButton(
       icon: Icon(icon, size: 28),
       color: AppColors.primary,

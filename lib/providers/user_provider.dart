@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/user_profile.dart';
+import '../features/profile/data/models/user_profile.dart';
 
 final currentUserProvider = StreamProvider<AppUser?>((ref) {
   final user = FirebaseAuth.instance.currentUser;
@@ -15,7 +15,7 @@ final currentUserProvider = StreamProvider<AppUser?>((ref) {
       .doc(user.uid)
       .snapshots()
       .map((doc) {
-    if (!doc.exists) return null;
-    return AppUser.fromFirestore(doc);
-  });
+        if (!doc.exists) return null;
+        return AppUser.fromFirestore(doc);
+      });
 });

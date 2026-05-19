@@ -38,10 +38,9 @@ class NotificationService {
     if (token == null) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set({'fcm_token': token}, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'fcm_token': token,
+      }, SetOptions(merge: true));
       debugPrint('✅ Token FCM guardado');
     }
   }

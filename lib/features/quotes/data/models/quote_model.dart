@@ -14,7 +14,9 @@ class QuoteMundicam {
   });
 
   factory QuoteMundicam.fromJson(Map<String, dynamic> json) {
-    DateTime dateCreated = DateTime.parse(json['date_created'] ?? DateTime.now().toString());
+    DateTime dateCreated = DateTime.parse(
+      json['date_created'] ?? DateTime.now().toString(),
+    );
     int diff = 30 - DateTime.now().difference(dateCreated).inDays;
 
     return QuoteMundicam(

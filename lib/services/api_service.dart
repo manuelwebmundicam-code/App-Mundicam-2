@@ -5,13 +5,13 @@ import 'package:dio/dio.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/foundation.dart';
 
-import '../models/banner.dart';
-import '../models/cursos_model.dart';
-import '../models/noticia.dart';
-import '../models/order_model.dart';
-import '../models/producto.dart';
-import '../models/category_model.dart';
-import '../models/quote_model.dart';
+import '../features/home/data/models/banner.dart';
+import '../features/training/data/models/cursos_model.dart';
+import '../features/home/data/models/noticia.dart';
+import '../features/orders/data/models/order_model.dart';
+import '../features/catalog/data/models/producto.dart';
+import '../features/catalog/data/models/category_model.dart';
+import '../features/quotes/data/models/quote_model.dart';
 
 class OrderCreateResult {
   final bool success;
@@ -46,10 +46,7 @@ class OrderCreateResult {
   }
 
   factory OrderCreateResult.failure(String message) {
-    return OrderCreateResult(
-      success: false,
-      errorMessage: message,
-    );
+    return OrderCreateResult(success: false, errorMessage: message);
   }
 }
 
@@ -121,11 +118,7 @@ class ApiService {
     return 'Basic ${base64Encode(utf8.encode('$_consumerKey:$_consumerSecret'))}';
   }
 
-  Options get _wooOptions => Options(
-    headers: {
-      'Authorization': _basicAuth,
-    },
-  );
+  Options get _wooOptions => Options(headers: {'Authorization': _basicAuth});
 
   // ================================================================
   // CLIENTES
@@ -136,10 +129,7 @@ class ApiService {
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/customers',
-        queryParameters: {
-          'email': email,
-          'role': 'all',
-        },
+        queryParameters: {'email': email, 'role': 'all'},
         options: _wooOptions,
       );
 
@@ -204,18 +194,19 @@ class ApiService {
       );
 
       final List data = response.data;
-      List<Product> productos =
-      data.map((item) => Product.fromJson(item)).toList();
+      List<Product> productos = data
+          .map((item) => Product.fromJson(item))
+          .toList();
 
       if (brand != null && brand.isNotEmpty) {
         final String queryMarca = brand.toLowerCase().trim();
 
         productos = productos.where((p) {
           return p.attributes.any(
-                (attr) =>
-            attr.name.toLowerCase().contains('marca') &&
+            (attr) =>
+                attr.name.toLowerCase().contains('marca') &&
                 attr.options.any(
-                      (opt) => opt.toLowerCase().trim() == queryMarca,
+                  (opt) => opt.toLowerCase().trim() == queryMarca,
                 ),
           );
         }).toList();
@@ -224,11 +215,11 @@ class ApiService {
       if (orderBy != null) {
         if (orderBy == 'price_asc') {
           productos.sort(
-                (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
+            (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
           );
         } else if (orderBy == 'price_desc') {
           productos.sort(
-                (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
+            (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
           );
         } else if (orderBy == 'date') {
           productos.sort((a, b) => b.id.compareTo(a.id));
@@ -251,10 +242,7 @@ class ApiService {
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/orders',
-        queryParameters: {
-          'search': customerEmail,
-          'per_page': 20,
-        },
+        queryParameters: {'search': customerEmail, 'per_page': 20},
         options: _wooOptions,
       );
 
@@ -275,9 +263,9 @@ class ApiService {
   // CREAR PEDIDO CON RESULTADO COMPLETO
   // ================================================================
   Future<OrderCreateResult> crearPedidoConResultado(
-      Map<String, dynamic> orderData, {
-        bool forceProcessingIfPending = true,
-      }) async {
+    Map<String, dynamic> orderData, {
+    bool forceProcessingIfPending = true,
+  }) async {
     await _ensureInitialized();
 
     try {
@@ -303,7 +291,9 @@ class ApiService {
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         if (response.data is! Map) {
-          debugPrint('❌ Respuesta inesperada al crear pedido: ${response.data}');
+          debugPrint(
+            '❌ Respuesta inesperada al crear pedido: ${response.data}',
+          );
           return OrderCreateResult.failure(
             'WooCommerce devolvió una respuesta no válida.',
           );
@@ -377,17 +367,12 @@ class ApiService {
     try {
       final orderData = {
         'status': 'checkout-draft',
-        'billing': {
-          'email': email,
-        },
+        'billing': {'email': email},
         'line_items': [
-          {
-            'product_id': productId,
-            'quantity': quantity,
-          }
+          {'product_id': productId, 'quantity': quantity},
         ],
         'customer_note':
-        customerNote ?? 'Presupuesto solicitado desde la app Mundicam',
+            customerNote ?? 'Presupuesto solicitado desde la app Mundicam',
       };
 
       debugPrint('📝 Creando presupuesto...');
@@ -420,11 +405,7 @@ class ApiService {
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/products',
-        queryParameters: {
-          'search': query,
-          'status': 'publish',
-          'per_page': 50,
-        },
+        queryParameters: {'search': query, 'status': 'publish', 'per_page': 50},
         options: _wooOptions,
       );
 
@@ -547,18 +528,19 @@ class ApiService {
       );
 
       final List data = response.data;
-      List<Product> productos =
-      data.map((item) => Product.fromJson(item)).toList();
+      List<Product> productos = data
+          .map((item) => Product.fromJson(item))
+          .toList();
 
       if (brand != null && brand.isNotEmpty) {
         final String queryMarca = brand.toLowerCase().trim();
 
         productos = productos.where((p) {
           return p.attributes.any(
-                (attr) =>
-            attr.name.toLowerCase().contains('marca') &&
+            (attr) =>
+                attr.name.toLowerCase().contains('marca') &&
                 attr.options.any(
-                      (opt) => opt.toLowerCase().trim() == queryMarca,
+                  (opt) => opt.toLowerCase().trim() == queryMarca,
                 ),
           );
         }).toList();
@@ -567,11 +549,11 @@ class ApiService {
       if (orderBy != null) {
         if (orderBy == 'price_asc') {
           productos.sort(
-                (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
+            (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
           );
         } else if (orderBy == 'price_desc') {
           productos.sort(
-                (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
+            (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
           );
         }
       }
@@ -591,19 +573,13 @@ class ApiService {
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/products/attributes/pa_marca/terms',
-        queryParameters: {
-          'per_page': 100,
-          'hide_empty': true,
-        },
+        queryParameters: {'per_page': 100, 'hide_empty': true},
         options: _wooOptions,
       );
 
       if (response.statusCode == 200) {
         return (response.data as List).map((term) {
-          return {
-            'id': term['id'],
-            'name': term['name'],
-          };
+          return {'id': term['id'], 'name': term['name']};
         }).toList();
       }
 
@@ -617,8 +593,8 @@ class ApiService {
   // FILTRAR CATEGORÍAS
   // ================================================================
   List<CategoryModel> _filtrarCategoriasVisibles(
-      List<CategoryModel> categorias,
-      ) {
+    List<CategoryModel> categorias,
+  ) {
     final Map<int, List<CategoryModel>> hijosPorPadre = {};
 
     for (final categoria in categorias) {
@@ -642,9 +618,7 @@ class ApiService {
     try {
       final response = await _dio.get(
         '/wp-json/wp/v2/posts',
-        queryParameters: {
-          'per_page': 10,
-        },
+        queryParameters: {'per_page': 10},
       );
 
       return (response.data as List)
@@ -659,10 +633,7 @@ class ApiService {
     try {
       final response = await _dio.get(
         '/wp-json/wp/v2/posts',
-        queryParameters: {
-          'per_page': 4,
-          '_embed': 'true',
-        },
+        queryParameters: {'per_page': 4, '_embed': 'true'},
       );
 
       return (response.data as List)
@@ -796,16 +767,14 @@ class ApiService {
   }
 
   Future<List<Map<String, dynamic>>> getRmaRequests(
-      String customerEmail,
-      ) async {
+    String customerEmail,
+  ) async {
     await _ensureInitialized();
 
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/rma',
-        queryParameters: {
-          'email': customerEmail,
-        },
+        queryParameters: {'email': customerEmail},
         options: _wooOptions,
       );
 

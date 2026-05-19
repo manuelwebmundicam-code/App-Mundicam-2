@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../theme.dart';
 
-class ProfessionalPageAppBar extends StatelessWidget implements PreferredSizeWidget {
+class ProfessionalPageAppBar extends StatelessWidget
+    implements PreferredSizeWidget {
   final String title;
   final String subtitle;
   final IconData icon;
@@ -56,7 +57,11 @@ class ProfessionalPageAppBar extends StatelessWidget implements PreferredSizeWid
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_rounded, color: Colors.white, size: 20),
+                      icon: const Icon(
+                        Icons.arrow_back_ios_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                       onPressed: onBack,
                       tooltip: backTooltip,
                     ),
@@ -77,7 +82,11 @@ class ProfessionalPageAppBar extends StatelessWidget implements PreferredSizeWid
                     ),
                     if (onRefresh != null)
                       IconButton(
-                        icon: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 20),
+                        icon: const Icon(
+                          Icons.refresh_rounded,
+                          color: Colors.white70,
+                          size: 20,
+                        ),
                         onPressed: onRefresh,
                         tooltip: refreshTooltip,
                       )

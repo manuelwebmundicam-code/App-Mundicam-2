@@ -14,7 +14,9 @@ class EmpresaPage extends StatelessWidget {
   }
 
   Future<void> _enviarWhatsApp() async {
-    final Uri url = Uri.parse("https://wa.me/34619078632?text=Hola Mundicam, me gustaría realizar una consulta.");
+    final Uri url = Uri.parse(
+      "https://wa.me/34619078632?text=Hola Mundicam, me gustaría realizar una consulta.",
+    );
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       debugPrint('No se pudo abrir WhatsApp');
     }
@@ -90,19 +92,39 @@ class EmpresaPage extends StatelessWidget {
                   const SizedBox(height: 16),
                   const Text(
                     "Mundicam nace en el año 2004 como una empresa familiar dedicada a la distribución de sistemas de seguridad. Hoy, somos un referente nacional e internacional en el sector del CCTV e intrusión.",
-                    style: TextStyle(fontSize: 16, height: 1.6, color: Colors.black87),
+                    style: TextStyle(
+                      fontSize: 16,
+                      height: 1.6,
+                      color: Colors.black87,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   const Text(
                     "Nuestra filosofía se basa en tres pilares fundamentales: el mejor asesoramiento técnico, un stock permanente y una logística envidiable.",
-                    style: TextStyle(fontSize: 16, height: 1.6, color: Colors.black87),
+                    style: TextStyle(
+                      fontSize: 16,
+                      height: 1.6,
+                      color: Colors.black87,
+                    ),
                   ),
                   const SizedBox(height: 32),
                   const Divider(),
                   const SizedBox(height: 16),
-                  _buildMundicamValue(Icons.verified_user, "GARANTÍA", "Productos certificados de primeras marcas."),
-                  _buildMundicamValue(Icons.support_agent, "SOPORTE TÉCNICO", "Asesoramiento especializado personalizado."),
-                  _buildMundicamValue(Icons.local_shipping, "LOGÍSTICA", "Envíos rápidos a toda la península y Europa."),
+                  _buildMundicamValue(
+                    Icons.verified_user,
+                    "GARANTÍA",
+                    "Productos certificados de primeras marcas.",
+                  ),
+                  _buildMundicamValue(
+                    Icons.support_agent,
+                    "SOPORTE TÉCNICO",
+                    "Asesoramiento especializado personalizado.",
+                  ),
+                  _buildMundicamValue(
+                    Icons.local_shipping,
+                    "LOGÍSTICA",
+                    "Envíos rápidos a toda la península y Europa.",
+                  ),
                   const SizedBox(height: 32),
                   Row(
                     children: [
@@ -116,7 +138,9 @@ class EmpresaPage extends StatelessWidget {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
                           ),
                         ),
@@ -133,7 +157,9 @@ class EmpresaPage extends StatelessWidget {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
                           ),
                         ),
@@ -199,7 +225,10 @@ class EmpresaPage extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(

@@ -4,7 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/api_service.dart';
-import '../models/quote_model.dart';
+import '../features/quotes/data/models/quote_model.dart';
 
 /// Provider para el servicio de API
 final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
@@ -59,8 +59,7 @@ final quotesProvider = FutureProvider<List<QuoteMundicam>>((ref) async {
 });
 
 /// Presupuestos visibles, quitando los que el usuario ha ocultado
-final visibleQuotesProvider =
-Provider<AsyncValue<List<QuoteMundicam>>>((ref) {
+final visibleQuotesProvider = Provider<AsyncValue<List<QuoteMundicam>>>((ref) {
   final quotesAsync = ref.watch(quotesProvider);
   final hiddenIds = ref.watch(hiddenQuoteIdsProvider);
 

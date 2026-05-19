@@ -1,8 +1,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/banner_mix.dart';
+import '../features/home/data/models/banner_mix.dart';
 import '../services/api_service.dart';
-import '../models/banner.dart';
+import '../features/home/data/models/banner.dart';
 
 final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 final bannerMixProvider = FutureProvider<List<BannerMixModel>>((ref) async {

@@ -79,15 +79,15 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
           ),
           suffixIcon: hasText
               ? IconButton(
-            icon: const Icon(
-              Icons.clear_rounded,
-              color: Colors.white70,
-              size: 22,
-            ),
-            onPressed: () {
-              _controller.clear();
-            },
-          )
+                  icon: const Icon(
+                    Icons.clear_rounded,
+                    color: Colors.white70,
+                    size: 22,
+                  ),
+                  onPressed: () {
+                    _controller.clear();
+                  },
+                )
               : null,
           filled: true,
           fillColor: AppColors.primary,

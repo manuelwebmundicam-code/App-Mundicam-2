@@ -36,10 +36,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   String? _errorMessage;
   String? _currentUrl;
 
-  static const Set<String> _paidStatuses = {
-    'processing',
-    'completed',
-  };
+  static const Set<String> _paidStatuses = {'processing', 'completed'};
 
   static const Set<String> _failedStatuses = {
     'failed',
@@ -47,10 +44,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     'refunded',
   };
 
-  static const Set<String> _pendingStatuses = {
-    'pending',
-    'on-hold',
-  };
+  static const Set<String> _pendingStatuses = {'pending', 'on-hold'};
 
   @override
   void initState() {
@@ -325,7 +319,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           _checkingPayment = false;
           _paymentError = true;
           _errorMessage =
-          'No se pudo comprobar el estado del pedido. Intenta de nuevo.';
+              'No se pudo comprobar el estado del pedido. Intenta de nuevo.';
         });
         return;
       }
@@ -344,7 +338,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           _checkingPayment = false;
           _paymentError = true;
           _errorMessage =
-          'La verificación del pedido no coincide. Contacta con MundiCam.';
+              'La verificación del pedido no coincide. Contacta con MundiCam.';
         });
         return;
       }
@@ -355,9 +349,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       }
 
       if (_failedStatuses.contains(status)) {
-        _markPaymentError(
-          'El pago aparece como no completado en WooCommerce.',
-        );
+        _markPaymentError('El pago aparece como no completado en WooCommerce.');
         return;
       }
 
@@ -367,7 +359,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           _waitingForConfirmation = showPendingAsWaiting;
           _paymentError = true;
           _errorMessage =
-          'El pedido todavía aparece pendiente de pago. Si acabas de pagar, espera unos segundos y pulsa “Comprobar pago”.';
+              'El pedido todavía aparece pendiente de pago. Si acabas de pagar, espera unos segundos y pulsa “Comprobar pago”.';
         });
         return;
       }
@@ -376,7 +368,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
         _checkingPayment = false;
         _paymentError = true;
         _errorMessage =
-        'Estado actual del pedido: $status. Si el pago se ha realizado, pulsa “Comprobar pago” en unos segundos.';
+            'Estado actual del pedido: $status. Si el pago se ha realizado, pulsa “Comprobar pago” en unos segundos.';
       });
     } catch (e) {
       debugPrint('❌ Error verificando pago: $e');
@@ -387,7 +379,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
         _checkingPayment = false;
         _paymentError = true;
         _errorMessage =
-        'No se pudo comprobar el estado del pago. Intenta de nuevo.';
+            'No se pudo comprobar el estado del pago. Intenta de nuevo.';
       });
     }
   }
@@ -457,10 +449,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           elevation: 0,
           title: const Text(
             'PAGO CON TARJETA',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontFamily: 'Oswald',
-            ),
+            style: TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Oswald'),
           ),
           leading: IconButton(
             icon: const Icon(Icons.close_rounded),
@@ -471,16 +460,17 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
               tooltip: 'Comprobar pago',
               icon: _checkingPayment
                   ? const SizedBox(
-                width: 19,
-                height: 19,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
+                      width: 19,
+                      height: 19,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : const Icon(Icons.verified_outlined),
-              onPressed:
-              _checkingPayment ? null : () => _verifyOrderPaymentStatus(),
+              onPressed: _checkingPayment
+                  ? null
+                  : () => _verifyOrderPaymentStatus(),
             ),
             IconButton(
               tooltip: 'Recargar',
@@ -492,23 +482,21 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
         body: _paymentSuccess
             ? _buildSuccessState()
             : Column(
-          children: [
-            if (_progress < 100)
-              LinearProgressIndicator(
-                value: _progress / 100,
-                color: AppColors.primary,
-                backgroundColor: Colors.orange.shade100,
-                minHeight: 3,
+                children: [
+                  if (_progress < 100)
+                    LinearProgressIndicator(
+                      value: _progress / 100,
+                      color: AppColors.primary,
+                      backgroundColor: Colors.orange.shade100,
+                      minHeight: 3,
+                    ),
+                  _buildPaymentHeader(),
+                  if (_openedExternalPayment) _buildExternalPaymentNotice(),
+                  if (_waitingForConfirmation) _buildWaitingNotice(),
+                  if (_paymentError) _buildErrorNotice(),
+                  Expanded(child: WebViewWidget(controller: _controller)),
+                ],
               ),
-            _buildPaymentHeader(),
-            if (_openedExternalPayment) _buildExternalPaymentNotice(),
-            if (_waitingForConfirmation) _buildWaitingNotice(),
-            if (_paymentError) _buildErrorNotice(),
-            Expanded(
-              child: WebViewWidget(controller: _controller),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -557,11 +545,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
               ],
             ),
           ),
-          const Icon(
-            Icons.lock_outline_rounded,
-            size: 18,
-            color: Colors.grey,
-          ),
+          const Icon(Icons.lock_outline_rounded, size: 18, color: Colors.grey),
         ],
       ),
     );
@@ -601,15 +585,15 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
             onPressed: _checkingPayment
                 ? null
                 : () => _verifyOrderPaymentStatus(
-              showPendingAsWaiting: true,
-              source: 'external_notice_button',
-            ),
+                    showPendingAsWaiting: true,
+                    source: 'external_notice_button',
+                  ),
             child: _checkingPayment
                 ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Text('Comprobar'),
           ),
         ],
@@ -686,9 +670,9 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
             onPressed: _checkingPayment
                 ? null
                 : () => _verifyOrderPaymentStatus(
-              showPendingAsWaiting: true,
-              source: 'error_notice_button',
-            ),
+                    showPendingAsWaiting: true,
+                    source: 'error_notice_button',
+                  ),
             child: const Text('Comprobar'),
           ),
         ],
@@ -765,9 +749,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                   ),
                   child: const Text(
                     'VOLVER A LA TIENDA',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
               ),

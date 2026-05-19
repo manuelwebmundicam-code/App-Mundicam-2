@@ -4,7 +4,7 @@ import '../widgets/professional_page_app_bar.dart';
 import '../theme.dart';
 import '../providers/quote_provider.dart';
 import '../providers/cart_provider.dart';
-import '../models/quote_model.dart';
+import '../features/quotes/data/models/quote_model.dart';
 import '../services/api_service.dart';
 import 'cart_page.dart';
 import 'home_page.dart';
@@ -12,10 +12,7 @@ import 'home_page.dart';
 class QuotesPage extends ConsumerStatefulWidget {
   final VoidCallback? onGoHome;
 
-  const QuotesPage({
-    super.key,
-    this.onGoHome,
-  });
+  const QuotesPage({super.key, this.onGoHome});
 
   @override
   ConsumerState<QuotesPage> createState() => _QuotesPageState();
@@ -140,7 +137,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const HomePage()),
-          (route) => false,
+      (route) => false,
     );
   }
 
@@ -319,10 +316,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                         quote.description.length > 40
                             ? '${quote.description.substring(0, 40)}...'
                             : quote.description,
-                        style: TextStyle(
-                          color: Colors.grey[500],
-                          fontSize: 12,
-                        ),
+                        style: TextStyle(color: Colors.grey[500], fontSize: 12),
                       ),
                     ],
                   ),
@@ -406,9 +400,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                           ),
                         ),
                       ),
@@ -556,11 +548,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             const Text(
               'Añade productos al presupuesto desde el catálogo\ny aparecerán aquí automáticamente.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey,
-                height: 1.5,
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
             ),
           ],
         ),
@@ -590,10 +578,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             const SizedBox(height: 20),
             const Text(
               'Error al cargar presupuestos',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             const Text(
