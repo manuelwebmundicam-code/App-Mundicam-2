@@ -1,5 +1,8 @@
+// main_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/providers/badge_provider.dart';
@@ -19,36 +22,21 @@ class MainScreen extends ConsumerStatefulWidget {
 
 class _MainScreenState extends ConsumerState<MainScreen>
     with WidgetsBindingObserver {
+  static const String _confirmedQuoteIdsKey = 'mundicam_confirmed_quote_ids';
+
   int _selectedIndex = 0;
   bool _loadBadges = false;
-
-  final List<bool> _loadedTabs = [
-    true, // Inicio
-    false, // Productos
-    false, // Pedidos
-    false, // Presupuestos
-    false, // Carrito
-  ];
-
-  final List<GlobalKey<NavigatorState>> _navigatorKeys = [
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-  ];
+  Set<String> _confirmedQuoteIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadConfirmedQuoteIds();
 
-    // Carga diferida de badges para que Inicio aparezca antes.
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
-      setState(() {
-        _loadBadges = true;
-      });
+      setState(() => _loadBadges = true);
     });
   }
 
@@ -58,17 +46,48 @@ class _MainScreenState extends ConsumerState<MainScreen>
     super.dispose();
   }
 
+  Future<void> _loadConfirmedQuoteIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedIds = prefs.getStringList(_confirmedQuoteIdsKey) ?? <String>[];
+
+    if (!mounted) return;
+
+    setState(() {
+      _confirmedQuoteIds = savedIds.toSet();
+    });
+  }
+
+  Future<void> _registerConfirmedQuotes(Set<String> quoteIds) async {
+    if (quoteIds.isEmpty) return;
+
+    final updatedIds = <String>{
+      ..._confirmedQuoteIds,
+      ...quoteIds,
+    };
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _confirmedQuoteIdsKey,
+      updatedIds.toList(),
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _confirmedQuoteIds = updatedIds;
+      _loadBadges = true;
+    });
+
+    ref.invalidate(quoteBadgeProvider);
+    ref.invalidate(cartBadgeProvider);
+  }
+
   void _onItemTapped(int index) {
-    if (_selectedIndex == index) {
-      _navigatorKeys[index].currentState?.popUntil((route) => route.isFirst);
-      return;
-    }
+    if (_selectedIndex == index) return;
 
     setState(() {
       _selectedIndex = index;
-      _loadedTabs[index] = true;
 
-      // Si el usuario entra en presupuestos o carrito, cargamos badges ya.
       if (index == 3 || index == 4) {
         _loadBadges = true;
       }
@@ -76,13 +95,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   Future<bool> _onWillPop() async {
-    final currentNavigator = _navigatorKeys[_selectedIndex].currentState;
-
-    if (currentNavigator != null && currentNavigator.canPop()) {
-      currentNavigator.pop();
-      return false;
-    }
-
     if (_selectedIndex != 0) {
       _onItemTapped(0);
       return false;
@@ -109,11 +121,23 @@ class _MainScreenState extends ConsumerState<MainScreen>
     return shouldExit ?? false;
   }
 
+  int _visibleQuoteBadgeCount(int rawQuoteCount) {
+    if (rawQuoteCount <= 0) return 0;
+
+    final confirmedCount = _confirmedQuoteIds.length;
+
+    if (confirmedCount <= 0) return rawQuoteCount;
+
+    final visibleCount = rawQuoteCount - confirmedCount;
+
+    return visibleCount > 0 ? visibleCount : 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final int cartItemCount = _loadBadges ? ref.watch(cartBadgeProvider) : 0;
-
-    final int quoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
+    final int rawQuoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
+    final int quoteCount = _visibleQuoteBadgeCount(rawQuoteCount);
 
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
@@ -122,52 +146,40 @@ class _MainScreenState extends ConsumerState<MainScreen>
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
 
-        final shouldPop = await _onWillPop();
+        final shouldExit = await _onWillPop();
 
-        if (shouldPop && mounted) {
-          Navigator.of(context).pop();
+        if (shouldExit && mounted) {
+          SystemNavigator.pop();
         }
       },
       child: Scaffold(
         body: IndexedStack(
           index: _selectedIndex,
           children: [
-            _loadedTabs[0]
-                ? _buildNavigator(0, const HomePage())
-                : const SizedBox.shrink(),
-
-            _loadedTabs[1]
-                ? _buildNavigator(1, const ProductosPage())
-                : const SizedBox.shrink(),
-
-            _loadedTabs[2]
-                ? _buildNavigator(
-                    2,
-                    OrdersPage(onGoHome: () => _onItemTapped(0)),
-                  )
-                : const SizedBox.shrink(),
-
-            _loadedTabs[3]
-                ? _buildNavigator(
-                    3,
-                    QuotesPage(onGoHome: () => _onItemTapped(0)),
-                  )
-                : const SizedBox.shrink(),
-
-            _loadedTabs[4]
-                ? _buildNavigator(4, CartPage(onGoHome: () => _onItemTapped(0)))
-                : const SizedBox.shrink(),
+            const HomePage(),
+            const ProductosPage(),
+            OrdersPage(
+              onGoHome: () => _onItemTapped(0),
+            ),
+            QuotesPage(
+              onGoHome: () => _onItemTapped(0),
+              onGoCart: () => _onItemTapped(4),
+              confirmedQuoteIds: _confirmedQuoteIds,
+              onQuotesConfirmed: _registerConfirmedQuotes,
+            ),
+            CartPage(
+              onGoHome: () => _onItemTapped(0),
+            ),
           ],
         ),
         bottomNavigationBar: Container(
           padding: EdgeInsets.only(bottom: bottomPadding),
           decoration: BoxDecoration(
-            color:
-                Theme.of(context).bottomNavigationBarTheme.backgroundColor ??
+            color: Theme.of(context).bottomNavigationBarTheme.backgroundColor ??
                 Colors.white,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Colors.black.withOpacity(0.05),
                 blurRadius: 10,
                 offset: const Offset(0, -2),
               ),
@@ -233,18 +245,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildNavigator(int index, Widget initialRoute) {
-    return Navigator(
-      key: _navigatorKeys[index],
-      onGenerateRoute: (routeSettings) {
-        return MaterialPageRoute(
-          builder: (context) => initialRoute,
-          settings: routeSettings,
-        );
-      },
     );
   }
 }

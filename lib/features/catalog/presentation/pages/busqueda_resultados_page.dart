@@ -2,11 +2,16 @@ import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_p
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
@@ -59,7 +64,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
           }
 
           final List<String> detectedTerms =
-              _SearchEngine.detectedReadableTerms(cleanedQuery);
+          _SearchEngine.detectedReadableTerms(cleanedQuery);
 
           return Column(
             children: [
@@ -410,7 +415,7 @@ class _SearchEngine {
     final String normalizedQuery = _normalize(query);
     final String name = _normalize(product.name);
     final String sku = _normalize(product.sku);
-    final String description = _normalize(product.shortDescription ?? '');
+    final String description = _normalize(product.shortDescription);
 
     final String fullText = '$name $sku $description';
 
@@ -672,7 +677,10 @@ class _ScoredProduct {
   final Product product;
   final int score;
 
-  const _ScoredProduct({required this.product, required this.score});
+  const _ScoredProduct({
+    required this.product,
+    required this.score,
+  });
 }
 
 // ------------------------------------------------------------
@@ -698,17 +706,63 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   int cantidad = 1;
   bool _isAddingToQuote = false;
 
+  double _precioDouble(Product p) {
+    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
+  }
+
+  String _formatearPrecio(double value) {
+    if (value <= 0) return 'Bajo consulta';
+
+    return '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
+  }
+
+  Future<String?> _getCurrentUserEmail() async {
+    final appUser = ref.read(currentUserProvider).value;
+
+    if (appUser != null && appUser.email.trim().isNotEmpty) {
+      return appUser.email.trim();
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return null;
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists && userDoc.data() != null) {
+        final email = userDoc.data()?['email']?.toString();
+
+        if (email != null && email.trim().isNotEmpty) {
+          return email.trim();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error al leer email de Firestore: $e');
+    }
+
+    if (user.email != null && user.email!.trim().isNotEmpty) {
+      return user.email!.trim();
+    }
+
+    if (user.providerData.isNotEmpty) {
+      final providerEmail = user.providerData.first.email;
+
+      if (providerEmail != null && providerEmail.trim().isNotEmpty) {
+        return providerEmail.trim();
+      }
+    }
+
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final Product p = widget.p;
-
-    final precioLimpio = p.price.replaceAll(',', '.').trim();
-    final precioPartes = precioLimpio.contains('.')
-        ? precioLimpio.split('.')
-        : [precioLimpio, '00'];
-
-    final parteEntera = precioPartes[0].isEmpty ? '0' : precioPartes[0];
-    final parteDecimal = precioPartes.length > 1 ? precioPartes[1] : '00';
+    final double precio = _precioDouble(p);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
@@ -758,7 +812,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      if ((p.shortDescription ?? '').trim().isNotEmpty) ...[
+                      if (p.shortDescription.trim().isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(
                           p.shortDescription,
@@ -774,35 +828,14 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       const SizedBox(height: 6),
                       Align(
                         alignment: Alignment.centerRight,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              '€',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                            Text(
-                              parteEntera,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                            Text(
-                              parteDecimal.padRight(2, '0').substring(0, 2),
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          ],
+                        child: Text(
+                          _formatearPrecio(precio),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.primary,
+                            fontFamily: 'Oswald',
+                          ),
                         ),
                       ),
                     ],
@@ -820,13 +853,22 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   child: ElevatedButton(
                     onPressed: p.isInstock
                         ? () {
-                            ref
-                                .read(cartProvider.notifier)
-                                .addProduct(p, cantidad);
-                          }
+                      ref
+                          .read(cartProvider.notifier)
+                          .addProduct(p, cantidad);
+
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const CartPage(),
+                        ),
+                      );
+                    }
                         : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+                      backgroundColor: p.isInstock
+                          ? AppColors.primary
+                          : Colors.grey.shade400,
                       foregroundColor: Colors.white,
                       elevation: 1,
                       shape: RoundedRectangleBorder(
@@ -834,9 +876,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 0),
                     ),
-                    child: const Text(
-                      'COMPRAR YA',
-                      style: TextStyle(
+                    child: Text(
+                      p.isInstock ? 'COMPRAR YA' : 'SIN STOCK',
+                      style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                       ),
@@ -846,31 +888,50 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Container(
-                  height: 36,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _qtyBtn(Icons.remove, () {
-                        if (cantidad > 1) {
-                          setState(() => cantidad--);
-                        }
-                      }),
-                      Text(
-                        '$cantidad',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
+                child: Opacity(
+                  opacity: p.isInstock ? 1 : 0.5,
+                  child: Container(
+                    height: 36,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _qtyBtn(
+                          Icons.remove,
+                          enabled: p.isInstock,
+                          onTap: () {
+                            if (cantidad > 1) {
+                              setState(() {
+                                cantidad--;
+                              });
+                            }
+                          },
                         ),
-                      ),
-                      _qtyBtn(Icons.add, () {
-                        setState(() => cantidad++);
-                      }, isPrimary: true),
-                    ],
+                        Text(
+                          '$cantidad',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: p.isInstock ? Colors.black : Colors.grey,
+                          ),
+                        ),
+                        _qtyBtn(
+                          Icons.add,
+                          enabled: p.isInstock,
+                          isPrimary: p.isInstock,
+                          onTap: () {
+                            if (p.isInstock) {
+                              setState(() {
+                                cantidad++;
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -885,24 +946,28 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   child: OutlinedButton(
                     onPressed: p.isInstock
                         ? () {
-                            ref
-                                .read(cartProvider.notifier)
-                                .addProduct(p, cantidad);
+                      ref
+                          .read(cartProvider.notifier)
+                          .addProduct(p, cantidad);
 
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('${p.name} añadido al carrito'),
-                                backgroundColor: AppColors.primary,
-                                duration: const Duration(seconds: 1),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
+                      ScaffoldMessenger.of(context).clearSnackBars();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            '$cantidad x ${p.name} añadido al carrito',
+                          ),
+                          backgroundColor: AppColors.primary,
+                          duration: const Duration(seconds: 1),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
                         : null,
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(
-                        color: AppColors.primary,
+                      side: BorderSide(
+                        color: p.isInstock
+                            ? AppColors.primary
+                            : Colors.grey.shade400,
                         width: 1.3,
                       ),
                       shape: RoundedRectangleBorder(
@@ -910,11 +975,12 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 0),
                     ),
-                    child: const Text(
-                      'AÑADIR CARRITO',
+                    child: Text(
+                      p.isInstock ? 'AÑADIR CARRITO' : 'SIN STOCK',
                       style: TextStyle(
                         fontSize: 10,
-                        color: AppColors.primary,
+                        color:
+                        p.isInstock ? AppColors.primary : Colors.grey,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -929,19 +995,24 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                     onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
                     icon: _isAddingToQuote
                         ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.orange,
-                            ),
-                          )
-                        : const Icon(Icons.description_outlined, size: 14),
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.orange,
+                      ),
+                    )
+                        : Icon(
+                      Icons.description_outlined,
+                      size: 14,
+                      color: Colors.orange.shade700,
+                    ),
                     label: Text(
                       _isAddingToQuote ? '...' : 'PRESUPUESTO',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
+                        color: Colors.orange.shade700,
                       ),
                     ),
                     style: OutlinedButton.styleFrom(
@@ -965,9 +1036,14 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     );
   }
 
-  Widget _qtyBtn(IconData icon, VoidCallback onTap, {bool isPrimary = false}) {
+  Widget _qtyBtn(
+      IconData icon, {
+        required bool enabled,
+        required VoidCallback onTap,
+        bool isPrimary = false,
+      }) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       child: Container(
         width: 30,
         height: 36,
@@ -975,20 +1051,26 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         child: Icon(
           icon,
           size: 16,
-          color: isPrimary ? AppColors.primary : Colors.black87,
+          color: enabled
+              ? (isPrimary ? AppColors.primary : Colors.black87)
+              : Colors.grey.shade400,
         ),
       ),
     );
   }
 
   Future<void> _addToQuote(Product product) async {
-    setState(() => _isAddingToQuote = true);
+    if (_isAddingToQuote) return;
+
+    setState(() {
+      _isAddingToQuote = true;
+    });
 
     try {
-      final userAsync = ref.read(currentUserProvider);
-      final appUser = userAsync.value;
+      final api = ApiService();
+      final email = await _getCurrentUserEmail();
 
-      if (appUser == null) {
+      if (email == null || email.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -998,6 +1080,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
             ),
           );
         }
+
         return;
       }
 
@@ -1005,20 +1088,47 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         throw Exception('ID de producto no válido');
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$cantidad x ${product.name} añadido al presupuesto'),
-            backgroundColor: Colors.green.shade700,
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      final precio =
+          double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
+
+      final ok = await api.crearPresupuesto(
+        email: email,
+        productId: product.id,
+        productName: product.name,
+        price: precio,
+        quantity: cantidad,
+      );
+
+      if (!mounted) return;
+
+      if (!ok) {
+        throw Exception('No se pudo añadir el producto al presupuesto.');
       }
 
       ref.invalidate(quotesProvider);
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$cantidad x ${product.name} añadido al presupuesto'),
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'VER',
+            textColor: Colors.white,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const QuotesPage()),
+              );
+            },
+          ),
+        ),
+      );
     } catch (e) {
+      debugPrint('❌ Error en _addToQuote búsqueda: $e');
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1031,7 +1141,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       }
     } finally {
       if (mounted) {
-        setState(() => _isAddingToQuote = false);
+        setState(() {
+          _isAddingToQuote = false;
+        });
       }
     }
   }
@@ -1059,7 +1171,7 @@ class ProductImageBusqueda extends StatelessWidget {
           fit: BoxFit.contain,
           placeholder: (context, url) => Container(color: Colors.grey[100]),
           errorWidget: (context, url, error) =>
-              const Icon(Icons.broken_image, color: Colors.grey),
+          const Icon(Icons.broken_image, color: Colors.grey),
         ),
       ),
     );

@@ -395,7 +395,59 @@ class ApiService {
       throw Exception(_mapDioError(e));
     }
   }
+  // Añade en ApiService:
 
+  /// Añadir producto a presupuesto existente
+  Future<bool> actualizarPresupuesto({
+    required String orderId,
+    required int productId,
+    required int quantity,
+  }) async {
+    await _ensureInitialized();
+    try {
+      final orden = await getOrdenCompleta(orderId);
+      if (orden == null) return false;
+      final lineItems = List<Map<String, dynamic>>.from(orden['line_items'] ?? []);
+      final idx = lineItems.indexWhere((item) => item['product_id'] == productId);
+      if (idx >= 0) {
+        lineItems[idx]['quantity'] = (lineItems[idx]['quantity'] ?? 0) + quantity;
+      } else {
+        lineItems.add({'product_id': productId, 'quantity': quantity});
+      }
+      final response = await _dio.put(
+        '/wp-json/wc/v3/orders/$orderId',
+        data: {'line_items': lineItems},
+        options: _wooOptions,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error actualizando presupuesto: $e');
+      return false;
+    }
+  }
+
+  /// Eliminar producto de presupuesto
+  Future<bool> eliminarProductoPresupuesto({
+    required String orderId,
+    required int productId,
+  }) async {
+    await _ensureInitialized();
+    try {
+      final orden = await getOrdenCompleta(orderId);
+      if (orden == null) return false;
+      final lineItems = List<Map<String, dynamic>>.from(orden['line_items'] ?? []);
+      lineItems.removeWhere((item) => item['product_id'] == productId);
+      final response = await _dio.put(
+        '/wp-json/wc/v3/orders/$orderId',
+        data: {'line_items': lineItems},
+        options: _wooOptions,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error eliminando: $e');
+      return false;
+    }
+  }
   // ================================================================
   // BÚSQUEDA DE PRODUCTOS
   // ================================================================

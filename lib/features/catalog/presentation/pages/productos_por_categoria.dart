@@ -16,6 +16,8 @@ import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.d
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
+import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
+import 'package:mundicam/core/network/api_service.dart';
 
 class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
   final int categoryId;
@@ -58,13 +60,17 @@ class _ProductosPorCategoriaScreenState
     if (_scrollTimer?.isActive ?? false) return;
 
     _scrollTimer = Timer(const Duration(milliseconds: 100), () {
+      if (!_scrollController.hasClients) return;
+
       if (_scrollController.position.pixels >=
           _scrollController.position.maxScrollExtent - 300) {
         final notifier = ref.read(
           productsPaginatedProvider(widget.categoryId).notifier,
         );
+
         if (!notifier.isLoading && notifier.hasMore && !_isLoadingMore) {
           _isLoadingMore = true;
+
           notifier.loadNextPage().then((_) {
             _isLoadingMore = false;
           });
@@ -117,55 +123,55 @@ class _ProductosPorCategoriaScreenState
       body: RepaintBoundary(
         child: productosState.isEmpty && !notifier.isLoading
             ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.search_off, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'No hay productos con estos filtros',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton.icon(
-                      onPressed: () =>
-                          ref.read(productFilterProvider.notifier).reset(),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text("Limpiar filtros"),
-                    ),
-                  ],
-                ),
-              )
-            : ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: productosState.length + (notifier.hasMore ? 1 : 0),
-                addAutomaticKeepAlives: true,
-                addRepaintBoundaries: true,
-                itemBuilder: (context, index) {
-                  if (index == productosState.length) {
-                    return const Padding(
-                      padding: EdgeInsets.all(20),
-                      child: Center(
-                        child: SizedBox(
-                          height: 30,
-                          width: 30,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    );
-                  }
-
-                  return ProductTile(
-                    key: ValueKey(productosState[index].id),
-                    p: productosState[index],
-                    firebase: _firebase,
-                  );
-                },
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.search_off, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text(
+                'No hay productos con estos filtros',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () =>
+                    ref.read(productFilterProvider.notifier).reset(),
+                icon: const Icon(Icons.refresh),
+                label: const Text("Limpiar filtros"),
+              ),
+            ],
+          ),
+        )
+            : ListView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          itemCount: productosState.length + (notifier.hasMore ? 1 : 0),
+          addAutomaticKeepAlives: true,
+          addRepaintBoundaries: true,
+          itemBuilder: (context, index) {
+            if (index == productosState.length) {
+              return const Padding(
+                padding: EdgeInsets.all(20),
+                child: Center(
+                  child: SizedBox(
+                    height: 30,
+                    width: 30,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            return ProductTile(
+              key: ValueKey(productosState[index].id),
+              p: productosState[index],
+              firebase: _firebase,
+            );
+          },
+        ),
       ),
     );
   }
@@ -175,7 +181,11 @@ class ProductTile extends ConsumerStatefulWidget {
   final Product p;
   final FirebaseService firebase;
 
-  const ProductTile({super.key, required this.p, required this.firebase});
+  const ProductTile({
+    super.key,
+    required this.p,
+    required this.firebase,
+  });
 
   @override
   ConsumerState<ProductTile> createState() => _ProductTileState();
@@ -185,35 +195,78 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   int cantidad = 1;
   bool _isAddingToQuote = false;
 
-  double _precioDouble(Product p) =>
-      double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
+  double _precioDouble(Product p) {
+    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
+  }
 
   String _formatearPrecioCompleto(double precio) {
+    if (precio <= 0) {
+      return 'Bajo consulta';
+    }
+
     final parts = precio.toStringAsFixed(2).split('.');
     final enteros = parts[0];
     final decimales = parts.length > 1 ? parts[1] : '00';
+
     final buffer = StringBuffer();
+
     for (int i = 0; i < enteros.length; i++) {
-      if (i > 0 && (enteros.length - i) % 3 == 0) buffer.write('.');
+      if (i > 0 && (enteros.length - i) % 3 == 0) {
+        buffer.write('.');
+      }
+
       buffer.write(enteros[i]);
     }
+
     return '${buffer.toString()},$decimales €';
   }
 
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  // ================================================================
-  // LÓGICA DE STOCK (SOLO BINARIO)
-  // ================================================================
   bool get _tieneStock => widget.p.isInstock;
   bool get _puedeComprar => _tieneStock && cantidad > 0;
 
   void _aumentarCantidad() {
     if (!_tieneStock) return;
-    setState(() => cantidad++);
+
+    setState(() {
+      cantidad++;
+    });
+  }
+
+  Future<String?> _getCurrentUserEmail() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return null;
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists && userDoc.data() != null) {
+        final email = userDoc.data()?['email']?.toString();
+
+        if (email != null && email.trim().isNotEmpty) {
+          return email.trim();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error al leer email de Firestore: $e');
+    }
+
+    if (user.email != null && user.email!.trim().isNotEmpty) {
+      return user.email!.trim();
+    }
+
+    if (user.providerData.isNotEmpty) {
+      final providerEmail = user.providerData.first.email;
+
+      if (providerEmail != null && providerEmail.trim().isNotEmpty) {
+        return providerEmail.trim();
+      }
+    }
+
+    return null;
   }
 
   @override
@@ -243,7 +296,10 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                 children: [
                   Hero(
                     tag: 'prod_${widget.p.id}',
-                    child: ProductImage(p: widget.p, firebase: widget.firebase),
+                    child: ProductImage(
+                      p: widget.p,
+                      firebase: widget.firebase,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -260,22 +316,19 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Text(
-                              _tieneStock ? "● Disponible" : "○ Sin stock",
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: _tieneStock ? Colors.green : Colors.red,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
+                        Text(
+                          _tieneStock ? "● Disponible" : "○ Sin stock",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: _tieneStock ? Colors.green : Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          widget.p.shortDescription ??
-                              "Sin descripción disponible",
+                          widget.p.shortDescription.isNotEmpty
+                              ? widget.p.shortDescription
+                              : "Sin descripción disponible",
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -304,7 +357,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
             ),
             const SizedBox(height: 10),
 
-            // COMPRAR YA + Selector cantidad
             Row(
               children: [
                 Expanded(
@@ -313,16 +365,17 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     child: ElevatedButton(
                       onPressed: _puedeComprar
                           ? () {
-                              ref
-                                  .read(cartProvider.notifier)
-                                  .addProduct(widget.p, cantidad);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const CartPage(),
-                                ),
-                              );
-                            }
+                        ref
+                            .read(cartProvider.notifier)
+                            .addProduct(widget.p, cantidad);
+
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CartPage(),
+                          ),
+                        );
+                      }
                           : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _tieneStock
@@ -359,7 +412,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           _qtyBtn(Icons.remove, _tieneStock, () {
-                            if (cantidad > 1) setState(() => cantidad--);
+                            if (cantidad > 1) {
+                              setState(() {
+                                cantidad--;
+                              });
+                            }
                           }),
                           Text(
                             "$cantidad",
@@ -384,7 +441,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
             ),
             const SizedBox(height: 8),
 
-            // AÑADIR AL CARRITO + PRESUPUESTO
             Row(
               children: [
                 Expanded(
@@ -393,20 +449,21 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     child: OutlinedButton(
                       onPressed: _puedeComprar
                           ? () {
-                              ref
-                                  .read(cartProvider.notifier)
-                                  .addProduct(widget.p, cantidad);
-                              ScaffoldMessenger.of(context).clearSnackBars();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    "${widget.p.name} añadido al carrito",
-                                  ),
-                                  backgroundColor: AppColors.primary,
-                                  duration: const Duration(seconds: 1),
-                                ),
-                              );
-                            }
+                        ref
+                            .read(cartProvider.notifier)
+                            .addProduct(widget.p, cantidad);
+
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              "$cantidad x ${widget.p.name} añadido al carrito",
+                            ),
+                            backgroundColor: AppColors.primary,
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      }
                           : null,
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(
@@ -438,45 +495,35 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                   child: SizedBox(
                     height: 36,
                     child: OutlinedButton.icon(
-                      onPressed: (_tieneStock && !_isAddingToQuote)
-                          ? () => _addToQuote(widget.p)
-                          : null,
+                      onPressed: _isAddingToQuote
+                          ? null
+                          : () => _addToQuote(widget.p),
                       icon: _isAddingToQuote
                           ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.orange,
-                              ),
-                            )
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.orange,
+                        ),
+                      )
                           : Icon(
-                              Icons.description_outlined,
-                              size: 14,
-                              color: _tieneStock
-                                  ? Colors.orange.shade700
-                                  : Colors.grey.shade400,
-                            ),
+                        Icons.description_outlined,
+                        size: 14,
+                        color: Colors.orange.shade700,
+                      ),
                       label: Text(
-                        _isAddingToQuote
-                            ? "..."
-                            : (_tieneStock ? "PRESUPUESTO" : "SIN STOCK"),
+                        _isAddingToQuote ? "..." : "PRESUPUESTO",
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: _tieneStock
-                              ? Colors.orange.shade700
-                              : Colors.grey.shade400,
+                          color: Colors.orange.shade700,
                         ),
                       ),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _tieneStock
-                            ? Colors.orange.shade700
-                            : Colors.grey.shade400,
+                        foregroundColor: Colors.orange.shade700,
                         side: BorderSide(
-                          color: _tieneStock
-                              ? Colors.orange.shade700
-                              : Colors.grey.shade400,
+                          color: Colors.orange.shade700,
                           width: 1.3,
                         ),
                         shape: RoundedRectangleBorder(
@@ -496,11 +543,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   Widget _qtyBtn(
-    IconData icon,
-    bool enabled,
-    VoidCallback onTap, {
-    bool isPrimary = false,
-  }) {
+      IconData icon,
+      bool enabled,
+      VoidCallback onTap, {
+        bool isPrimary = false,
+      }) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
@@ -519,47 +566,38 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   Future<void> _addToQuote(Product product) async {
-    setState(() => _isAddingToQuote = true);
-    try {
-      final apiService = ref.read(apiServiceProvider);
-      final user = FirebaseAuth.instance.currentUser;
+    if (_isAddingToQuote) return;
 
-      String? email;
-      if (user != null) {
-        try {
-          final userDoc = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .get();
-          if (userDoc.exists && userDoc.data() != null) {
-            email = userDoc.get('email') as String?;
-          }
-        } catch (e) {
-          debugPrint('Error al leer email de Firestore: $e');
-        }
-      }
-      email ??= user?.email ?? user?.providerData.firstOrNull?.email;
+    setState(() {
+      _isAddingToQuote = true;
+    });
+
+    try {
+      final apiService = ApiService();
+      final email = await _getCurrentUserEmail();
 
       if (email == null || email.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                "No se pudo obtener tu email. Contacta con soporte.",
-              ),
+              content: Text("No se pudo obtener tu email."),
               backgroundColor: Colors.red,
-              duration: Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
             ),
           );
         }
+
         return;
+      }
+
+      if (product.id == 0) {
+        throw Exception("ID de producto no válido.");
       }
 
       final precioDouble =
           double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
-      if (product.id == 0) throw Exception("ID de producto no válido");
 
-      await apiService.crearPresupuesto(
+      final ok = await apiService.crearPresupuesto(
         email: email,
         productId: product.id,
         productName: product.name,
@@ -567,30 +605,53 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         quantity: cantidad,
       );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("$cantidad x ${product.name} añadido al presupuesto"),
-            backgroundColor: Colors.green.shade700,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+      if (!mounted) return;
+
+      if (!ok) {
+        throw Exception("No se pudo añadir el producto al presupuesto.");
       }
+
       ref.invalidate(quotesProvider);
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "$cantidad x ${product.name} añadido al presupuesto",
+          ),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+          action: SnackBarAction(
+            label: 'VER',
+            textColor: Colors.white,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const QuotesPage()),
+              );
+            },
+          ),
+        ),
+      );
     } catch (e) {
       debugPrint('❌ Error en _addToQuote: $e');
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("Error: $e"),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isAddingToQuote = false);
+      if (mounted) {
+        setState(() {
+          _isAddingToQuote = false;
+        });
+      }
     }
   }
 }
@@ -599,7 +660,11 @@ class ProductImage extends StatelessWidget {
   final Product p;
   final FirebaseService firebase;
 
-  const ProductImage({super.key, required this.p, required this.firebase});
+  const ProductImage({
+    super.key,
+    required this.p,
+    required this.firebase,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -622,7 +687,7 @@ class ProductImage extends StatelessWidget {
           cacheKey: p.imageUrl,
           placeholder: (_, __) => Container(color: Colors.grey[100]),
           errorWidget: (_, __, ___) =>
-              const Icon(Icons.broken_image, color: Colors.grey, size: 30),
+          const Icon(Icons.broken_image, color: Colors.grey, size: 30),
           fadeOutDuration: const Duration(milliseconds: 150),
           fadeInDuration: const Duration(milliseconds: 150),
         ),
