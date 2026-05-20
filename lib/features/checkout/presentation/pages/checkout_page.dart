@@ -39,7 +39,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   final _formKey = GlobalKey<FormState>();
   final ScrollController _scrollController = ScrollController();
 
-  // Controladores
   final _nameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -71,14 +70,14 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       id: 'bacs',
       title: 'Transferencia bancaria',
       description:
-          'Pago mediante transferencia bancaria. El pedido será procesado por MundiCam.',
+      'Pago mediante transferencia bancaria. El pedido será procesado por MundiCam.',
       icon: Icons.account_balance_outlined,
     ),
     _CheckoutPaymentMethod(
       id: 'cheque',
       title: 'Giro / pago aplazado',
       description:
-          'Forma de pago vinculada a condiciones comerciales y crédito aprobado.',
+      'Forma de pago vinculada a condiciones comerciales y crédito aprobado.',
       icon: Icons.receipt_long_outlined,
       requiresCredit: true,
     ),
@@ -86,7 +85,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       id: 'redsys',
       title: '💳 Pago con Tarjeta (Redsys)',
       description:
-          'Pago seguro con tarjeta bancaria a través de la pasarela Redsys de WooCommerce.',
+      'Pago seguro con tarjeta bancaria a través de la pasarela Redsys de WooCommerce.',
       icon: Icons.credit_card_outlined,
     ),
   ];
@@ -144,7 +143,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   _CheckoutPaymentMethod get _selectedPaymentMethod {
     return _paymentMethods.firstWhere(
-      (method) => method.id == _paymentMethod,
+          (method) => method.id == _paymentMethod,
       orElse: () => _paymentMethods.first,
     );
   }
@@ -163,7 +162,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   // ============================================================
-  // CARGAR DATOS DESDE WOOCOMMERCE
+  // CARGAR DATOS DEL CLIENTE
+  // Ahora usa las mismas claves que el perfil:
+  // - CIF/NIF: billing_nif + fallback billing.nif / billing.cif
+  // - Gestor: wpuef_cid_c30 + fallback pedidos@mundicam.com
+  // - Forma de pago: payment_method
+  // - Crédito: credit_limit / credit_used
   // ============================================================
   Future<void> _cargarDatosCliente() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -203,97 +207,83 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       final apiService = ApiService();
       final wooCustomer = await apiService.getCustomerByEmail(email);
 
-      if (wooCustomer != null) {
-        final wooEmail = wooCustomer['email']?.toString().trim().toLowerCase();
-
-        if (wooEmail != email) {
-          debugPrint('🚨 Email no coincide');
-
-          setState(() {
-            _loadingProfile = false;
-            _errorMessage = 'Error de seguridad al cargar los datos';
-          });
-
-          return;
-        }
-
-        _customerId = wooCustomer['id'];
-        final billing = wooCustomer['billing'] as Map<String, dynamic>? ?? {};
-
-        _creditLimit =
-            double.tryParse(
-              _getMetaValue(wooCustomer['meta_data'], 'credit_limit') ?? '0',
-            ) ??
-            0;
-
-        _creditUsed =
-            double.tryParse(
-              _getMetaValue(wooCustomer['meta_data'], 'credit_used') ?? '0',
-            ) ??
-            0;
-
-        final wooPaymentMethod = _getMetaValue(
-          wooCustomer['meta_data'],
-          'payment_method',
-        );
-
-        final normalizedPaymentMethod = _normalizePaymentMethod(
-          wooPaymentMethod,
-        );
-
-        final selectedMethod = _paymentMethods.firstWhere(
-          (method) => method.id == normalizedPaymentMethod,
-          orElse: () => _paymentMethods.first,
-        );
-
-        if (_isPaymentMethodEnabled(selectedMethod)) {
-          _paymentMethod = normalizedPaymentMethod;
-        } else {
-          _paymentMethod = 'bacs';
-        }
-
-        _assignedManager =
-            _getMetaValue(wooCustomer['meta_data'], 'assigned_manager') ??
-            _getMetaValue(wooCustomer['meta_data'], '_assigned_manager') ??
-            _getMetaValue(wooCustomer['meta_data'], 'gestor_asignado') ??
-            _getMetaValue(wooCustomer['meta_data'], 'commercial_manager') ??
-            _getMetaValue(wooCustomer['meta_data'], 'sales_manager');
-
-        if (mounted) {
-          setState(() {
-            _nameController.text = wooCustomer['first_name']?.toString() ?? '';
-            _lastNameController.text =
-                wooCustomer['last_name']?.toString() ?? '';
-            _emailController.text =
-                (wooCustomer['email']?.toString() ?? email)!;
-            _companyController.text = billing['company']?.toString() ?? '';
-            _phoneController.text = billing['phone']?.toString() ?? '';
-            _nifController.text =
-                _getMetaValue(wooCustomer['meta_data'], 'cif_nif') ?? '';
-            _addressController.text = billing['address_1']?.toString() ?? '';
-            _cityController.text = billing['city']?.toString() ?? '';
-            _postCodeController.text = billing['postcode']?.toString() ?? '';
-            _stateController.text = billing['state']?.toString() ?? '';
-            _countryController.text = billing['country']?.toString() ?? 'ES';
-
-            _profileLoaded = true;
-            _loadingProfile = false;
-          });
-        }
-
-        debugPrint('✅ Datos cargados correctamente');
-        debugPrint('   Cliente: $_customerId');
-        debugPrint('   Crédito: $_creditUsed / $_creditLimit €');
-        debugPrint('   Pago: $_paymentMethod');
-        debugPrint('   Gestor: ${_assignedManager ?? "Sin gestor asignado"}');
-      } else {
+      if (wooCustomer == null) {
         debugPrint('⚠️ Cliente no encontrado en WooCommerce');
 
         setState(() {
           _loadingProfile = false;
           _errorMessage = 'No se encontraron tus datos. Contacta con soporte.';
         });
+
+        return;
       }
+
+      final wooEmail = wooCustomer['email']?.toString().trim().toLowerCase();
+
+      if (wooEmail != email) {
+        debugPrint('🚨 Email no coincide');
+
+        setState(() {
+          _loadingProfile = false;
+          _errorMessage = 'Error de seguridad al cargar los datos';
+        });
+
+        return;
+      }
+
+      _customerId = wooCustomer['id'];
+
+      final billing = wooCustomer['billing'] as Map<String, dynamic>? ?? {};
+      final metaData = wooCustomer['meta_data'];
+
+      _creditLimit =
+          double.tryParse(_getMetaValue(metaData, 'credit_limit') ?? '0') ?? 0;
+
+      _creditUsed =
+          double.tryParse(_getMetaValue(metaData, 'credit_used') ?? '0') ?? 0;
+
+      final wooPaymentMethod = _getMetaValue(metaData, 'payment_method');
+
+      final normalizedPaymentMethod = _normalizePaymentMethod(wooPaymentMethod);
+
+      final selectedMethod = _paymentMethods.firstWhere(
+            (method) => method.id == normalizedPaymentMethod,
+        orElse: () => _paymentMethods.first,
+      );
+
+      if (_isPaymentMethodEnabled(selectedMethod)) {
+        _paymentMethod = normalizedPaymentMethod;
+      } else {
+        _paymentMethod = 'bacs';
+      }
+
+      _assignedManager = _getGestor(metaData);
+
+      if (mounted) {
+        setState(() {
+          _nameController.text = wooCustomer['first_name']?.toString() ?? '';
+          _lastNameController.text = wooCustomer['last_name']?.toString() ?? '';
+          _emailController.text = wooCustomer['email']?.toString() ?? email!;
+          _companyController.text = billing['company']?.toString() ?? '';
+          _phoneController.text = billing['phone']?.toString() ?? '';
+          _nifController.text = _getNifCif(metaData, billing);
+          _addressController.text = billing['address_1']?.toString() ?? '';
+          _cityController.text = billing['city']?.toString() ?? '';
+          _postCodeController.text = billing['postcode']?.toString() ?? '';
+          _stateController.text = billing['state']?.toString() ?? '';
+          _countryController.text = billing['country']?.toString() ?? 'ES';
+
+          _profileLoaded = true;
+          _loadingProfile = false;
+        });
+      }
+
+      debugPrint('✅ Datos cargados correctamente');
+      debugPrint('   Cliente: $_customerId');
+      debugPrint('   CIF/NIF: ${_nifController.text}');
+      debugPrint('   Crédito: $_creditUsed / $_creditLimit €');
+      debugPrint('   Pago: $_paymentMethod');
+      debugPrint('   Gestor: ${_assignedManager ?? "Sin gestor asignado"}');
     } catch (e) {
       debugPrint('❌ Error: $e');
 
@@ -305,7 +295,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   // ============================================================
-  // EXTRAER META DATA
+  // MISMA LÓGICA DE METADATOS QUE PERFIL
   // ============================================================
   String? _getMetaValue(dynamic metaData, String key) {
     if (metaData == null || key.isEmpty) return null;
@@ -331,6 +321,63 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
 
     return null;
+  }
+
+  String? _getFirstMetaValue(dynamic metaData, List<String> keys) {
+    for (final key in keys) {
+      final value = _getMetaValue(metaData, key);
+
+      if (value != null && value.trim().isNotEmpty && value != '—') {
+        return value.trim();
+      }
+    }
+
+    return null;
+  }
+
+  String _getNifCif(dynamic metaData, Map<String, dynamic> billing) {
+    final metaValue = _getFirstMetaValue(metaData, [
+      'billing_nif',
+      '_billing_nif',
+      'cif_nif',
+      'cif',
+      'nif',
+      'billing_cif',
+      'billing_nif_cif',
+    ]);
+
+    if (metaValue != null && metaValue.isNotEmpty) {
+      return metaValue;
+    }
+
+    final billingNif = billing['nif']?.toString().trim() ?? '';
+    if (billingNif.isNotEmpty && billingNif != 'null') {
+      return billingNif;
+    }
+
+    final billingCif = billing['cif']?.toString().trim() ?? '';
+    if (billingCif.isNotEmpty && billingCif != 'null') {
+      return billingCif;
+    }
+
+    return '';
+  }
+
+  String _getGestor(dynamic metaData) {
+    final gestor = _getFirstMetaValue(metaData, [
+      'wpuef_cid_c30',
+      'assigned_manager',
+      '_assigned_manager',
+      'gestor_asignado',
+      'commercial_manager',
+      'sales_manager',
+    ]);
+
+    if (gestor != null && gestor.isNotEmpty) {
+      return gestor;
+    }
+
+    return 'pedidos@mundicam.com';
   }
 
   // ============================================================
@@ -370,8 +417,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         if (stockActual > 0 && item.quantity > stockActual) {
           _mostrarError(
             'Stock insuficiente para "${item.product.name}".\n'
-            'Disponible: $stockActual uds.\n'
-            'Solicitado: ${item.quantity} uds.',
+                'Disponible: $stockActual uds.\n'
+                'Solicitado: ${item.quantity} uds.',
           );
           return false;
         }
@@ -422,8 +469,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         _mostrarError(
           'Crédito insuficiente.\n'
-          'Disponible: ${disponible.toStringAsFixed(2)} €\n'
-          'Total pedido: ${total.toStringAsFixed(2)} €',
+              'Disponible: ${disponible.toStringAsFixed(2)} €\n'
+              'Total pedido: ${total.toStringAsFixed(2)} €',
         );
       }
 
@@ -470,6 +517,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'customer_note': _notesController.text.trim(),
       'meta_data': [
         {'key': '_billing_nif', 'value': _nifController.text.trim()},
+        {'key': 'billing_nif', 'value': _nifController.text.trim()},
         {'key': '_mundicam_payment_method_app', 'value': _paymentMethod},
         {'key': '_mundicam_payment_method_title', 'value': _paymentMethodTitle},
         if (_assignedManager != null && _assignedManager!.trim().isNotEmpty)
@@ -485,6 +533,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     debugPrint('📦 Creando pedido para cliente $_customerId');
     debugPrint('   Método de pago: $_paymentMethod - $_paymentMethodTitle');
     debugPrint('   Status: ${isCardPayment ? "pending" : "processing"}');
+    debugPrint('   CIF/NIF: ${_nifController.text.trim()}');
     debugPrint('   Gestor asignado: ${_assignedManager ?? "Sin gestor"}');
 
     try {
@@ -569,9 +618,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
   }
 
-  // ============================================================
-  // SUCCESS / ERROR
-  // ============================================================
   void _mostrarExito() {
     HapticFeedback.heavyImpact();
 
@@ -645,9 +691,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     );
   }
 
-  // ============================================================
-  // UI
-  // ============================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -660,105 +703,105 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       ),
       body: _loadingProfile
           ? const Center(
-              child: CircularProgressIndicator(color: AppColors.primary),
-            )
+        child: CircularProgressIndicator(color: AppColors.primary),
+      )
           : _errorMessage != null
           ? _buildErrorState()
           : Form(
-              key: _formKey,
-              child: ListView(
-                controller: _scrollController,
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                children: [
-                  _buildSteps(),
-                  const SizedBox(height: 20),
-                  _buildSectionCard(
-                    icon: Icons.person_outline_rounded,
-                    title: "DATOS PERSONALES",
-                    locked: true,
-                    children: [
-                      _buildLockedField("Nombre", _nameController),
-                      _buildLockedField("Apellidos", _lastNameController),
-                      _buildLockedField("Email", _emailController),
-                      _buildLockedField("Teléfono", _phoneController),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSectionCard(
-                    icon: Icons.business_outlined,
-                    title: "DATOS DE EMPRESA",
-                    locked: true,
-                    children: [
-                      _buildLockedField("Empresa", _companyController),
-                      _buildLockedField("NIF/CIF", _nifController),
-                      _buildManagerInfo(),
-                      _buildCreditInfo(),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSectionCard(
-                    icon: Icons.local_shipping_outlined,
-                    title: "DIRECCIÓN DE ENVÍO",
-                    subtitle: "Puedes modificar la dirección de entrega",
-                    children: [
-                      _buildField(
-                        "Dirección",
-                        _addressController,
-                        icon: Icons.home_outlined,
-                      ),
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: _buildField("Ciudad", _cityController),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 2,
-                            child: _buildField(
-                              "C.P.",
-                              _postCodeController,
-                              keyboard: TextInputType.number,
-                            ),
-                          ),
-                        ],
-                      ),
-                      _buildField(
-                        "Provincia",
-                        _stateController,
-                        required: false,
-                      ),
-                      _buildField("País", _countryController, required: false),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSectionCard(
-                    icon: Icons.payment_outlined,
-                    title: "MÉTODO DE PAGO",
-                    subtitle: "Selecciona la forma de pago del pedido",
-                    children: [_buildPaymentInfo()],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSectionCard(
-                    icon: Icons.note_outlined,
-                    title: "NOTAS DEL PEDIDO",
-                    subtitle: "Opcional",
-                    children: [
-                      _buildField(
-                        "Instrucciones adicionales",
-                        _notesController,
-                        maxLines: 3,
-                        required: false,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  _buildSummary(),
-                  const SizedBox(height: 16),
-                ],
-              ),
+        key: _formKey,
+        child: ListView(
+          controller: _scrollController,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+          children: [
+            _buildSteps(),
+            const SizedBox(height: 20),
+            _buildSectionCard(
+              icon: Icons.person_outline_rounded,
+              title: "DATOS PERSONALES",
+              locked: true,
+              children: [
+                _buildLockedField("Nombre", _nameController),
+                _buildLockedField("Apellidos", _lastNameController),
+                _buildLockedField("Email", _emailController),
+                _buildLockedField("Teléfono", _phoneController),
+              ],
             ),
+            const SizedBox(height: 16),
+            _buildSectionCard(
+              icon: Icons.business_outlined,
+              title: "DATOS DE EMPRESA",
+              locked: true,
+              children: [
+                _buildLockedField("Empresa", _companyController),
+                _buildLockedField("NIF/CIF", _nifController),
+                _buildManagerInfo(),
+                _buildCreditInfo(),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildSectionCard(
+              icon: Icons.local_shipping_outlined,
+              title: "DIRECCIÓN DE ENVÍO",
+              subtitle: "Puedes modificar la dirección de entrega",
+              children: [
+                _buildField(
+                  "Dirección",
+                  _addressController,
+                  icon: Icons.home_outlined,
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: _buildField("Ciudad", _cityController),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: _buildField(
+                        "C.P.",
+                        _postCodeController,
+                        keyboard: TextInputType.number,
+                      ),
+                    ),
+                  ],
+                ),
+                _buildField(
+                  "Provincia",
+                  _stateController,
+                  required: false,
+                ),
+                _buildField("País", _countryController, required: false),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildSectionCard(
+              icon: Icons.payment_outlined,
+              title: "MÉTODO DE PAGO",
+              subtitle: "Selecciona la forma de pago del pedido",
+              children: [_buildPaymentInfo()],
+            ),
+            const SizedBox(height: 16),
+            _buildSectionCard(
+              icon: Icons.note_outlined,
+              title: "NOTAS DEL PEDIDO",
+              subtitle: "Opcional",
+              children: [
+                _buildField(
+                  "Instrucciones adicionales",
+                  _notesController,
+                  maxLines: 3,
+                  required: false,
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _buildSummary(),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
   }
 
@@ -833,13 +876,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             child: active
                 ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
                 : Text(
-                    "3",
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+              "3",
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 4),
@@ -947,13 +990,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   Widget _buildField(
-    String label,
-    TextEditingController controller, {
-    TextInputType keyboard = TextInputType.text,
-    IconData? icon,
-    bool required = true,
-    int maxLines = 1,
-  }) {
+      String label,
+      TextEditingController controller, {
+        TextInputType keyboard = TextInputType.text,
+        IconData? icon,
+        bool required = true,
+        int maxLines = 1,
+      }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextFormField(
@@ -984,9 +1027,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         ),
         validator: required
             ? (v) {
-                if (v == null || v.trim().isEmpty) return "Campo requerido";
-                return null;
-              }
+          if (v == null || v.trim().isEmpty) return "Campo requerido";
+          return null;
+        }
             : null,
       ),
     );
@@ -1065,7 +1108,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 Text(
                   manager != null && manager.isNotEmpty
                       ? manager
-                      : "Sin gestor asignado",
+                      : "pedidos@mundicam.com",
                   style: const TextStyle(
                     fontSize: 14,
                     color: AppColors.textPrimary,
@@ -1185,7 +1228,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               Expanded(
                 child: Text(
                   'El pago con tarjeta se realizará mediante Redsys en entorno seguro de WooCommerce. '
-                  'El giro está sujeto a crédito y condiciones comerciales aprobadas.',
+                      'El giro está sujeto a crédito y condiciones comerciales aprobadas.',
                   style: TextStyle(
                     fontSize: 11,
                     height: 1.35,
@@ -1208,12 +1251,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     return InkWell(
       onTap: enabled
           ? () {
-              HapticFeedback.selectionClick();
+        HapticFeedback.selectionClick();
 
-              setState(() {
-                _paymentMethod = method.id;
-              });
-            }
+        setState(() {
+          _paymentMethod = method.id;
+        });
+      }
           : null,
       borderRadius: BorderRadius.circular(14),
       child: Container(
@@ -1249,13 +1292,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               child: Center(
                 child: selected
                     ? Container(
-                        width: 12,
-                        height: 12,
-                        decoration: const BoxDecoration(
-                          color: AppColors.primary,
-                          shape: BoxShape.circle,
-                        ),
-                      )
+                  width: 12,
+                  height: 12,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                )
                     : null,
               ),
             ),
@@ -1493,22 +1536,22 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               ),
               child: _isLoading
                   ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
                   : Text(
-                      _paymentMethod == 'redsys'
-                          ? 'PAGAR CON TARJETA'
-                          : 'CONFIRMAR PEDIDO',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                _paymentMethod == 'redsys'
+                    ? 'PAGAR CON TARJETA'
+                    : 'CONFIRMAR PEDIDO',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
           ),
         ],
