@@ -10,7 +10,7 @@ import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
 
 // ================================================================
-// PROVIDERS
+// PROVIDER
 // ================================================================
 
 final chatBoxProvider = StateProvider<bool>((ref) => false);
@@ -28,16 +28,19 @@ class ChatBox extends ConsumerStatefulWidget {
 
 class _ChatBoxState extends ConsumerState<ChatBox> {
   // ---------------------------------------------------------------
-  // COLORES VERDES
+  // COLORES CORPORATIVOS
   // ---------------------------------------------------------------
 
-  static const Color _greenPrimary = Color(0xFF2E7D32);
-  static const Color _greenLight = Color(0xFF4CAF50);
-  static const Color _greenDark = Color(0xFF1B5E20);
-  static const Color _greenSurface = Color(0xFFE8F5E9);
+  static const Color _brandRed = Color(0xFFA60909);
+  static const Color _brandRedLight = Color(0xFFD71920);
+  static const Color _brandRedDark = Color(0xFF7A0505);
+  static const Color _dark = Color(0xFF111827);
+  static const Color _surface = Color(0xFFF8F9FB);
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _onlineGreen = Color(0xFF34D399);
 
   // ---------------------------------------------------------------
-  // CONSTANTES DE CONTACTO
+  // CONTACTO
   // ---------------------------------------------------------------
 
   static const String _telefono = '968629383';
@@ -49,11 +52,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
   static const String _academy = 'https://www.mundicam.com/academy/';
 
   static const String _welcomeMessage =
-      '👋 ¡Hola! Soy el asistente de Mundicam. Puedo ayudarte con '
-      'productos, pedidos, presupuestos, RMA, crédito y soporte.';
+      '👋 ¡Hola! Soy el asistente de MundiCam. Puedo ayudarte con productos, pedidos, presupuestos, RMA, crédito y soporte.';
 
   // ---------------------------------------------------------------
-  // CONTROLADORES Y ESTADO
+  // ESTADO
   // ---------------------------------------------------------------
 
   final ScrollController _scrollController = ScrollController();
@@ -67,10 +69,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
   final List<_ChatMessage> _messages = const [
     _ChatMessage(sender: _ChatSender.bot, text: _welcomeMessage),
   ].toList();
-
-  // ---------------------------------------------------------------
-  // MAPAS Y LISTAS DE DATOS
-  // ---------------------------------------------------------------
 
   late final Map<String, _ChatNode> _nodes = _buildNodes();
 
@@ -114,8 +112,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       icon: Icons.videocam_rounded,
       search: 'videovigilancia camara cctv nvr dvr',
       prompt:
-          '🎥 Videovigilancia profesional: cámaras, grabadores, accesorios, '
-          'discos, PoE y analítica.',
+      '🎥 Videovigilancia profesional: cámaras, grabadores, accesorios, discos, PoE y analítica.',
       brands: [
         'Hikvision',
         'Dahua',
@@ -132,8 +129,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       icon: Icons.security_rounded,
       search: 'alarmas intrusion detector sirena central',
       prompt:
-          '🚨 Alarmas e intrusión: centrales, detectores, sirenas, teclados, '
-          'mandos y accesorios.',
+      '🚨 Alarmas e intrusión: centrales, detectores, sirenas, teclados, mandos y accesorios.',
       brands: ['Ajax', 'Ksenia', 'Paradox', 'Satel', 'Honeywell', 'Bosch'],
     ),
     _CategoryDef(
@@ -142,8 +138,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       icon: Icons.lock_rounded,
       search: 'control de acceso lector cerradura biometrico',
       prompt:
-          '🔐 Control de acceso: lectores, cerraduras, terminales, '
-          'controladoras e identificación.',
+      '🔐 Control de acceso: lectores, cerraduras, terminales, controladoras e identificación.',
       brands: ['ZKTeco', 'Anviz', 'Yale'],
     ),
     _CategoryDef(
@@ -152,8 +147,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       icon: Icons.local_fire_department_rounded,
       search: 'incendio central detector humo pulsador sirena',
       prompt:
-          '🔥 Incendio: centrales, detectores, pulsadores, sirenas, módulos '
-          'y accesorios.',
+      '🔥 Incendio: centrales, detectores, pulsadores, sirenas, módulos y accesorios.',
       brands: ['Teletek', 'Honeywell', 'Siemens'],
     ),
     _CategoryDef(
@@ -162,8 +156,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       icon: Icons.hub_rounded,
       search: 'networking switch poe router wifi omada',
       prompt:
-          '🌐 Networking: switches PoE, routers, WiFi profesional, '
-          'controladores y puntos de acceso.',
+      '🌐 Networking: switches PoE, routers, WiFi profesional, controladores y puntos de acceso.',
       brands: ['TP-Link', 'Omada'],
     ),
     _CategoryDef(
@@ -172,8 +165,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       icon: Icons.sim_card_rounded,
       search: 'wisim sim m2m iot multioperador apn',
       prompt:
-          '📡 IoT/M2M: conectividad multioperador para CCTV, alarmas, '
-          'telemetría, movilidad e industria.',
+      '📡 IoT/M2M: conectividad multioperador para CCTV, alarmas, telemetría, movilidad e industria.',
       brands: ['WISIM'],
     ),
     _CategoryDef(
@@ -182,8 +174,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       icon: Icons.solar_power_rounded,
       search: 'seguridad autonoma solar torre pod evolve xtender',
       prompt:
-          '☀️ Seguridad autónoma: torres, POD, energía solar, vídeo, '
-          'analítica y conectividad.',
+      '☀️ Seguridad autónoma: torres, POD, energía solar, vídeo, analítica y conectividad.',
       brands: ['Evolve Xtender'],
     ),
   ];
@@ -194,8 +185,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: '¿Cómo hago un pedido?',
       icon: Icons.shopping_cart_checkout_rounded,
       answer:
-          '🛒 Para hacer un pedido: entra en catálogo, abre un producto, '
-          'selecciona cantidad, añádelo al carrito y finaliza desde Checkout.',
+      '🛒 Para hacer un pedido: entra en catálogo, abre un producto, selecciona cantidad, añádelo al carrito y finaliza desde Checkout.',
       options: [
         _ChatOption(
           label: 'Abrir catálogo',
@@ -210,9 +200,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: '¿Cómo pido presupuesto?',
       icon: Icons.request_quote_rounded,
       answer:
-          '📄 Puedes solicitar presupuesto desde el botón "Presupuesto" del '
-          'producto. Si no hay stock, la compra queda bloqueada, pero puedes '
-          'pedir valoración comercial.',
+      '📄 Puedes solicitar presupuesto desde el botón "Presupuesto" del producto. Si no hay stock, la compra queda bloqueada, pero puedes pedir valoración comercial.',
       options: [
         _ChatOption(
           label: 'Abrir presupuestos',
@@ -226,7 +214,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           icon: Icons.chat_rounded,
           action: _ChatAction.whatsapp,
           whatsappText:
-              'Hola Mundicam, necesito ayuda para preparar un presupuesto.',
+          'Hola MundiCam, necesito ayuda para preparar un presupuesto.',
         ),
       ],
     ),
@@ -235,8 +223,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: '¿Dónde veo mis pedidos?',
       icon: Icons.local_shipping_rounded,
       answer:
-          '📦 Puedes consultar tus pedidos desde la sección "Pedidos". Verás '
-          'estado, fecha, total y productos incluidos.',
+      '📦 Puedes consultar tus pedidos desde la sección "Pedidos". Verás estado, fecha, total y productos incluidos.',
       options: [
         _ChatOption(
           label: 'Abrir pedidos',
@@ -252,8 +239,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: '¿Cómo solicito RMA?',
       icon: Icons.assignment_return_rounded,
       answer:
-          '🔧 Para solicitar una RMA, entra en pedidos, localiza un pedido '
-          'completado y pulsa el botón RMA del producto correspondiente.',
+      '🔧 Para solicitar una RMA, entra en pedidos, localiza un pedido completado y pulsa el botón RMA del producto correspondiente.',
       options: [
         _ChatOption(
           label: 'Abrir pedidos',
@@ -266,7 +252,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           label: 'Contactar soporte',
           icon: Icons.chat_rounded,
           action: _ChatAction.whatsapp,
-          whatsappText: 'Hola Mundicam, necesito ayuda para gestionar una RMA.',
+          whatsappText: 'Hola MundiCam, necesito ayuda para gestionar una RMA.',
         ),
       ],
     ),
@@ -275,15 +261,14 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: 'Crédito disponible',
       icon: Icons.account_balance_wallet_rounded,
       answer:
-          '💳 Tu crédito se consulta desde Perfil. La app muestra límite, '
-          'crédito usado y crédito disponible.',
+      '💳 Tu crédito se consulta desde Perfil. La app muestra límite, crédito usado y crédito disponible.',
       options: [
         _ChatOption(
           label: 'Contactar gestor',
           icon: Icons.support_agent_rounded,
           action: _ChatAction.whatsapp,
           whatsappText:
-              'Hola Mundicam, necesito consultar mi crédito disponible.',
+          'Hola MundiCam, necesito consultar mi crédito disponible.',
         ),
       ],
     ),
@@ -292,8 +277,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: 'Cambiar dirección',
       icon: Icons.location_on_rounded,
       answer:
-          '📍 La dirección de envío se puede editar durante el Checkout. '
-          'Empresa y CIF/NIF permanecen bloqueados porque vienen de WooCommerce.',
+      '📍 La dirección de envío se puede editar durante el Checkout. Empresa y CIF/NIF permanecen bloqueados porque vienen de WooCommerce.',
       options: [
         _ChatOption(
           label: 'Abrir catálogo',
@@ -308,15 +292,14 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: 'Mi gestor',
       icon: Icons.support_agent_rounded,
       answer:
-          '👤 Tu gestor asignado aparece en Perfil, dentro de los datos '
-          'empresariales cargados desde WooCommerce.',
+      '👤 Tu gestor asignado aparece en Perfil, dentro de los datos empresariales cargados desde WooCommerce.',
       options: [
         _ChatOption(
           label: 'Contactar gestor',
           icon: Icons.chat_rounded,
           action: _ChatAction.whatsapp,
           whatsappText:
-              'Hola Mundicam, necesito contactar con mi gestor asignado.',
+          'Hola MundiCam, necesito contactar con mi gestor asignado.',
         ),
       ],
     ),
@@ -325,8 +308,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       title: 'Stock y disponibilidad',
       icon: Icons.inventory_2_rounded,
       answer:
-          '📦 El stock aparece en la tarjeta y en la ficha del producto. Si '
-          'no hay stock, la compra se bloquea y puedes solicitar presupuesto.',
+      '📦 El stock aparece en la tarjeta y en la ficha del producto. Si no hay stock, la compra se bloquea y puedes solicitar presupuesto.',
       options: [
         _ChatOption(
           label: 'Abrir catálogo',
@@ -338,10 +320,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     ),
   ];
 
-  // ---------------------------------------------------------------
-  // CICLO DE VIDA
-  // ---------------------------------------------------------------
-
   @override
   void dispose() {
     _scrollController.dispose();
@@ -350,13 +328,8 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     super.dispose();
   }
 
-  // ---------------------------------------------------------------
-  // CONSTRUCCIÓN DEL ÁRBOL DE NODOS
-  // ---------------------------------------------------------------
-
   Map<String, _ChatNode> _buildNodes() {
     final nodes = <String, _ChatNode>{
-      // Raíz -------------------------------------------------------
       'root': _ChatNode(
         prompt: '¿Qué necesitas?',
         options: [
@@ -397,12 +370,9 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
         ],
       ),
-
-      // Buscar -----------------------------------------------------
       'buscar': _ChatNode(
         prompt:
-            '🔎 Escribe una marca, referencia o tipo de producto. Ejemplos: '
-            '"Ajax", "Dahua", "NVR", "cámara IP", "switch PoE" o "KSI".',
+        '🔎 Escribe una marca, referencia o tipo de producto. Ejemplos: "Ajax", "Dahua", "NVR", "cámara IP", "switch PoE" o "KSI".',
         options: [
           const _ChatOption(
             label: 'Abrir catálogo',
@@ -410,7 +380,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             action: _ChatAction.openCatalog,
           ),
           const _ChatOption(
-            label: 'Hablar con Mundicam',
+            label: 'Hablar con MundiCam',
             icon: Icons.chat_rounded,
             action: _ChatAction.whatsapp,
           ),
@@ -421,8 +391,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
         ],
       ),
-
-      // Catálogo ---------------------------------------------------
       'catalog': _ChatNode(
         prompt: 'Elige una familia o abre el catálogo completo:',
         options: [
@@ -433,7 +401,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             successMessage: '📋 Abriendo catálogo completo...',
           ),
           ..._categories.map(
-            (category) => _ChatOption(
+                (category) => _ChatOption(
               label: category.title,
               icon: category.icon,
               nextNodeKey: 'cat_${category.key}',
@@ -453,11 +421,9 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
         ],
       ),
-
-      // Pedidos ----------------------------------------------------
       'pedidos': _ChatNode(
         prompt:
-            '📦 Consulta pedidos, estados, productos incluidos y gestiones asociadas.',
+        '📦 Consulta pedidos, estados, productos incluidos y gestiones asociadas.',
         options: [
           const _ChatOption(
             label: 'Abrir pedidos',
@@ -476,11 +442,9 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
         ],
       ),
-
-      // Presupuestos -----------------------------------------------
       'presupuestos': _ChatNode(
         prompt:
-            '📄 Gestiona presupuestos aceptables y solicitudes comerciales.',
+        '📄 Gestiona presupuestos aceptables y solicitudes comerciales.',
         options: [
           const _ChatOption(
             label: 'Abrir presupuestos',
@@ -495,7 +459,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             icon: Icons.chat_rounded,
             action: _ChatAction.whatsapp,
             whatsappText:
-                'Hola Mundicam, necesito ayuda con un presupuesto profesional.',
+            'Hola MundiCam, necesito ayuda con un presupuesto profesional.',
           ),
           const _ChatOption(
             label: 'Volver',
@@ -504,8 +468,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
         ],
       ),
-
-      // Soporte ----------------------------------------------------
       'soporte': _ChatNode(
         prompt: '🔧 Soporte técnico, RMA, documentación y garantía.',
         options: [
@@ -515,21 +477,21 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             icon: Icons.engineering_rounded,
             action: _ChatAction.whatsapp,
             whatsappText:
-                'Hola Mundicam, necesito soporte técnico sobre un producto o instalación.',
+            'Hola MundiCam, necesito soporte técnico sobre un producto o instalación.',
           ),
           const _ChatOption(
             label: 'Pedir documentación',
             icon: Icons.menu_book_rounded,
             action: _ChatAction.whatsapp,
             whatsappText:
-                'Hola Mundicam, necesito documentación técnica de un producto.',
+            'Hola MundiCam, necesito documentación técnica de un producto.',
           ),
           const _ChatOption(
             label: 'Garantía',
             icon: Icons.verified_user_rounded,
             action: _ChatAction.whatsapp,
             whatsappText:
-                'Hola Mundicam, necesito consultar la garantía de un producto.',
+            'Hola MundiCam, necesito consultar la garantía de un producto.',
           ),
           const _ChatOption(
             label: 'Volver',
@@ -538,11 +500,9 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
         ],
       ),
-
-      // Cuenta -----------------------------------------------------
       'cuenta': _ChatNode(
         prompt:
-            '👤 Datos de empresa, crédito, gestor asignado, dirección y condiciones B2B.',
+        '👤 Datos de empresa, crédito, gestor asignado, dirección y condiciones B2B.',
         options: [
           _faqOption('credito'),
           _faqOption('gestor'),
@@ -552,7 +512,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             icon: Icons.chat_rounded,
             action: _ChatAction.whatsapp,
             whatsappText:
-                'Hola Mundicam, necesito contactar con mi gestor comercial.',
+            'Hola MundiCam, necesito contactar con mi gestor comercial.',
           ),
           const _ChatOption(
             label: 'Volver',
@@ -561,17 +521,15 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
         ],
       ),
-
-      // Contacto ---------------------------------------------------
       'contacto': _ChatNode(
-        prompt: '📞 Elige cómo quieres contactar con Mundicam:',
+        prompt: '📞 Elige cómo quieres contactar con MundiCam:',
         options: [
           const _ChatOption(
             label: 'WhatsApp ($_whatsappFormateado)',
             icon: Icons.chat_rounded,
             action: _ChatAction.whatsapp,
             whatsappText:
-                'Hola Mundicam, necesito ayuda desde la app profesional.',
+            'Hola MundiCam, necesito ayuda desde la app profesional.',
           ),
           const _ChatOption(
             label: 'Llamar ($_telefonoFormateado)',
@@ -582,10 +540,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             label: 'Email ($_email)',
             icon: Icons.email_rounded,
             action: _ChatAction.email,
-            emailSubject: 'Consulta desde App Mundicam',
+            emailSubject: 'Consulta desde App MundiCam',
           ),
           const _ChatOption(
-            label: 'Web Mundicam',
+            label: 'Web MundiCam',
             icon: Icons.language_rounded,
             action: _ChatAction.web,
             webUrl: _web,
@@ -605,7 +563,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       ),
     };
 
-    // Nodos de categorías -----------------------------------------
     for (final category in _categories) {
       nodes['cat_${category.key}'] = _ChatNode(
         prompt: category.prompt,
@@ -618,7 +575,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             successMessage: '📋 Abriendo catálogo de ${category.title}...',
           ),
           ...category.brands.map(
-            (brand) => _ChatOption(
+                (brand) => _ChatOption(
               label: brand,
               icon: Icons.sell_outlined,
               action: _ChatAction.searchBrand,
@@ -631,7 +588,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             icon: Icons.chat_rounded,
             action: _ChatAction.whatsapp,
             whatsappText:
-                'Hola Mundicam, necesito asesoramiento sobre un proyecto profesional.',
+            'Hola MundiCam, necesito asesoramiento sobre un proyecto profesional.',
           ),
           const _ChatOption(
             label: 'Volver',
@@ -642,7 +599,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       );
     }
 
-    // Nodos de FAQ ------------------------------------------------
     for (final faq in _faqs) {
       nodes['faq_${faq.key}'] = _ChatNode(
         prompt: faq.answer,
@@ -660,10 +616,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     return nodes;
   }
 
-  // ---------------------------------------------------------------
-  // HELPERS DE CONSTRUCCIÓN DE NODOS
-  // ---------------------------------------------------------------
-
   _ChatOption _faqOption(String key) {
     final faq = _faqs.firstWhere((item) => item.key == key);
     return _ChatOption(
@@ -673,13 +625,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     );
   }
 
-  // ---------------------------------------------------------------
-  // MANEJO DEL CHAT
-  // ---------------------------------------------------------------
-
   void _toggleChat() {
     final isOpen = ref.read(chatBoxProvider);
     ref.read(chatBoxProvider.notifier).state = !isOpen;
+
     if (isOpen) {
       FocusScope.of(context).unfocus();
     } else {
@@ -699,30 +648,33 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       _isTyping = false;
       _inputController.clear();
     });
+
     _scrollToBottom();
   }
 
   void _addMessage(_ChatSender sender, String text) {
     if (!mounted) return;
+
     setState(() {
       _messages.add(_ChatMessage(sender: sender, text: text));
     });
+
     _scrollToBottom();
   }
 
   Future<void> _simulateTyping({int milliseconds = 450}) async {
     if (!mounted) return;
+
     setState(() => _isTyping = true);
     _scrollToBottom();
+
     await Future.delayed(Duration(milliseconds: milliseconds));
+
     if (!mounted) return;
+
     setState(() => _isTyping = false);
     _scrollToBottom();
   }
-
-  // ---------------------------------------------------------------
-  // PROCESAMIENTO DE TEXTO
-  // ---------------------------------------------------------------
 
   String _normalize(String input) {
     return input
@@ -744,16 +696,19 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
 
   String? _detectBrand(String text) {
     final normalized = _normalize(text);
+
     for (final entry in _brandMap.entries) {
       if (normalized.contains(entry.key)) {
         return entry.value;
       }
     }
+
     return null;
   }
 
   bool _looksLikeReference(String raw) {
     final value = raw.trim().toUpperCase();
+
     return RegExp(r'[A-Z]{2,}[-_][A-Z0-9]').hasMatch(value) ||
         RegExp(r'\b[A-Z]{2,}[0-9]{2,}[A-Z0-9-]*\b').hasMatch(value) ||
         value.startsWith('IPC') ||
@@ -764,27 +719,27 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         value.startsWith('DH-');
   }
 
-  // ---------------------------------------------------------------
-  // NAVEGACIÓN POR NODOS Y OPCIONES
-  // ---------------------------------------------------------------
-
   void _showNode(String key) {
     final node = _nodes[key];
     if (node == null) return;
+
     setState(() {
       _currentNodeKey = key;
       _contextOptions = null;
     });
+
     _addMessage(_ChatSender.bot, node.prompt);
   }
 
   Future<void> _handleOption(_ChatOption option) async {
     if (_isTyping) return;
+
     FocusScope.of(context).unfocus();
     _addMessage(_ChatSender.user, option.label);
 
     if (option.requiresLogin) {
       final user = ref.read(currentUserProvider).value;
+
       if (user == null) {
         await _simulateTyping(milliseconds: 300);
         _addMessage(
@@ -811,10 +766,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     }
   }
 
-  // ---------------------------------------------------------------
-  // EJECUCIÓN DE ACCIONES
-  // ---------------------------------------------------------------
-
   Future<void> _handleAction(_ChatOption option) async {
     switch (option.action!) {
       case _ChatAction.openCatalog:
@@ -826,12 +777,14 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
 
       case _ChatAction.searchBrand:
         final brand = option.brandName;
+
         if (brand == null) return;
+
         _addMessage(
           _ChatSender.bot,
-          'Te llevo al catálogo para buscar $brand. Si el filtro automático no '
-          'se aplica, escribe "$brand" en el buscador del catálogo.',
+          'Te llevo al catálogo para buscar $brand. Si el filtro automático no se aplica, escribe "$brand" en el buscador del catálogo.',
         );
+
         _openCatalog(searchQuery: brand, brandName: brand);
         break;
 
@@ -846,7 +799,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       case _ChatAction.whatsapp:
         await _openWhatsApp(
           option.whatsappText ??
-              'Hola Mundicam, necesito ayuda desde la app profesional.',
+              'Hola MundiCam, necesito ayuda desde la app profesional.',
         );
         break;
 
@@ -863,7 +816,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
             scheme: 'mailto',
             path: _email,
             queryParameters: {
-              'subject': option.emailSubject ?? 'Consulta desde App Mundicam',
+              'subject': option.emailSubject ?? 'Consulta desde App MundiCam',
             },
           ),
           errorMessage: 'No he podido abrir el correo.',
@@ -882,12 +835,15 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
 
   void _openCatalog({String? searchQuery, String? brandName}) {
     final args = <String, String>{};
+
     if (searchQuery != null && searchQuery.trim().isNotEmpty) {
       args['searchQuery'] = searchQuery.trim();
     }
+
     if (brandName != null && brandName.trim().isNotEmpty) {
       args['brandName'] = brandName.trim();
     }
+
     _navigateTo(const ProductosPage(), arguments: args.isEmpty ? null : args);
   }
 
@@ -898,8 +854,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         settings: RouteSettings(arguments: arguments),
       ),
     );
+
     Future.delayed(const Duration(milliseconds: 350), () {
       if (!mounted) return;
+
       ref.read(chatBoxProvider.notifier).state = false;
       FocusScope.of(context).unfocus();
     });
@@ -914,12 +872,13 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
   }
 
   Future<void> _safeLaunch(
-    Uri uri, {
-    LaunchMode mode = LaunchMode.platformDefault,
-    required String errorMessage,
-  }) async {
+      Uri uri, {
+        LaunchMode mode = LaunchMode.platformDefault,
+        required String errorMessage,
+      }) async {
     try {
       final launched = await launchUrl(uri, mode: mode);
+
       if (!launched) {
         _addMessage(_ChatSender.bot, '⚠️ $errorMessage');
       }
@@ -928,23 +887,20 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     }
   }
 
-  // ---------------------------------------------------------------
-  // TEXTO LIBRE DEL USUARIO
-  // ---------------------------------------------------------------
-
   Future<void> _handleFreeText() async {
     final raw = _inputController.text.trim();
+
     if (raw.isEmpty || _isTyping) return;
 
     _inputController.clear();
     _addMessage(_ChatSender.user, raw);
+
     await _simulateTyping(milliseconds: 550);
 
     if (!mounted) return;
 
     final normalized = _normalize(raw);
 
-    // Detección de marca
     final brand = _detectBrand(raw);
     if (brand != null) {
       _setContextOptions([
@@ -964,17 +920,18 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           icon: Icons.chat_rounded,
           action: _ChatAction.whatsapp,
           whatsappText:
-              'Hola Mundicam, necesito asesoramiento comercial sobre una marca o producto.',
+          'Hola MundiCam, necesito asesoramiento comercial sobre una marca o producto.',
         ),
       ]);
+
       _addMessage(
         _ChatSender.bot,
-        'He detectado la marca $brand. ¿Quieres ver productos o contactar con Mundicam?',
+        'He detectado la marca $brand. ¿Quieres ver productos o contactar con MundiCam?',
       );
+
       return;
     }
 
-    // Detección de referencia
     if (_looksLikeReference(raw)) {
       _setContextOptions([
         _ChatOption(
@@ -988,31 +945,30 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           icon: Icons.chat_rounded,
           action: _ChatAction.whatsapp,
           whatsappText:
-              'Hola Mundicam, necesito ayuda para localizar una referencia de producto.',
+          'Hola MundiCam, necesito ayuda para localizar una referencia de producto.',
         ),
       ]);
+
       _addMessage(
         _ChatSender.bot,
         'Parece una referencia o SKU. Puedo buscarla en catálogo o ayudarte por WhatsApp.',
       );
+
       return;
     }
 
-    // Detección de categoría
     final category = _detectCategory(normalized);
     if (category != null) {
       _showNode('cat_${category.key}');
       return;
     }
 
-    // Detección de intención (FAQ)
     final intentNode = _detectIntent(normalized);
     if (intentNode != null) {
       _showNode(intentNode);
       return;
     }
 
-    // Saludos
     if (_containsAny(normalized, [
       'hola',
       'buenas',
@@ -1021,18 +977,16 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     ])) {
       _addMessage(
         _ChatSender.bot,
-        '¡Hola! 😊 Puedes escribir una marca, referencia o elegir una opción rápida.',
+        '¡Hola! Puedes escribir una marca, referencia o elegir una opción rápida.',
       );
       return;
     }
 
-    // Agradecimientos
     if (_containsAny(normalized, ['gracias', 'perfecto', 'ok', 'vale'])) {
-      _addMessage(_ChatSender.bot, '¡De nada! ¿Te ayudo con algo más?');
+      _addMessage(_ChatSender.bot, 'De nada. ¿Te ayudo con algo más?');
       return;
     }
 
-    // Fallback
     _setContextOptions([
       const _ChatOption(
         label: 'Abrir catálogo',
@@ -1045,23 +999,19 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         nextNodeKey: 'faq_pedido',
       ),
       const _ChatOption(
-        label: 'Contactar Mundicam',
+        label: 'Contactar MundiCam',
         icon: Icons.chat_rounded,
         action: _ChatAction.whatsapp,
         whatsappText:
-            'Hola Mundicam, necesito ayuda con una consulta desde la app.',
+        'Hola MundiCam, necesito ayuda con una consulta desde la app.',
       ),
     ]);
+
     _addMessage(
       _ChatSender.bot,
-      'No he podido identificar exactamente tu consulta. Prueba con una marca, '
-      'referencia, "cámaras", "alarmas", "pedido", "RMA" o "presupuesto".',
+      'No he podido identificar exactamente tu consulta. Prueba con una marca, referencia, "cámaras", "alarmas", "pedido", "RMA" o "presupuesto".',
     );
   }
-
-  // ---------------------------------------------------------------
-  // DETECCIÓN DE CATEGORÍAS E INTENCIONES
-  // ---------------------------------------------------------------
 
   _CategoryDef? _detectCategory(String normalized) {
     final checks = <String, List<String>>{
@@ -1132,6 +1082,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         return _categories.firstWhere((category) => category.key == entry.key);
       }
     }
+
     return null;
   }
 
@@ -1172,6 +1123,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         return entry.key;
       }
     }
+
     return null;
   }
 
@@ -1188,13 +1140,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     });
   }
 
-  // ---------------------------------------------------------------
-  // SCROLL
-  // ---------------------------------------------------------------
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
+
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
         duration: const Duration(milliseconds: 240),
@@ -1202,10 +1151,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       );
     });
   }
-
-  // ---------------------------------------------------------------
-  // BUILD PRINCIPAL
-  // ---------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -1215,20 +1160,19 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     final size = MediaQuery.sizeOf(context);
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
 
-    final panelWidth = math.min(size.width - 24, 360.0);
+    final panelWidth = math.min(size.width - 24, 370.0);
     final panelHeight = math.max(
-      320.0,
-      math.min(520.0, size.height - bottomInset - 138),
+      330.0,
+      math.min(520.0, size.height - bottomInset - 148),
     );
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        // Panel del chat ------------------------------------------
         if (isOpen)
           Positioned(
             right: 12,
-            bottom: 92 + bottomInset,
+            bottom: 76 + bottomInset,
             width: panelWidth,
             height: panelHeight,
             child: AnimatedScale(
@@ -1239,30 +1183,25 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
               child: _buildChatPanel(visibleOptions),
             ),
           ),
-
-        // Botón flotante ------------------------------------------
-        Positioned(right: 16, bottom: 18, child: _buildFloatingButton(isOpen)),
+        Positioned(
+          right: 14,
+          bottom: 16,
+          child: _buildFloatingButton(isOpen),
+        ),
       ],
     );
   }
 
-  // ---------------------------------------------------------------
-  // PANEL DEL CHAT
-  // ---------------------------------------------------------------
-
   Widget _buildChatPanel(List<_ChatOption> visibleOptions) {
     return Material(
-      elevation: 20,
-      borderRadius: BorderRadius.circular(28),
-      shadowColor: _greenDark.withValues(alpha: 0.3),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(24),
+      shadowColor: Colors.black.withValues(alpha: 0.16),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFFF8F9FB),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: _greenLight.withValues(alpha: 0.3),
-            width: 1.2,
-          ),
+          color: _surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: _border, width: 1.1),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -1277,6 +1216,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
                   if (_isTyping && index == _messages.length) {
                     return const _TypingIndicator();
                   }
+
                   return _buildBubble(_messages[index]);
                 },
               ),
@@ -1289,188 +1229,184 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     );
   }
 
-  // ---------------------------------------------------------------
-  // BOTÓN FLOTANTE
-  // ---------------------------------------------------------------
-
   Widget _buildFloatingButton(bool isOpen) {
     return GestureDetector(
       onTap: _toggleChat,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 240),
+        duration: const Duration(milliseconds: 230),
         curve: Curves.easeOutCubic,
-        width: isOpen ? 60 : 154,
-        height: 60,
-        padding: EdgeInsets.only(left: isOpen ? 0 : 12, right: isOpen ? 0 : 14),
+        width: isOpen ? 46 : 106,
+        height: 42,
+        padding: EdgeInsets.symmetric(horizontal: isOpen ? 0 : 8),
         decoration: BoxDecoration(
-          gradient: isOpen
-              ? null
-              : const LinearGradient(
-                  colors: [_greenPrimary, _greenLight],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-          color: isOpen ? Colors.white : null,
-          borderRadius: BorderRadius.circular(30),
+          color: isOpen ? Colors.white : _dark,
+          borderRadius: BorderRadius.circular(isOpen ? 23 : 15),
           border: Border.all(
             color: isOpen
-                ? _greenPrimary.withValues(alpha: 0.3)
-                : Colors.white.withValues(alpha: 0.2),
-            width: isOpen ? 1.5 : 2,
+                ? _brandRed.withValues(alpha: 0.30)
+                : Colors.white.withValues(alpha: 0.10),
+            width: 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: _greenPrimary.withValues(alpha: isOpen ? 0.2 : 0.45),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
+              color: Colors.black.withValues(alpha: 0.14),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 180),
           child: isOpen
-              ? Center(
-                  key: const ValueKey('close'),
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: _greenSurface,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      color: _greenPrimary,
-                      size: 24,
-                    ),
-                  ),
-                )
+              ? const Icon(
+            Icons.close_rounded,
+            key: ValueKey('close'),
+            color: _brandRed,
+            size: 22,
+          )
               : Row(
-                  key: const ValueKey('help'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.25),
-                        borderRadius: BorderRadius.circular(17),
-                      ),
-                      child: Image.asset(
-                        'assets/images/mundicamlogochatbox.png',
-                        width: 20,
-                        height: 20,
-                        fit: BoxFit.contain,
-                      ),
-                    ),
-                    const SizedBox(width: 9),
-                    const Expanded(
-                      child: Text(
-                        '¿Dudas?\nTe ayudo',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13.5,
-                          height: 1.05,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: Colors.greenAccent,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.greenAccent.withValues(alpha: 0.6),
-                            blurRadius: 6,
-                            spreadRadius: 1,
-                          ),
-                        ],
-                      ),
+            key: const ValueKey('help'),
+            children: [
+              Container(
+                width: 25,
+                height: 25,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Image.asset(
+                  'assets/images/mundicamlogochatbox.png',
+                  width: 18,
+                  height: 18,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.support_agent_rounded,
+                    color: _brandRedLight,
+                    size: 17,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  '¿Dudas?\nTe ayudo',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10.8,
+                    height: 1.02,
+                    fontWeight: FontWeight.w900,
+                    fontFamily: 'Oswald',
+                  ),
+                ),
+              ),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: _onlineGreen,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: _onlineGreen.withValues(alpha: 0.50),
+                      blurRadius: 5,
+                      spreadRadius: 0.8,
                     ),
                   ],
                 ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
-
-  // ---------------------------------------------------------------
-  // HEADER DEL CHAT
-  // ---------------------------------------------------------------
 
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [_greenPrimary, _greenLight],
+          colors: [_brandRed, _brandRedDark],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(28),
-          topRight: Radius.circular(28),
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
         ),
       ),
       child: Row(
         children: [
           Container(
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(20),
+              color: _dark,
+              borderRadius: BorderRadius.circular(14),
             ),
-            padding: const EdgeInsets.all(3),
-            child: CircleAvatar(
-              backgroundColor: Colors.white24,
-              radius: 18,
+            child: Center(
               child: Image.asset(
                 'assets/images/mundicamlogochatbox.png',
-                width: 22,
-                height: 22,
+                width: 28,
+                height: 28,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Icon(
+                  Icons.support_agent_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
             ),
           ),
           const SizedBox(width: 11),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Asistente Mundicam',
+                const Text(
+                  'Asistente MundiCam',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w900,
                     fontSize: 16,
                     fontFamily: 'Oswald',
                   ),
                 ),
-                SizedBox(height: 2),
-                Text(
-                  'Ayuda rápida para profesionales',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 11.5,
-                  ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: const BoxDecoration(
+                        color: _onlineGreen,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Operativo · ayuda rápida profesional',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(
-              Icons.refresh_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
             onPressed: _resetChat,
             tooltip: 'Reiniciar',
             style: IconButton.styleFrom(
@@ -1482,11 +1418,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           ),
           const SizedBox(width: 4),
           IconButton(
-            icon: const Icon(
-              Icons.close_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
+            icon: const Icon(Icons.close_rounded, color: Colors.white),
             onPressed: _toggleChat,
             tooltip: 'Cerrar',
             style: IconButton.styleFrom(
@@ -1501,12 +1433,9 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     );
   }
 
-  // ---------------------------------------------------------------
-  // BURBUJA DE MENSAJE
-  // ---------------------------------------------------------------
-
   Widget _buildBubble(_ChatMessage msg) {
     final isBot = msg.sender == _ChatSender.bot;
+
     return Align(
       alignment: isBot ? Alignment.centerLeft : Alignment.centerRight,
       child: Container(
@@ -1515,63 +1444,46 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           left: isBot ? 0 : 38,
           right: isBot ? 38 : 0,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        constraints: const BoxConstraints(maxWidth: 280),
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
+        constraints: const BoxConstraints(maxWidth: 285),
         decoration: BoxDecoration(
-          gradient: isBot
-              ? null
-              : const LinearGradient(
-                  colors: [_greenPrimary, _greenLight],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-          color: isBot ? Colors.white : null,
+          color: isBot ? Colors.white : _brandRed,
           borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(22),
-            topRight: const Radius.circular(22),
-            bottomLeft: Radius.circular(isBot ? 8 : 22),
-            bottomRight: Radius.circular(isBot ? 22 : 8),
+            topLeft: const Radius.circular(20),
+            topRight: const Radius.circular(20),
+            bottomLeft: Radius.circular(isBot ? 8 : 20),
+            bottomRight: Radius.circular(isBot ? 20 : 8),
           ),
           boxShadow: [
             BoxShadow(
-              color: (isBot ? Colors.black : _greenPrimary).withValues(
-                alpha: 0.08,
-              ),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
             ),
           ],
-          border: isBot
-              ? Border.all(color: _greenLight.withValues(alpha: 0.15), width: 1)
-              : null,
+          border: isBot ? Border.all(color: _border, width: 1) : null,
         ),
         child: Text(
           msg.text,
           style: TextStyle(
-            color: isBot ? const Color(0xFF111827) : Colors.white,
+            color: isBot ? _dark : Colors.white,
             fontSize: 13.4,
             height: 1.42,
-            fontWeight: isBot ? FontWeight.w500 : FontWeight.w600,
+            fontWeight: isBot ? FontWeight.w500 : FontWeight.w700,
           ),
         ),
       ),
     );
   }
 
-  // ---------------------------------------------------------------
-  // OPCIONES RÁPIDAS
-  // ---------------------------------------------------------------
-
   Widget _buildQuickOptions(List<_ChatOption> options) {
     return Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxHeight: 134),
       padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: _greenLight.withValues(alpha: 0.2)),
-        ),
+        border: Border(top: BorderSide(color: _border)),
       ),
       child: SingleChildScrollView(
         child: Wrap(
@@ -1593,22 +1505,15 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: const Color(0xFFF9FAFB),
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _greenPrimary.withValues(alpha: 0.5)),
-            boxShadow: [
-              BoxShadow(
-                color: _greenPrimary.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
+            border: Border.all(color: _brandRed.withValues(alpha: 0.28)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (option.icon != null) ...[
-                Icon(option.icon, size: 16, color: _greenPrimary),
+                Icon(option.icon, size: 16, color: _brandRed),
                 const SizedBox(width: 6),
               ],
               ConstrainedBox(
@@ -1618,9 +1523,9 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: _greenPrimary,
+                    color: _dark,
                     fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
@@ -1631,18 +1536,14 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     );
   }
 
-  // ---------------------------------------------------------------
-  // INPUT DE TEXTO
-  // ---------------------------------------------------------------
-
   Widget _buildInput() {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
+          bottomLeft: Radius.circular(24),
+          bottomRight: Radius.circular(24),
         ),
       ),
       child: Row(
@@ -1655,10 +1556,13 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
               maxLines: 2,
               textInputAction: TextInputAction.send,
               enabled: !_isTyping,
-              cursorColor: _greenPrimary,
+              cursorColor: _brandRed,
               decoration: InputDecoration(
                 hintText: 'Escribe aquí tu duda...',
-                hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                hintStyle: TextStyle(
+                  color: Colors.grey.shade400,
+                  fontSize: 13,
+                ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 10,
@@ -1671,15 +1575,12 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
                   borderRadius: BorderRadius.circular(26),
                   borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(26),
-                  borderSide: const BorderSide(
-                    color: _greenPrimary,
-                    width: 1.5,
-                  ),
+                focusedBorder: const OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(26)),
+                  borderSide: BorderSide(color: _brandRed, width: 1.5),
                 ),
                 filled: true,
-                fillColor: const Color(0xFFF8F9FB),
+                fillColor: _surface,
               ),
               onSubmitted: (_) => _handleFreeText(),
             ),
@@ -1687,24 +1588,17 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           const SizedBox(width: 8),
           Container(
             decoration: BoxDecoration(
-              gradient: _isTyping
-                  ? null
-                  : const LinearGradient(
-                      colors: [_greenPrimary, _greenLight],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-              color: _isTyping ? Colors.grey.shade300 : null,
+              color: _isTyping ? Colors.grey.shade300 : _brandRed,
               shape: BoxShape.circle,
               boxShadow: _isTyping
                   ? null
                   : [
-                      BoxShadow(
-                        color: _greenPrimary.withValues(alpha: 0.35),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+                BoxShadow(
+                  color: _brandRed.withValues(alpha: 0.25),
+                  blurRadius: 9,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: IconButton(
               icon: const Icon(
@@ -1742,14 +1636,20 @@ class _ChatMessage {
   final _ChatSender sender;
   final String text;
 
-  const _ChatMessage({required this.sender, required this.text});
+  const _ChatMessage({
+    required this.sender,
+    required this.text,
+  });
 }
 
 class _ChatNode {
   final String prompt;
   final List<_ChatOption> options;
 
-  const _ChatNode({required this.prompt, required this.options});
+  const _ChatNode({
+    required this.prompt,
+    required this.options,
+  });
 }
 
 class _ChatOption {
@@ -1868,14 +1768,19 @@ class _TypingDotState extends State<_TypingDot>
   @override
   void initState() {
     super.initState();
+
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 650),
     );
+
     _opacity = Tween<double>(
       begin: 0.25,
       end: 1,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    ).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+
     Future.delayed(Duration(milliseconds: widget.delay), () {
       if (mounted) {
         _controller.repeat(reverse: true);
@@ -1897,7 +1802,7 @@ class _TypingDotState extends State<_TypingDot>
         width: 8,
         height: 8,
         decoration: BoxDecoration(
-          color: _ChatBoxState._greenPrimary.withValues(alpha: 0.55),
+          color: _ChatBoxState._brandRed.withValues(alpha: 0.55),
           shape: BoxShape.circle,
         ),
       ),
