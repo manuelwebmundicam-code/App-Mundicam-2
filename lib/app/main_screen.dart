@@ -28,6 +28,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
   List.generate(5, (_) => GlobalKey<NavigatorState>());
 
   int _selectedIndex = 0;
+
+  // Guarda desde qué pestaña venimos antes de entrar al carrito.
+  // Así la flecha del carrito puede volver a la pantalla anterior real.
+  int _lastIndexBeforeCart = 0;
+
   bool _loadBadges = false;
   Set<String> _confirmedQuoteIds = <String>{};
 
@@ -93,6 +98,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
       }) {
     if (index < 0 || index >= _navigatorKeys.length) return;
 
+    // Si vamos al carrito desde otra pestaña, guardamos la pestaña origen.
+    if (index == 4 && _selectedIndex != 4) {
+      _lastIndexBeforeCart = _selectedIndex;
+    }
+
     setState(() {
       _selectedIndex = index;
 
@@ -110,6 +120,19 @@ class _MainScreenState extends ConsumerState<MainScreen>
         }
       });
     }
+  }
+
+  void _goBackFromCart() {
+    final targetIndex = _lastIndexBeforeCart;
+
+    if (targetIndex == 4) {
+      _switchToTab(0);
+      return;
+    }
+
+    // No usamos popToRoot aquí, porque queremos volver exactamente
+    // donde estaba el usuario: categoría, búsqueda, marca o detalle.
+    _switchToTab(targetIndex);
   }
 
   void _onItemTapped(int index) {
@@ -240,6 +263,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
               index: 4,
               child: CartPage(
                 onGoHome: () => _switchToTab(0, popToRoot: true),
+                onGoBack: _goBackFromCart,
               ),
             ),
           ],
