@@ -1,12 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:mundicam/features/catalog/data/models/category_model.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 class CategoryGrid extends ConsumerWidget {
-  const CategoryGrid({super.key});
+  final VoidCallback? onGoCart;
+  final VoidCallback? onGoQuotes;
+
+  const CategoryGrid({
+    super.key,
+    this.onGoCart,
+    this.onGoQuotes,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -21,7 +29,9 @@ class CategoryGrid extends ConsumerWidget {
       ),
       error: (error, stack) => const SizedBox(
         height: 100,
-        child: Center(child: Text('Error al cargar categorías')),
+        child: Center(
+          child: Text('Error al cargar categorías'),
+        ),
       ),
       data: (categories) {
         final visibleCategories = categories.take(8).toList();
@@ -40,15 +50,17 @@ class CategoryGrid extends ConsumerWidget {
             ),
             itemBuilder: (context, index) {
               final category = visibleCategories[index];
+
               return CategoryCard(
                 category: category,
                 onTap: () {
-                  Navigator.push(
-                    context,
+                  Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (context) => ProductosPorCategoriaScreen(
                         categoryId: category.id,
                         categoryName: category.name,
+                        onGoCart: onGoCart,
+                        onGoQuotes: onGoQuotes,
                       ),
                     ),
                   );
@@ -66,23 +78,37 @@ class CategoryCard extends StatelessWidget {
   final CategoryModel category;
   final VoidCallback onTap;
 
-  const CategoryCard({required this.category, required this.onTap, super.key});
+  const CategoryCard({
+    super.key,
+    required this.category,
+    required this.onTap,
+  });
 
   String _mapNameToAsset(String name) {
-    String n = name.toUpperCase();
+    final String n = name.toUpperCase();
+
     if (n.contains('TARJETA') || n.contains('M2M') || n.contains('WISM')) {
       return 'TARJETAS';
     }
+
     if (n.contains('CCTV')) return 'CCTV';
     if (n.contains('IP HD')) return 'IP HD';
     if (n.contains('INTRUSION')) return 'INTRUSION';
+    if (n.contains('INTRUSIÓN')) return 'INTRUSION';
     if (n.contains('ACCESOS')) return 'ACCESOS';
     if (n.contains('NETWORKING')) return 'NETWORKING';
     if (n.contains('NIEBLA')) return 'NIEBLA DE SEGURIDAD';
     if (n.contains('INCENDIO')) return 'CONTRA INCENDIOS';
     if (n.contains('HURTO')) return 'ANTI HURTO';
     if (n.contains('COMPLEMENTOS')) return 'COMPLEMENTOS';
-    return n.replaceAll('Ó', 'O').replaceAll('Á', 'A').trim();
+
+    return n
+        .replaceAll('Ó', 'O')
+        .replaceAll('Á', 'A')
+        .replaceAll('É', 'E')
+        .replaceAll('Í', 'I')
+        .replaceAll('Ú', 'U')
+        .trim();
   }
 
   @override
@@ -107,7 +133,6 @@ class CategoryCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(15),
           child: Stack(
             children: [
-              // Imagen de fondo
               Positioned.fill(
                 child: Image.asset(
                   assetPath,
@@ -121,7 +146,6 @@ class CategoryCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Degradado para legibilidad del texto
               Positioned.fill(
                 child: Container(
                   decoration: BoxDecoration(
@@ -137,7 +161,6 @@ class CategoryCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Texto de la categoría
               Positioned(
                 bottom: 10,
                 left: 8,

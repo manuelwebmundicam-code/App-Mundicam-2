@@ -1,32 +1,35 @@
 import 'dart:async';
 
-import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mundicam/features/catalog/data/models/producto.dart';
-import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
-import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
-import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
-import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
-import 'package:mundicam/core/firebase/firebase_service.dart';
+
 import 'package:mundicam/core/cache/image_cache_service.dart';
-import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.dart';
-import 'package:mundicam/shared/theme/app_theme.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
-import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
+import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
+import 'package:mundicam/features/catalog/data/models/producto.dart';
+import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
+import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
+import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
+import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.dart';
+import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
+import 'package:mundicam/shared/theme/app_theme.dart';
 
 class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
   final int categoryId;
   final String categoryName;
+  final VoidCallback? onGoCart;
+  final VoidCallback? onGoQuotes;
 
   const ProductosPorCategoriaScreen({
     super.key,
     required this.categoryId,
     required this.categoryName,
+    this.onGoCart,
+    this.onGoQuotes,
   });
 
   @override
@@ -94,6 +97,7 @@ class _ProductosPorCategoriaScreenState
     final productosState = ref.watch(
       productsPaginatedProvider(widget.categoryId),
     );
+
     final notifier = ref.watch(
       productsPaginatedProvider(widget.categoryId).notifier,
     );
@@ -126,7 +130,11 @@ class _ProductosPorCategoriaScreenState
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.search_off, size: 64, color: Colors.grey),
+              const Icon(
+                Icons.search_off,
+                size: 64,
+                color: Colors.grey,
+              ),
               const SizedBox(height: 16),
               const Text(
                 'No hay productos con estos filtros',
@@ -137,7 +145,7 @@ class _ProductosPorCategoriaScreenState
                 onPressed: () =>
                     ref.read(productFilterProvider.notifier).reset(),
                 icon: const Icon(Icons.refresh),
-                label: const Text("Limpiar filtros"),
+                label: const Text('Limpiar filtros'),
               ),
             ],
           ),
@@ -169,6 +177,8 @@ class _ProductosPorCategoriaScreenState
               key: ValueKey(productosState[index].id),
               p: productosState[index],
               firebase: _firebase,
+              onGoCart: widget.onGoCart,
+              onGoQuotes: widget.onGoQuotes,
             );
           },
         ),
@@ -180,11 +190,15 @@ class _ProductosPorCategoriaScreenState
 class ProductTile extends ConsumerStatefulWidget {
   final Product p;
   final FirebaseService firebase;
+  final VoidCallback? onGoCart;
+  final VoidCallback? onGoQuotes;
 
   const ProductTile({
     super.key,
     required this.p,
     required this.firebase,
+    this.onGoCart,
+    this.onGoQuotes,
   });
 
   @override
@@ -230,6 +244,44 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     setState(() {
       cantidad++;
     });
+  }
+
+  void _goToCartKeepingTabs() {
+    if (widget.onGoCart != null) {
+      debugPrint('✅ onGoCart recibido en ProductTile. Cambiando a Carrito...');
+      widget.onGoCart!();
+      return;
+    }
+
+    debugPrint('❌ onGoCart es NULL en ProductTile');
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$cantidad x ${widget.p.name} añadido al carrito'),
+        backgroundColor: AppColors.primary,
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _goToQuotesKeepingTabs() {
+    if (widget.onGoQuotes != null) {
+      debugPrint('✅ onGoQuotes recibido en ProductTile. Cambiando a Presupuestos...');
+      widget.onGoQuotes!();
+      return;
+    }
+
+    debugPrint('❌ onGoQuotes es NULL en ProductTile');
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Producto añadido al presupuesto'),
+        backgroundColor: AppColors.primary,
+        duration: Duration(seconds: 1),
+      ),
+    );
   }
 
   Future<String?> _getCurrentUserEmail() async {
@@ -283,11 +335,13 @@ class _ProductTileState extends ConsumerState<ProductTile> {
           children: [
             InkWell(
               onTap: () {
-                Navigator.push(
-                  context,
+                Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (context) =>
-                        ProductDetailScreen(product: widget.p),
+                    builder: (context) => ProductDetailScreen(
+                      product: widget.p,
+                      onGoCart: widget.onGoCart,
+                      onGoQuotes: widget.onGoQuotes,
+                    ),
                   ),
                 );
               },
@@ -317,7 +371,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _tieneStock ? "● Disponible" : "○ Sin stock",
+                          _tieneStock ? '● Disponible' : '○ Sin stock',
                           style: TextStyle(
                             fontSize: 11,
                             color: _tieneStock ? Colors.green : Colors.red,
@@ -328,7 +382,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         Text(
                           widget.p.shortDescription.isNotEmpty
                               ? widget.p.shortDescription
-                              : "Sin descripción disponible",
+                              : 'Sin descripción disponible',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -356,7 +410,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
               ),
             ),
             const SizedBox(height: 10),
-
             Row(
               children: [
                 Expanded(
@@ -369,12 +422,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                             .read(cartProvider.notifier)
                             .addProduct(widget.p, cantidad);
 
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const CartPage(),
-                          ),
-                        );
+                        _goToCartKeepingTabs();
                       }
                           : null,
                       style: ElevatedButton.styleFrom(
@@ -389,7 +437,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         padding: const EdgeInsets.symmetric(vertical: 0),
                       ),
                       child: Text(
-                        _tieneStock ? "COMPRAR YA" : "SIN STOCK",
+                        _tieneStock ? 'COMPRAR YA' : 'SIN STOCK',
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -419,7 +467,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                             }
                           }),
                           Text(
-                            "$cantidad",
+                            '$cantidad',
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.bold,
@@ -440,7 +488,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
               ],
             ),
             const SizedBox(height: 8),
-
             Row(
               children: [
                 Expanded(
@@ -457,7 +504,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              "$cantidad x ${widget.p.name} añadido al carrito",
+                              '$cantidad x ${widget.p.name} añadido al carrito',
                             ),
                             backgroundColor: AppColors.primary,
                             duration: const Duration(seconds: 1),
@@ -478,7 +525,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         padding: const EdgeInsets.symmetric(vertical: 0),
                       ),
                       child: Text(
-                        _tieneStock ? "AÑADIR AL CARRITO" : "SIN STOCK",
+                        _tieneStock ? 'AÑADIR AL CARRITO' : 'SIN STOCK',
                         style: TextStyle(
                           fontSize: 10,
                           color: _tieneStock
@@ -513,7 +560,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         color: Colors.orange.shade700,
                       ),
                       label: Text(
-                        _isAddingToQuote ? "..." : "PRESUPUESTO",
+                        _isAddingToQuote ? '...' : 'PRESUPUESTO',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
@@ -580,7 +627,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("No se pudo obtener tu email."),
+              content: Text('No se pudo obtener tu email.'),
               backgroundColor: Colors.red,
               behavior: SnackBarBehavior.floating,
             ),
@@ -591,7 +638,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       }
 
       if (product.id == 0) {
-        throw Exception("ID de producto no válido.");
+        throw Exception('ID de producto no válido.');
       }
 
       final precioDouble =
@@ -608,7 +655,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       if (!mounted) return;
 
       if (!ok) {
-        throw Exception("No se pudo añadir el producto al presupuesto.");
+        throw Exception('No se pudo añadir el producto al presupuesto.');
       }
 
       ref.invalidate(quotesProvider);
@@ -617,7 +664,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            "$cantidad x ${product.name} añadido al presupuesto",
+            '$cantidad x ${product.name} añadido al presupuesto',
           ),
           backgroundColor: Colors.green.shade700,
           behavior: SnackBarBehavior.floating,
@@ -625,12 +672,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
           action: SnackBarAction(
             label: 'VER',
             textColor: Colors.white,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const QuotesPage()),
-              );
-            },
+            onPressed: _goToQuotesKeepingTabs,
           ),
         ),
       );
@@ -640,7 +682,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Error: $e"),
+            content: Text('Error: $e'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
@@ -686,8 +728,11 @@ class ProductImage extends StatelessWidget {
           memCacheHeight: 160,
           cacheKey: p.imageUrl,
           placeholder: (_, __) => Container(color: Colors.grey[100]),
-          errorWidget: (_, __, ___) =>
-          const Icon(Icons.broken_image, color: Colors.grey, size: 30),
+          errorWidget: (_, __, ___) => const Icon(
+            Icons.broken_image,
+            color: Colors.grey,
+            size: 30,
+          ),
           fadeOutDuration: const Duration(milliseconds: 150),
           fadeInDuration: const Duration(milliseconds: 150),
         ),

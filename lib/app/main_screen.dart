@@ -24,6 +24,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
     with WidgetsBindingObserver {
   static const String _confirmedQuoteIdsKey = 'mundicam_confirmed_quote_ids';
 
+  final List<GlobalKey<NavigatorState>> _navigatorKeys =
+  List.generate(5, (_) => GlobalKey<NavigatorState>());
+
   int _selectedIndex = 0;
   bool _loadBadges = false;
   Set<String> _confirmedQuoteIds = <String>{};
@@ -32,6 +35,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
     _loadConfirmedQuoteIds();
 
     Future.delayed(const Duration(milliseconds: 700), () {
@@ -66,6 +70,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     };
 
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setStringList(
       _confirmedQuoteIdsKey,
       updatedIds.toList(),
@@ -82,8 +87,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
     ref.invalidate(cartBadgeProvider);
   }
 
-  void _onItemTapped(int index) {
-    if (_selectedIndex == index) return;
+  void _switchToTab(
+      int index, {
+        bool popToRoot = false,
+      }) {
+    if (index < 0 || index >= _navigatorKeys.length) return;
 
     setState(() {
       _selectedIndex = index;
@@ -92,11 +100,42 @@ class _MainScreenState extends ConsumerState<MainScreen>
         _loadBadges = true;
       }
     });
+
+    if (popToRoot) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final navigator = _navigatorKeys[index].currentState;
+
+        if (navigator != null && navigator.canPop()) {
+          navigator.popUntil((route) => route.isFirst);
+        }
+      });
+    }
+  }
+
+  void _onItemTapped(int index) {
+    if (_selectedIndex == index) {
+      final navigator = _navigatorKeys[index].currentState;
+
+      if (navigator != null && navigator.canPop()) {
+        navigator.popUntil((route) => route.isFirst);
+      }
+
+      return;
+    }
+
+    _switchToTab(index);
   }
 
   Future<bool> _onWillPop() async {
+    final currentNavigator = _navigatorKeys[_selectedIndex].currentState;
+
+    if (currentNavigator != null && currentNavigator.canPop()) {
+      currentNavigator.pop();
+      return false;
+    }
+
     if (_selectedIndex != 0) {
-      _onItemTapped(0);
+      _switchToTab(0);
       return false;
     }
 
@@ -124,13 +163,24 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _visibleQuoteBadgeCount(int rawQuoteCount) {
     if (rawQuoteCount <= 0) return 0;
 
-    final confirmedCount = _confirmedQuoteIds.length;
-
-    if (confirmedCount <= 0) return rawQuoteCount;
-
-    final visibleCount = rawQuoteCount - confirmedCount;
+    final visibleCount = rawQuoteCount - _confirmedQuoteIds.length;
 
     return visibleCount > 0 ? visibleCount : 0;
+  }
+
+  Widget _buildTabNavigator({
+    required int index,
+    required Widget child,
+  }) {
+    return Navigator(
+      key: _navigatorKeys[index],
+      onGenerateRoute: (settings) {
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => child,
+        );
+      },
+    );
   }
 
   @override
@@ -156,19 +206,41 @@ class _MainScreenState extends ConsumerState<MainScreen>
         body: IndexedStack(
           index: _selectedIndex,
           children: [
-            const HomePage(),
-            const ProductosPage(),
-            OrdersPage(
-              onGoHome: () => _onItemTapped(0),
+            _buildTabNavigator(
+              index: 0,
+              child: HomePage(
+                onGoCart: () => _switchToTab(4, popToRoot: true),
+                onGoQuotes: () => _switchToTab(3, popToRoot: true),
+              ),
             ),
-            QuotesPage(
-              onGoHome: () => _onItemTapped(0),
-              onGoCart: () => _onItemTapped(4),
-              confirmedQuoteIds: _confirmedQuoteIds,
-              onQuotesConfirmed: _registerConfirmedQuotes,
+            _buildTabNavigator(
+              index: 1,
+              child: ProductosPage(
+                onGoHome: () => _switchToTab(0, popToRoot: true),
+                onGoCart: () => _switchToTab(4, popToRoot: true),
+                onGoQuotes: () => _switchToTab(3, popToRoot: true),
+              ),
             ),
-            CartPage(
-              onGoHome: () => _onItemTapped(0),
+            _buildTabNavigator(
+              index: 2,
+              child: OrdersPage(
+                onGoHome: () => _switchToTab(0, popToRoot: true),
+              ),
+            ),
+            _buildTabNavigator(
+              index: 3,
+              child: QuotesPage(
+                onGoHome: () => _switchToTab(0, popToRoot: true),
+                onGoCart: () => _switchToTab(4, popToRoot: true),
+                confirmedQuoteIds: _confirmedQuoteIds,
+                onQuotesConfirmed: _registerConfirmedQuotes,
+              ),
+            ),
+            _buildTabNavigator(
+              index: 4,
+              child: CartPage(
+                onGoHome: () => _switchToTab(0, popToRoot: true),
+              ),
             ),
           ],
         ),

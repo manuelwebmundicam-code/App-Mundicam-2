@@ -11,7 +11,14 @@ import 'package:mundicam/features/home/presentation/widgets/news_section.dart';
 import 'package:mundicam/features/home/presentation/widgets/academy_banner.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final VoidCallback? onGoCart;
+  final VoidCallback? onGoQuotes;
+
+  const HomePage({
+    super.key,
+    this.onGoCart,
+    this.onGoQuotes,
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -25,17 +32,17 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
 
-    // Primero se pinta la estructura principal.
     Future.delayed(const Duration(milliseconds: 250), () {
       if (!mounted) return;
+
       setState(() {
         _showSecondaryContent = true;
       });
     });
 
-    // El chatbox se carga un poco después para no bloquear el primer render.
     Future.delayed(const Duration(milliseconds: 800), () {
       if (!mounted) return;
+
       setState(() {
         _showChatBox = true;
       });
@@ -56,17 +63,25 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   children: [
                     const Header(),
+
+                    // De momento lo dejamos sin callbacks hasta actualizar search_bar.dart.
                     const SearchBarWidget(),
+
                     const MenuBarWidget(),
                     const SizedBox(height: 20),
 
                     _buildSectionTitle('CATEGORÍAS'),
                     const SizedBox(height: 10),
-                    const CategoryGrid(),
+
+                    CategoryGrid(
+                      onGoCart: widget.onGoCart,
+                      onGoQuotes: widget.onGoQuotes,
+                    ),
 
                     const SizedBox(height: 5),
 
                     if (_showSecondaryContent) ...[
+                      // De momento lo dejamos sin callbacks hasta actualizar brands_banner.dart.
                       const BrandsBanner(),
                       const SizedBox(height: 15),
                       const AcademyBanner(),

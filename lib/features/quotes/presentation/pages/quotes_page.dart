@@ -339,9 +339,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     if (widget.onGoCart != null) {
       widget.onGoCart!();
     }
-  }
-
-  Future<void> _deleteQuoteItem(
+  }Future<void> _deleteQuoteItem(
       QuoteMundicam quote,
       _QuoteLineItem item,
       ) async {
@@ -376,10 +374,18 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             (quoteItem) => quoteItem.productId == item.productId,
       );
 
+      final bool presupuestoVacio = updatedItems.isEmpty;
+
+      // Si el presupuesto se queda vacío, lo guardamos como oculto
+      // para que no vuelva a aparecer y para que baje la pelotita roja.
+      if (presupuestoVacio) {
+        await _saveConfirmedQuoteIds(<String>{quote.id});
+      }
+
       if (!mounted) return;
 
       setState(() {
-        if (updatedItems.isEmpty) {
+        if (presupuestoVacio) {
           _hiddenQuoteIds.add(quote.id);
           _quoteItemsCache[quote.id] = <_QuoteLineItem>[];
           _quoteItemsFutures.remove(quote.id);
@@ -395,10 +401,15 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
       ref.invalidate(quotesProvider);
       ref.invalidate(quoteBadgeProvider);
+      ref.invalidate(cartBadgeProvider);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${item.name} eliminado del presupuesto.'),
+          content: Text(
+            presupuestoVacio
+                ? 'Presupuesto eliminado.'
+                : '${item.name} eliminado del presupuesto.',
+          ),
           backgroundColor: Colors.green.shade700,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),

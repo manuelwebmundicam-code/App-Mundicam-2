@@ -4,22 +4,26 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'package:mundicam/core/network/api_service.dart';
-import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
-import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 class BusquedaResultadosPage extends ConsumerWidget {
   final String query;
+  final VoidCallback? onGoCart;
+  final VoidCallback? onGoQuotes;
 
-  const BusquedaResultadosPage({super.key, required this.query});
+  const BusquedaResultadosPage({
+    super.key,
+    required this.query,
+    this.onGoCart,
+    this.onGoQuotes,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -63,8 +67,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
             return _buildEmptyState(context, cleanedQuery);
           }
 
-          final List<String> detectedTerms =
-          _SearchEngine.detectedReadableTerms(cleanedQuery);
+          final List<String> detectedTerms = _SearchEngine.detectedReadableTerms(cleanedQuery);
 
           return Column(
             children: [
@@ -138,6 +141,8 @@ class BusquedaResultadosPage extends ConsumerWidget {
                     return ProductTileBusqueda(
                       p: productos[index],
                       firebase: firebase,
+                      onGoCart: onGoCart,
+                      onGoQuotes: onGoQuotes,
                     );
                   },
                 ),
@@ -238,8 +243,11 @@ class BusquedaResultadosPage extends ConsumerWidget {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                              BusquedaResultadosPage(query: suggestion),
+                          builder: (_) => BusquedaResultadosPage(
+                            query: suggestion,
+                            onGoCart: onGoCart,
+                            onGoQuotes: onGoQuotes,
+                          ),
                         ),
                       );
                     },
@@ -267,7 +275,6 @@ class BusquedaResultadosPage extends ConsumerWidget {
 // ------------------------------------------------------------
 // MOTOR LOCAL DE RELEVANCIA PARA BÚSQUEDA
 // ------------------------------------------------------------
-
 class _SearchEngine {
   static final Map<String, List<String>> _synonyms = {
     'camara': [
@@ -393,7 +400,6 @@ class _SearchEngine {
 
   static List<Product> sortByRelevance(List<Product> products, String query) {
     final List<String> terms = _expandedTerms(query);
-
     final List<_ScoredProduct> scored = products.map((product) {
       return _ScoredProduct(
         product: product,
@@ -404,7 +410,6 @@ class _SearchEngine {
     scored.sort((a, b) {
       final int byScore = b.score.compareTo(a.score);
       if (byScore != 0) return byScore;
-
       return a.product.name.compareTo(b.product.name);
     });
 
@@ -416,21 +421,18 @@ class _SearchEngine {
     final String name = _normalize(product.name);
     final String sku = _normalize(product.sku);
     final String description = _normalize(product.shortDescription);
-
     final String fullText = '$name $sku $description';
 
     int score = 0;
 
     if (sku.isNotEmpty && sku == normalizedQuery) score += 500;
     if (sku.isNotEmpty && sku.contains(normalizedQuery)) score += 300;
-
     if (name == normalizedQuery) score += 260;
     if (name.startsWith(normalizedQuery)) score += 210;
     if (name.contains(normalizedQuery)) score += 170;
 
     for (final brand in _knownBrands) {
       final String normalizedBrand = _normalize(brand);
-
       if (normalizedQuery.contains(normalizedBrand)) {
         if (name.contains(normalizedBrand)) score += 120;
         if (description.contains(normalizedBrand)) score += 60;
@@ -440,7 +442,6 @@ class _SearchEngine {
 
     for (final term in terms) {
       if (term.length < 2) continue;
-
       if (name.contains(term)) score += 38;
       if (sku.contains(term)) score += 45;
       if (description.contains(term)) score += 18;
@@ -448,7 +449,6 @@ class _SearchEngine {
     }
 
     if (product.isInstock) score += 8;
-
     if (name.contains('kit') && normalizedQuery.contains('kit')) score += 35;
     if (name.contains('poe') && normalizedQuery.contains('poe')) score += 35;
     if (name.contains('wifi') && normalizedQuery.contains('wifi')) score += 35;
@@ -463,7 +463,6 @@ class _SearchEngine {
 
   static List<String> _expandedTerms(String query) {
     final String normalized = _normalize(query);
-
     final Set<String> terms = {};
 
     for (final raw in normalized.split(' ')) {
@@ -475,12 +474,10 @@ class _SearchEngine {
 
     _synonyms.forEach((key, values) {
       final String normalizedKey = _normalize(key);
-
       if (normalized.contains(normalizedKey) ||
           values.any((v) => normalized.contains(_normalize(v)))) {
         for (final value in values) {
           final normalizedValue = _normalize(value);
-
           for (final part in normalizedValue.split(' ')) {
             if (part.trim().length >= 2) {
               terms.add(part.trim());
@@ -492,7 +489,6 @@ class _SearchEngine {
 
     for (final brand in _knownBrands) {
       final String normalizedBrand = _normalize(brand);
-
       if (normalized.contains(normalizedBrand)) {
         for (final part in normalizedBrand.split(' ')) {
           if (part.trim().length >= 2) {
@@ -632,7 +628,6 @@ class _SearchEngine {
     });
 
     text = text.replaceAll(RegExp(r'\s+'), ' ');
-
     return text.trim();
   }
 
@@ -686,20 +681,22 @@ class _ScoredProduct {
 // ------------------------------------------------------------
 // TILE PRODUCTO RESULTADO BÚSQUEDA
 // ------------------------------------------------------------
-
 class ProductTileBusqueda extends ConsumerStatefulWidget {
   final Product p;
   final FirebaseService firebase;
+  final VoidCallback? onGoCart;
+  final VoidCallback? onGoQuotes;
 
   const ProductTileBusqueda({
     super.key,
     required this.p,
     required this.firebase,
+    this.onGoCart,
+    this.onGoQuotes,
   });
 
   @override
-  ConsumerState<ProductTileBusqueda> createState() =>
-      _ProductTileBusquedaState();
+  ConsumerState<ProductTileBusqueda> createState() => _ProductTileBusquedaState();
 }
 
 class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
@@ -712,19 +709,62 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   String _formatearPrecio(double value) {
     if (value <= 0) return 'Bajo consulta';
-
     return '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
+  }
+
+  void _closeSearchStackAndGo(VoidCallback callback) {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.popUntil((route) => route.isFirst);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      callback();
+    });
+  }
+
+  void _goToCartKeepingTabs() {
+    final goCart = widget.onGoCart;
+    if (goCart != null) {
+      _closeSearchStackAndGo(goCart);
+      return;
+    }
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$cantidad x ${widget.p.name} añadido al carrito'),
+        backgroundColor: AppColors.primary,
+        duration: const Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _goToQuotesKeepingTabs() {
+    final goQuotes = widget.onGoQuotes;
+    if (goQuotes != null) {
+      _closeSearchStackAndGo(goQuotes);
+      return;
+    }
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Producto añadido al presupuesto'),
+        backgroundColor: AppColors.primary,
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<String?> _getCurrentUserEmail() async {
     final appUser = ref.read(currentUserProvider).value;
-
     if (appUser != null && appUser.email.trim().isNotEmpty) {
       return appUser.email.trim();
     }
 
     final user = FirebaseAuth.instance.currentUser;
-
     if (user == null) return null;
 
     try {
@@ -735,7 +775,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
       if (userDoc.exists && userDoc.data() != null) {
         final email = userDoc.data()?['email']?.toString();
-
         if (email != null && email.trim().isNotEmpty) {
           return email.trim();
         }
@@ -750,7 +789,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
     if (user.providerData.isNotEmpty) {
       final providerEmail = user.providerData.first.email;
-
       if (providerEmail != null && providerEmail.trim().isNotEmpty) {
         return providerEmail.trim();
       }
@@ -777,7 +815,11 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => ProductDetailScreen(product: p),
+                  builder: (context) => ProductDetailScreen(
+                    product: p,
+                    onGoCart: widget.onGoCart,
+                    onGoQuotes: widget.onGoQuotes,
+                  ),
                 ),
               );
             },
@@ -856,19 +898,12 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       ref
                           .read(cartProvider.notifier)
                           .addProduct(p, cantidad);
-
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const CartPage(),
-                        ),
-                      );
+                      _goToCartKeepingTabs();
                     }
                         : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: p.isInstock
-                          ? AppColors.primary
-                          : Colors.grey.shade400,
+                      backgroundColor:
+                      p.isInstock ? AppColors.primary : Colors.grey.shade400,
                       foregroundColor: Colors.white,
                       elevation: 1,
                       shape: RoundedRectangleBorder(
@@ -949,7 +984,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       ref
                           .read(cartProvider.notifier)
                           .addProduct(p, cantidad);
-
                       ScaffoldMessenger.of(context).clearSnackBars();
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -992,7 +1026,8 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                 child: SizedBox(
                   height: 36,
                   child: OutlinedButton.icon(
-                    onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
+                    onPressed:
+                    _isAddingToQuote ? null : () => _addToQuote(p),
                     icon: _isAddingToQuote
                         ? const SizedBox(
                       width: 14,
@@ -1061,7 +1096,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
-
     setState(() {
       _isAddingToQuote = true;
     });
@@ -1080,7 +1114,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
             ),
           );
         }
-
         return;
       }
 
@@ -1117,18 +1150,12 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
           action: SnackBarAction(
             label: 'VER',
             textColor: Colors.white,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const QuotesPage()),
-              );
-            },
+            onPressed: _goToQuotesKeepingTabs,
           ),
         ),
       );
     } catch (e) {
       debugPrint('❌ Error en _addToQuote búsqueda: $e');
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
