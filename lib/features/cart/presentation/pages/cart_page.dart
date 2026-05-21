@@ -2,16 +2,38 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/checkout/presentation/pages/checkout_page.dart';
-import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 
 class CartPage extends ConsumerWidget {
   final VoidCallback? onGoHome;
+  final VoidCallback? onGoBack;
 
-  const CartPage({super.key, this.onGoHome});
+  const CartPage({
+    super.key,
+    this.onGoHome,
+    this.onGoBack,
+  });
+
+  void _handleBack(BuildContext context) {
+    if (onGoBack != null) {
+      onGoBack!();
+      return;
+    }
+
+    if (onGoHome != null) {
+      onGoHome!();
+      return;
+    }
+
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+  }
 
   void _goToHome(BuildContext context) {
     if (onGoHome != null) {
@@ -19,11 +41,10 @@ class CartPage extends ConsumerWidget {
       return;
     }
 
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const HomePage()),
-      (route) => false,
-    );
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
   }
 
   @override
@@ -36,34 +57,35 @@ class CartPage extends ConsumerWidget {
         title: 'MI CESTA',
         subtitle: 'Resumen de productos y tramitación del pedido',
         icon: Icons.shopping_cart_outlined,
-        onBack: () => _goToHome(context),
+        onBack: () => _handleBack(context),
       ),
       body: cartItems.isEmpty
           ? _buildEmptyCart(context)
           : Column(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 20,
-                    ),
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: cartItems.length,
-                    itemBuilder: (context, index) {
-                      final item = cartItems[index];
-                      final price =
-                          double.tryParse(
-                            item.product.price.replaceAll(',', '.'),
-                          ) ??
-                          0;
-                      return _buildProductItem(ref, item, price);
-                    },
-                  ),
-                ),
-                _buildCheckoutSection(ref, context),
-              ],
+        children: [
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 20,
+              ),
+              physics: const BouncingScrollPhysics(),
+              itemCount: cartItems.length,
+              itemBuilder: (context, index) {
+                final item = cartItems[index];
+
+                final price = double.tryParse(
+                  item.product.price.replaceAll(',', '.'),
+                ) ??
+                    0;
+
+                return _buildProductItem(ref, item, price);
+              },
             ),
+          ),
+          _buildCheckoutSection(ref, context),
+        ],
+      ),
     );
   }
 
@@ -85,7 +107,6 @@ class CartPage extends ConsumerWidget {
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
-            // Imagen + botón eliminar a la izquierda
             Stack(
               children: [
                 ClipRRect(
@@ -97,6 +118,15 @@ class CartPage extends ConsumerWidget {
                     fit: BoxFit.cover,
                     placeholder: (context, url) =>
                         Container(color: Colors.grey[100]),
+                    errorWidget: (context, url, error) => Container(
+                      width: 80,
+                      height: 80,
+                      color: Colors.grey[100],
+                      child: const Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.grey,
+                      ),
+                    ),
                   ),
                 ),
                 Positioned(
@@ -148,12 +178,15 @@ class CartPage extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    "${price.toStringAsFixed(2)} €/ud.",
-                    style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                    '${price.toStringAsFixed(2)} €/ud.',
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 12,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    "${(price * item.quantity).toStringAsFixed(2)} €",
+                    '${(price * item.quantity).toStringAsFixed(2)} €',
                     style: const TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w900,
@@ -164,7 +197,6 @@ class CartPage extends ConsumerWidget {
                 ],
               ),
             ),
-            // Controles de cantidad
             Column(
               children: [
                 _qtyBtn(
@@ -176,7 +208,7 @@ class CartPage extends ConsumerWidget {
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Text(
-                    "${item.quantity}",
+                    '${item.quantity}',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
@@ -185,9 +217,19 @@ class CartPage extends ConsumerWidget {
                 ),
                 _qtyBtn(
                   icon: Icons.remove,
-                  onTap: () => ref
-                      .read(cartProvider.notifier)
-                      .updateQuantity(item.product.id, item.quantity - 1),
+                  onTap: () {
+                    if (item.quantity <= 1) {
+                      ref
+                          .read(cartProvider.notifier)
+                          .removeProduct(item.product.id);
+                    } else {
+                      ref
+                          .read(cartProvider.notifier)
+                          .updateQuantity(item.product.id, item.quantity - 1);
+                    }
+
+                    HapticFeedback.lightImpact();
+                  },
                 ),
               ],
             ),
@@ -197,7 +239,10 @@ class CartPage extends ConsumerWidget {
     );
   }
 
-  Widget _qtyBtn({required IconData icon, required VoidCallback onTap}) {
+  Widget _qtyBtn({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -206,47 +251,67 @@ class CartPage extends ConsumerWidget {
           color: const Color(0xFFF5F5F5),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon, size: 18, color: AppColors.primary),
+        child: Icon(
+          icon,
+          size: 18,
+          color: AppColors.primary,
+        ),
       ),
     );
   }
 
   Widget _buildEmptyCart(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.shopping_cart_outlined,
-            size: 80,
-            color: Colors.grey.shade300,
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            "Tu cesta está vacía",
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.shopping_cart_outlined,
+              size: 80,
+              color: Colors.grey.shade300,
             ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () {},
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 16),
+            const Text(
+              'Tu cesta está vacía',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            child: const Text(
-              "VOLVER A LA TIENDA",
-              style: TextStyle(fontWeight: FontWeight.bold),
+            const SizedBox(height: 8),
+            const Text(
+              'Añade productos desde el catálogo para preparar tu pedido.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 13,
+                height: 1.4,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () => _goToHome(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 30,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'VOLVER A LA TIENDA',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -262,30 +327,38 @@ class CartPage extends ConsumerWidget {
           topLeft: Radius.circular(30),
           topRight: Radius.circular(30),
         ),
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 15)],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 15,
+          ),
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           _priceRow(
-            "Base Imponible",
-            "${notifier.subtotal.toStringAsFixed(2)} €",
+            'Base Imponible',
+            '${notifier.subtotal.toStringAsFixed(2)} €',
           ),
           const SizedBox(height: 4),
           _priceRow(
-            "IVA (21%) incluido",
-            "${notifier.iva.toStringAsFixed(2)} €",
+            'IVA (21%) incluido',
+            '${notifier.iva.toStringAsFixed(2)} €',
           ),
           const Divider(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                "TOTAL",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                'TOTAL',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
               ),
               Text(
-                "${notifier.total.toStringAsFixed(2)} €",
+                '${notifier.total.toStringAsFixed(2)} €',
                 style: const TextStyle(
                   fontWeight: FontWeight.w900,
                   fontSize: 22,
@@ -300,11 +373,14 @@ class CartPage extends ConsumerWidget {
             width: double.infinity,
             height: 55,
             child: ElevatedButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const CheckoutPage()),
-              ),
-              child: const Text("TRAMITAR PEDIDO"),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const CheckoutPage(),
+                  ),
+                );
+              },
+              child: const Text('TRAMITAR PEDIDO'),
             ),
           ),
         ],
@@ -318,7 +394,10 @@ class CartPage extends ConsumerWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 13,
+          ),
         ),
         Text(
           value,

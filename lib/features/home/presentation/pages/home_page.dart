@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/chatbox.dart';
 import 'package:mundicam/features/home/presentation/widgets/brands_banner.dart';
@@ -15,7 +14,14 @@ import 'package:mundicam/features/home/presentation/providers/noticias_provider.
 import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
 
 class HomePage extends ConsumerStatefulWidget {
-  const HomePage({super.key});
+  final VoidCallback? onGoCart;
+  final VoidCallback? onGoQuotes;
+
+  const HomePage({
+    super.key,
+    this.onGoCart,
+    this.onGoQuotes,
+  });
 
   @override
   ConsumerState<HomePage> createState() => _HomePageState();
@@ -33,12 +39,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
-
     Future.delayed(const Duration(milliseconds: 250), () {
       if (!mounted) return;
       setState(() => _showSecondaryContent = true);
     });
-
     Future.delayed(const Duration(milliseconds: 800), () {
       if (!mounted) return;
       setState(() => _showChatBox = true);
@@ -49,7 +53,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     ref.invalidate(categoriesProvider);
     ref.invalidate(noticiasProvider);
     ref.invalidate(bannerMixProvider);
-
     await Future.delayed(const Duration(milliseconds: 350));
   }
 
@@ -78,25 +81,20 @@ class _HomePageState extends ConsumerState<HomePage> {
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: ClampingScrollPhysics(),
                   ),
-                  keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
+                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildTopPanel(),
-
                       const SizedBox(height: 22),
                       _buildSectionTitle('CATEGORÍAS'),
                       const SizedBox(height: 12),
                       const CategoryGrid(),
-
                       if (_showSecondaryContent) ...[
                         const SizedBox(height: 14),
                         const BrandsBanner(),
-
                         const SizedBox(height: 22),
                         _buildNewsPanel(),
-
                         const SizedBox(height: 18),
                         _buildMundicamFooter(),
                       ] else ...[
@@ -111,7 +109,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                 ),
               ),
-
               if (_showChatBox) const ChatBox(),
             ],
           ),
@@ -282,7 +279,6 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
           ),
           const SizedBox(height: 11),
-
           _footerContactRow(
             icon: Icons.phone_outlined,
             text: '+34 968 629 383',
@@ -309,15 +305,12 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
           ),
-
           const SizedBox(height: 9),
-
           _footerWebButton(
             onTap: () => _openFooterLink(
               Uri.parse('https://www.mundicam.com'),
             ),
           ),
-
           const SizedBox(height: 12),
           const Text(
             '© MUNDICAM 2025-2026 · Todos los derechos reservados',
