@@ -246,33 +246,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     });
   }
 
-  void _goToCartKeepingTabs() {
-    if (widget.onGoCart != null) {
-      debugPrint('✅ onGoCart recibido en ProductTile. Cambiando a Carrito...');
-      widget.onGoCart!();
-      return;
-    }
-
-    debugPrint('❌ onGoCart es NULL en ProductTile');
-
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$cantidad x ${widget.p.name} añadido al carrito'),
-        backgroundColor: AppColors.primary,
-        duration: const Duration(seconds: 1),
-      ),
-    );
-  }
-
   void _goToQuotesKeepingTabs() {
     if (widget.onGoQuotes != null) {
-      debugPrint('✅ onGoQuotes recibido en ProductTile. Cambiando a Presupuestos...');
       widget.onGoQuotes!();
       return;
     }
-
-    debugPrint('❌ onGoQuotes es NULL en ProductTile');
 
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -327,13 +305,14 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
     return RepaintBoundary(
       child: Container(
-        margin: const EdgeInsets.only(bottom: 6),
+        margin: const EdgeInsets.only(bottom: 8),
         color: Colors.white,
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             InkWell(
+              borderRadius: BorderRadius.circular(10),
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -367,9 +346,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                            height: 1.25,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 5),
                         Text(
                           _tieneStock ? '● Disponible' : '○ Sin stock',
                           style: TextStyle(
@@ -388,19 +369,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           style: const TextStyle(
                             fontSize: 12,
                             color: Colors.grey,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            _formatearPrecioCompleto(precio),
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.primary,
-                              fontFamily: 'Oswald',
-                            ),
+                            height: 1.25,
                           ),
                         ),
                       ],
@@ -409,52 +378,21 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 36,
-                    child: ElevatedButton(
-                      onPressed: _puedeComprar
-                          ? () {
-                        ref
-                            .read(cartProvider.notifier)
-                            .addProduct(widget.p, cantidad);
 
-                        _goToCartKeepingTabs();
-                      }
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _tieneStock
-                            ? AppColors.primary
-                            : Colors.grey.shade400,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 0),
-                      ),
-                      child: Text(
-                        _tieneStock ? 'COMPRAR YA' : 'SIN STOCK',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
+            const SizedBox(height: 12),
+
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
                 Expanded(
                   child: Opacity(
                     opacity: _tieneStock ? 1.0 : 0.5,
                     child: Container(
-                      height: 36,
+                      height: 38,
                       decoration: BoxDecoration(
+                        color: const Color(0xFFF8F9FB),
                         border: Border.all(color: Colors.grey.shade300),
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -469,9 +407,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           Text(
                             '$cantidad',
                             style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: _tieneStock ? Colors.black : Colors.grey,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: _tieneStock
+                                  ? AppColors.textPrimary
+                                  : Colors.grey,
                             ),
                           ),
                           _qtyBtn(
@@ -485,103 +425,108 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     ),
                   ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      _formatearPrecioCompleto(precio),
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.primary,
+                        fontFamily: 'Oswald',
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 36,
-                    child: OutlinedButton(
-                      onPressed: _puedeComprar
-                          ? () {
-                        ref
-                            .read(cartProvider.notifier)
-                            .addProduct(widget.p, cantidad);
 
-                        ScaffoldMessenger.of(context).clearSnackBars();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              '$cantidad x ${widget.p.name} añadido al carrito',
-                            ),
-                            backgroundColor: AppColors.primary,
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                          : null,
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(
-                          color: _tieneStock
-                              ? AppColors.primary
-                              : Colors.grey.shade400,
-                          width: 1.3,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 0),
+            const SizedBox(height: 10),
+
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: ElevatedButton(
+                onPressed: _puedeComprar
+                    ? () {
+                  ref
+                      .read(cartProvider.notifier)
+                      .addProduct(widget.p, cantidad);
+
+                  ScaffoldMessenger.of(context).clearSnackBars();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        '$cantidad x ${widget.p.name} añadido al carrito',
                       ),
-                      child: Text(
-                        _tieneStock ? 'AÑADIR AL CARRITO' : 'SIN STOCK',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: _tieneStock
-                              ? AppColors.primary
-                              : Colors.grey.shade400,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      backgroundColor: AppColors.primary,
+                      duration: const Duration(seconds: 1),
                     ),
+                  );
+                }
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                  _tieneStock ? AppColors.primary : Colors.grey.shade400,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 0),
+                ),
+                child: Text(
+                  _tieneStock ? 'AÑADIR AL CARRITO' : 'SIN STOCK',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SizedBox(
-                    height: 36,
-                    child: OutlinedButton.icon(
-                      onPressed: _isAddingToQuote
-                          ? null
-                          : () => _addToQuote(widget.p),
-                      icon: _isAddingToQuote
-                          ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.orange,
-                        ),
-                      )
-                          : Icon(
-                        Icons.description_outlined,
-                        size: 14,
-                        color: Colors.orange.shade700,
-                      ),
-                      label: Text(
-                        _isAddingToQuote ? '...' : 'PRESUPUESTO',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange.shade700,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.orange.shade700,
-                        side: BorderSide(
-                          color: Colors.orange.shade700,
-                          width: 1.3,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 0),
-                      ),
-                    ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton(
+                onPressed:
+                _isAddingToQuote ? null : () => _addToQuote(widget.p),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.9),
+                    width: 1.3,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 0),
+                ),
+                child: _isAddingToQuote
+                    ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primary,
+                  ),
+                )
+                    : const Text(
+                  'AÑADIR AL PRESUPUESTO',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
                   ),
                 ),
-              ],
+              ),
             ),
           ],
         ),
@@ -597,13 +542,12 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       }) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
-      child: Container(
-        width: 30,
-        height: 36,
-        alignment: Alignment.center,
+      child: SizedBox(
+        width: 38,
+        height: 38,
         child: Icon(
           icon,
-          size: 16,
+          size: 17,
           color: enabled
               ? (isPrimary ? AppColors.primary : Colors.black87)
               : Colors.grey.shade400,

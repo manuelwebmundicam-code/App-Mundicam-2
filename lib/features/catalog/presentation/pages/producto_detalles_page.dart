@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
@@ -35,7 +34,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   bool _specsExpanded = true;
   bool _descriptionExpanded = true;
   bool _cargandoRecomendados = true;
-
   List<Product> _recomendados = [];
 
   static const Color _dark = Color(0xFF111827);
@@ -53,9 +51,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     try {
       final api = ApiService();
       final product = widget.product;
-
       String? marca;
-
       for (final attr in product.attributes) {
         if (attr.name.toLowerCase().contains('marca') &&
             attr.options.isNotEmpty) {
@@ -65,11 +61,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       }
 
       List<Product> todos = [];
-
       if (marca != null && marca.isNotEmpty) {
         todos.addAll(await api.getProductos(brand: marca, perPage: 20));
       }
-
       if (todos.length < 10) {
         todos.addAll(await api.getProductos(perPage: 50));
       }
@@ -84,7 +78,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           .where((p) => p.id != product.id && p.hasStock)
           .map((p) {
         int score = 0;
-
         if (marca != null) {
           for (final a in p.attributes) {
             if (a.name.toLowerCase().contains('marca') &&
@@ -95,13 +88,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             }
           }
         }
-
         final pp =
             double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
-
         if (precioActual > 0 && pp > 0) {
           final diff = (pp - precioActual).abs() / precioActual;
-
           if (diff < 0.15) {
             score += 50;
           } else if (diff < 0.30) {
@@ -110,7 +100,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             score += 10;
           }
         }
-
         return MapEntry(p, score);
       })
           .where((e) => e.value > 0)
@@ -118,7 +107,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
       recomendados.sort((a, b) => b.value.compareTo(a.value));
 
-      List<Product> finales = recomendados.map((e) => e.key).take(8).toList();
+      List<Product> finales =
+      recomendados.map((e) => e.key).take(8).toList();
 
       if (finales.length < 4) {
         finales.addAll(
@@ -134,7 +124,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       }
 
       if (!mounted) return;
-
       setState(() {
         _recomendados = finales;
         _cargandoRecomendados = false;
@@ -174,18 +163,14 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   Future<String?> _getCurrentUserEmail() async {
     final user = FirebaseAuth.instance.currentUser;
-
     if (user == null) return null;
-
     try {
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
-
       if (userDoc.exists && userDoc.data() != null) {
         final email = userDoc.data()?['email']?.toString();
-
         if (email != null && email.trim().isNotEmpty) {
           return email.trim();
         }
@@ -193,60 +178,34 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     } catch (e) {
       debugPrint('Error al leer email de Firestore: $e');
     }
-
     if (user.email != null && user.email!.trim().isNotEmpty) {
       return user.email!.trim();
     }
-
     if (user.providerData.isNotEmpty) {
       final providerEmail = user.providerData.first.email;
-
       if (providerEmail != null && providerEmail.trim().isNotEmpty) {
         return providerEmail.trim();
       }
     }
-
     return null;
   }
 
   void _closeProductStackAndGo(VoidCallback callback) {
     final navigator = Navigator.of(context);
-
     if (navigator.canPop()) {
       navigator.popUntil((route) => route.isFirst);
     }
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       callback();
     });
   }
 
-  void _goToCartKeepingTabs() {
-    final goCart = widget.onGoCart;
-
-    if (goCart != null) {
-      _closeProductStackAndGo(goCart);
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Producto añadido al carrito'),
-        backgroundColor: AppColors.primary,
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
   void _goToQuotesKeepingTabs() {
     final goQuotes = widget.onGoQuotes;
-
     if (goQuotes != null) {
       _closeProductStackAndGo(goQuotes);
       return;
     }
-
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Producto añadido al presupuesto'),
@@ -260,21 +219,18 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final p = widget.product;
-
     final precio = _precioDouble(p);
     final precioRegular = _precioRegularDouble(p);
-
     final tieneDescuento = precioRegular > precio && precio > 0;
-    final descuento = tieneDescuento
+    final descuento =
+    tieneDescuento
         ? ((precioRegular - precio) / precioRegular * 100).round()
         : 0;
     final ahorro = tieneDescuento ? precioRegular - precio : 0.0;
-
     final enStock = p.hasStock;
     final descLimpia = _limpiarHtml(p.description);
 
     String? marca;
-
     for (final a in p.attributes) {
       if (a.name.toLowerCase().contains('marca') && a.options.isNotEmpty) {
         marca = a.options.first;
@@ -283,15 +239,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     }
 
     final specRows = <MapEntry<String, String>>[];
-
     if (marca != null) {
       specRows.add(MapEntry('Marca', marca));
     }
-
     if (p.sku.isNotEmpty) {
       specRows.add(MapEntry('SKU', p.sku));
     }
-
     specRows.add(
       MapEntry('Disponibilidad', enStock ? 'En stock' : 'Sin stock'),
     );
@@ -338,17 +291,17 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 child: CachedNetworkImage(
                   imageUrl: p.imageUrl,
                   fit: BoxFit.contain,
-                  placeholder: (_, __) => const Center(
+                  placeholder:
+                      (_, __) =>
+                  const Center(
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       color: AppColors.primary,
                     ),
                   ),
-                  errorWidget: (_, __, ___) => const Icon(
-                    Icons.broken_image,
-                    size: 60,
-                    color: _border,
-                  ),
+                  errorWidget:
+                      (_, __, ___) =>
+                  const Icon(Icons.broken_image, size: 60, color: _border),
                 ),
               ),
             ),
@@ -488,14 +441,18 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _qtyBtn(Icons.remove_rounded, _cantidad > 1, () {
-                        if (_cantidad > 1) {
-                          HapticFeedback.selectionClick();
-                          setState(() {
-                            _cantidad--;
-                          });
-                        }
-                      }),
+                      _qtyBtn(
+                        Icons.remove_rounded,
+                        _cantidad > 1,
+                            () {
+                          if (_cantidad > 1) {
+                            HapticFeedback.selectionClick();
+                            setState(() {
+                              _cantidad--;
+                            });
+                          }
+                        },
+                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Text(
@@ -552,60 +509,23 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             ),
           ],
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton(
-              onPressed: enStock
-                  ? () {
-                ref.read(cartProvider.notifier).addProduct(p, _cantidad);
-
-                HapticFeedback.mediumImpact();
-
-                _goToCartKeepingTabs();
-              }
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                enStock ? AppColors.primary : Colors.grey.shade300,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                disabledBackgroundColor: Colors.grey.shade300,
-              ),
-              child: Text(
-                enStock ? 'COMPRAR YA' : 'SIN STOCK',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
                 child: SizedBox(
                   height: 44,
                   child: OutlinedButton.icon(
-                    onPressed: enStock && !_isAddingToCart
+                    onPressed:
+                    enStock && !_isAddingToCart
                         ? () async {
                       setState(() {
                         _isAddingToCart = true;
                       });
-
                       ref
                           .read(cartProvider.notifier)
                           .addProduct(p, _cantidad);
-
                       HapticFeedback.mediumImpact();
-
                       if (!mounted) return;
-
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
@@ -616,7 +536,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                           duration: const Duration(seconds: 1),
                         ),
                       );
-
                       setState(() {
                         _isAddingToCart = false;
                       });
@@ -645,10 +564,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       ),
                     ),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: enStock ? AppColors.primary : Colors.grey,
+                      foregroundColor:
+                      enStock ? AppColors.primary : Colors.grey,
                       side: BorderSide(
-                        color:
-                        enStock ? AppColors.primary : Colors.grey.shade300,
+                        color: enStock
+                            ? AppColors.primary
+                            : Colors.grey.shade300,
                         width: 1.5,
                       ),
                       shape: RoundedRectangleBorder(
@@ -798,7 +719,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   child: Column(
                     children: List.generate(specRows.length, (i) {
                       final row = specRows[i];
-
                       return Container(
                         color: i.isEven ? _softBg : Colors.white,
                         padding: const EdgeInsets.symmetric(
@@ -954,7 +874,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                           return true;
                         }
                       }
-
                       return false;
                     })
                     ? 'Más de $marca'
@@ -987,7 +906,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             itemBuilder: (_, i) {
               final rp = _recomendados[i];
               final precioRp = _precioDouble(rp);
-
               return SizedBox(
                 width: 160,
                 child: Material(
@@ -998,7 +916,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => ProductDetailScreen(
+                          builder:
+                              (_) => ProductDetailScreen(
                             product: rp,
                             onGoCart: widget.onGoCart,
                             onGoQuotes: widget.onGoQuotes,
@@ -1076,9 +995,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                       ref
                                           .read(cartProvider.notifier)
                                           .addProduct(rp, 1);
-
                                       HapticFeedback.mediumImpact();
-
                                       ScaffoldMessenger.of(context)
                                           .showSnackBar(
                                         SnackBar(
@@ -1088,7 +1005,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                           backgroundColor:
                                           AppColors.primary,
                                           behavior:
-                                          SnackBarBehavior.floating,
+                                          SnackBarBehavior
+                                              .floating,
                                           duration: const Duration(
                                             seconds: 1,
                                           ),
@@ -1175,7 +1093,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   Future<void> _addToQuote() async {
     if (_isAddingToQuote) return;
-
     setState(() {
       _isAddingToQuote = true;
     });
@@ -1195,18 +1112,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             ),
           );
         }
-
         return;
       }
 
       final prod = widget.product;
-
       if (prod.id == 0) {
         throw Exception('ID de producto no válido.');
       }
 
       final precio = _precioDouble(prod);
-
       final ok = await api.crearPresupuesto(
         email: email,
         productId: prod.id,
@@ -1238,7 +1152,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       );
     } catch (e) {
       debugPrint('❌ Error en _addToQuote: $e');
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
