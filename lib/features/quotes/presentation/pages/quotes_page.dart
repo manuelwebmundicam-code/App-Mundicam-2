@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/network/api_service.dart';
 import '../../../../shared/theme/app_theme.dart';
@@ -49,14 +50,13 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   @override
   void initState() {
     super.initState();
-
     _hiddenQuoteIds.addAll(widget.confirmedQuoteIds);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-
       await _loadConfirmedQuoteIds();
       ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
     });
   }
 
@@ -72,8 +72,9 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     });
 
     await _loadConfirmedQuoteIds();
-
     ref.invalidate(quotesProvider);
+    ref.invalidate(quoteBadgeProvider);
+    ref.invalidate(cartBadgeProvider);
   }
 
   Future<void> _loadConfirmedQuoteIds() async {
@@ -98,13 +99,22 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       ...quoteIds,
     };
 
-    await prefs.setStringList(
-      _confirmedQuoteIdsKey,
-      updatedIds.toList(),
-    );
-
+    await prefs.setStringList(_confirmedQuoteIdsKey, updatedIds.toList());
     await widget.onQuotesConfirmed?.call(quoteIds);
 
+    if (mounted) {
+      setState(() {
+        _hiddenQuoteIds.addAll(quoteIds);
+        for (final quoteId in quoteIds) {
+          _quoteItemsCache[quoteId] = <_QuoteLineItem>[];
+          _quoteItemsFutures.remove(quoteId);
+          _expandedQuoteIds.remove(quoteId);
+        }
+        _activeQuoteId = null;
+      });
+    }
+
+    ref.invalidate(quotesProvider);
     ref.invalidate(quoteBadgeProvider);
     ref.invalidate(cartBadgeProvider);
   }
@@ -114,14 +124,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       if (_hiddenQuoteIds.contains(quote.id)) return false;
 
       final cachedItems = _quoteItemsCache[quote.id];
-
-      if (cachedItems != null && cachedItems.isEmpty) {
-        return false;
-      }
-
-      if (quote.total <= 0 && cachedItems == null) {
-        return false;
-      }
+      if (cachedItems != null && cachedItems.isEmpty) return false;
+      if (quote.total <= 0 && cachedItems == null) return false;
 
       return true;
     }).toList();
@@ -129,11 +133,9 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   String _extractOrderId(QuoteMundicam quote) {
     final orderId = quote.id.replaceAll(RegExp(r'[^0-9]'), '');
-
     if (orderId.isEmpty) {
       throw Exception('No se pudo identificar el ID del presupuesto.');
     }
-
     return orderId;
   }
 
@@ -174,12 +176,15 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           .toList();
 
       _quoteItemsCache[quote.id] = items;
-
       return items;
     } finally {
       _quoteItemsFutures.remove(quote.id);
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // CONFIRMAR PRESUPUESTOS Y ENVIAR PRODUCTOS AL CARRITO
+  // ═══════════════════════════════════════════════════════════════
 
   Future<void> _confirmarPresupuestoYEnviarAlCarrito(
       List<QuoteMundicam> quotes,
@@ -187,8 +192,14 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     if (_isLoadingAction) return;
 
     final visibleQuotes = _getVisibleQuotes(quotes);
-
     if (visibleQuotes.isEmpty) return;
+
+    final confirmar = await _confirmarMoverAlCarritoDialog(
+      totalPresupuestos: visibleQuotes.length,
+      total: _combinedVisibleTotal(visibleQuotes),
+    );
+
+    if (!confirmar || !mounted) return;
 
     setState(() {
       _isLoadingAction = true;
@@ -212,16 +223,12 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           _activeQuoteId = quote.id;
         });
 
-        final items = await _loadQuoteItems(
-          quote,
-          forceRefresh: true,
-        );
+        final items = await _loadQuoteItems(quote, forceRefresh: true);
 
         for (final item in items) {
           if (item.productId <= 0) continue;
 
           final producto = await api.getProductoById(item.productId);
-
           if (producto == null) continue;
 
           productosParaMover.add(
@@ -234,7 +241,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           );
 
           quoteIdsConfirmados.add(quote.id);
-
           productosPorPedido
               .putIfAbsent(orderId, () => <int>{})
               .add(item.productId);
@@ -280,18 +286,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
       if (!mounted) return;
 
-      setState(() {
-        _hiddenQuoteIds.addAll(quoteIdsConfirmados);
-
-        for (final quoteId in quoteIdsConfirmados) {
-          _quoteItemsCache[quoteId] = <_QuoteLineItem>[];
-          _quoteItemsFutures.remove(quoteId);
-          _expandedQuoteIds.remove(quoteId);
-        }
-
-        _activeQuoteId = null;
-      });
-
       ref.invalidate(quotesProvider);
       ref.invalidate(quoteBadgeProvider);
       ref.invalidate(cartBadgeProvider);
@@ -312,7 +306,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       await Future.delayed(const Duration(milliseconds: 180));
 
       if (!mounted) return;
-
       _goToCart();
     } catch (e) {
       if (!mounted) return;
@@ -335,18 +328,271 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     }
   }
 
+  Future<bool> _confirmarMoverAlCarritoDialog({
+    required int totalPresupuestos,
+    required double total,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Text(
+            'Confirmar presupuesto',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          content: Text(
+            'Se moverán los productos de tus presupuestos al carrito '
+                'y se quitarán de presupuestos pendientes.\n\n'
+                'Presupuestos: $totalPresupuestos\n'
+                'Total: ${_formatMoney(total)}\n\n'
+                '¿Quieres continuar?',
+            style: const TextStyle(
+              height: 1.4,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                'Confirmar',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result ?? false;
+  }
+
   void _goToCart() {
     if (widget.onGoCart != null) {
       widget.onGoCart!();
     }
-  }Future<void> _deleteQuoteItem(
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // GUARDAR PRESUPUESTO POR EMAIL Y OCULTARLO
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<bool> _confirmarGuardarPresupuestoDialog({
+    required int totalPresupuestos,
+    required double total,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Text(
+            'Guardar presupuesto',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          content: Text(
+            'Se abrirá tu aplicación de correo con el presupuesto listo '
+                'para enviar a pedidos@mundicam.com.\n\n'
+                'Presupuestos: $totalPresupuestos\n'
+                'Total: ${_formatMoney(total)}\n\n'
+                '¿Quieres continuar?',
+            style: const TextStyle(
+              height: 1.4,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade700,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                'Guardar',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result ?? false;
+  }
+
+  Future<void> _guardarPresupuestoPorEmail(List<QuoteMundicam> quotes) async {
+    if (_isLoadingAction) return;
+
+    final visibleQuotes = _getVisibleQuotes(quotes);
+    if (visibleQuotes.isEmpty) return;
+
+    final confirmar = await _confirmarGuardarPresupuestoDialog(
+      totalPresupuestos: visibleQuotes.length,
+      total: _combinedVisibleTotal(visibleQuotes),
+    );
+
+    if (!confirmar || !mounted) return;
+
+    setState(() {
+      _isLoadingAction = true;
+      _processingQuoteId = 'save';
+      _activeQuoteId = null;
+    });
+
+    try {
+      final StringBuffer cuerpoEmail = StringBuffer();
+      double totalGeneral = 0;
+      int totalProductos = 0;
+      int totalUnidades = 0;
+      final Set<String> quoteIdsGuardados = <String>{};
+
+      for (final quote in visibleQuotes) {
+        if (!mounted) return;
+
+        setState(() {
+          _activeQuoteId = quote.id;
+        });
+
+        final items = await _loadQuoteItems(quote, forceRefresh: true);
+        if (items.isEmpty) continue;
+
+        quoteIdsGuardados.add(quote.id);
+
+        cuerpoEmail.writeln('═══════════════════════════════════');
+        cuerpoEmail.writeln('  PRESUPUESTO #${quote.id}');
+        cuerpoEmail.writeln('═══════════════════════════════════');
+        cuerpoEmail.writeln('');
+
+        for (final item in items) {
+          final precioUnidad =
+          item.quantity > 0 ? item.total / item.quantity : item.total;
+
+          cuerpoEmail.writeln('  • ${item.name}');
+          cuerpoEmail.writeln('    Cantidad: ${item.quantity}');
+          cuerpoEmail.writeln('    Precio: ${_formatMoney(precioUnidad)}');
+          cuerpoEmail.writeln('    Subtotal: ${_formatMoney(item.total)}');
+          cuerpoEmail.writeln('');
+
+          totalGeneral += item.total;
+          totalProductos++;
+          totalUnidades += item.quantity;
+        }
+      }
+
+      if (totalProductos == 0 || quoteIdsGuardados.isEmpty) {
+        throw Exception('No se encontraron productos en los presupuestos.');
+      }
+
+      cuerpoEmail.writeln('═══════════════════════════════════');
+      cuerpoEmail.writeln('  TOTAL: ${_formatMoney(totalGeneral)}');
+      cuerpoEmail.writeln('  Productos: $totalProductos');
+      cuerpoEmail.writeln('  Unidades: $totalUnidades');
+      cuerpoEmail.writeln('═══════════════════════════════════');
+      cuerpoEmail.writeln('');
+      cuerpoEmail.writeln('Enviado desde la app Mundicam');
+
+      final asunto = 'Presupuesto Mundicam - ${_formatMoney(totalGeneral)}';
+
+      final mailtoUri = Uri(
+        scheme: 'mailto',
+        path: 'pedidos@mundicam.com',
+        queryParameters: {
+          'subject': asunto,
+          'body': cuerpoEmail.toString(),
+        },
+      );
+
+      if (!await canLaunchUrl(mailtoUri)) {
+        throw Exception('No se pudo abrir el cliente de correo.');
+      }
+
+      await launchUrl(mailtoUri, mode: LaunchMode.externalApplication);
+
+      await _saveConfirmedQuoteIds(quoteIdsGuardados);
+
+      if (!mounted) return;
+
+      ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
+      ref.invalidate(cartBadgeProvider);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✅ Presupuesto guardado. '
+                '$totalProductos producto${totalProductos != 1 ? 's' : ''} '
+                'preparado${totalProductos != 1 ? 's' : ''} por email.',
+          ),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Error guardando presupuesto: $e');
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al guardar presupuesto: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingAction = false;
+          _processingQuoteId = null;
+          _activeQuoteId = null;
+        });
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ELIMINAR PRODUCTO DE PRESUPUESTO
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<void> _deleteQuoteItem(
       QuoteMundicam quote,
       _QuoteLineItem item,
       ) async {
     if (_isLoadingAction) return;
 
     final deleteKey = '${quote.id}_${item.productId}_${item.lineItemId}';
-
     if (_deletingLineItemKeys.contains(deleteKey)) return;
 
     setState(() {
@@ -376,8 +622,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
       final bool presupuestoVacio = updatedItems.isEmpty;
 
-      // Si el presupuesto se queda vacío, lo guardamos como oculto
-      // para que no vuelva a aparecer y para que baje la pelotita roja.
       if (presupuestoVacio) {
         await _saveConfirmedQuoteIds(<String>{quote.id});
       }
@@ -466,9 +710,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       bottomNavigationBar: quotesAsync.maybeWhen(
         data: (allQuotes) {
           final quotes = _getVisibleQuotes(allQuotes);
-
           if (quotes.isEmpty) return null;
-
           return _buildBottomQuoteBar(quotes);
         },
         orElse: () => null,
@@ -477,7 +719,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
         loading: () => const Center(
           child: CircularProgressIndicator(color: AppColors.primary),
         ),
-        error: (err, stack) => _buildErrorState(ref),
+        error: (err, stack) => _buildErrorState(),
         data: (allQuotes) {
           final quotes = _getVisibleQuotes(allQuotes);
 
@@ -555,7 +797,9 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   Widget _buildBottomQuoteBar(List<QuoteMundicam> quotes) {
     final total = _combinedVisibleTotal(quotes);
-    final bool isProcessing = _isLoadingAction || _processingQuoteId == 'all';
+    final bool isProcessing = _isLoadingAction;
+    final bool isSaving = _processingQuoteId == 'save';
+    final bool isConfirming = _processingQuoteId == 'all';
 
     return SafeArea(
       top: false,
@@ -606,49 +850,86 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
               ),
             ),
             const SizedBox(width: 12),
-            SizedBox(
-              width: 194,
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: isProcessing
-                    ? null
-                    : () => _confirmarPresupuestoYEnviarAlCarrito(quotes),
-                icon: isProcessing
-                    ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-                    : const Icon(
-                  Icons.check_circle_outline_rounded,
-                  size: 19,
-                  color: Colors.white,
-                ),
-                label: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    isProcessing ? 'CONFIRMANDO...' : 'CONFIRMAR PRESUPUESTO',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      fontSize: 12,
-                      letterSpacing: 0.1,
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 180,
+                  height: 36,
+                  child: OutlinedButton.icon(
+                    onPressed: isProcessing
+                        ? null
+                        : () => _guardarPresupuestoPorEmail(quotes),
+                    icon: isSaving
+                        ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.blue,
+                      ),
+                    )
+                        : const Icon(Icons.save_alt_rounded, size: 16),
+                    label: const Text(
+                      'GUARDAR PRESUP.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.blue.shade700,
+                      side: BorderSide(color: Colors.blue.shade300),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  disabledBackgroundColor: Colors.grey.shade300,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(13),
+                const SizedBox(height: 4),
+                SizedBox(
+                  width: 180,
+                  height: 40,
+                  child: ElevatedButton.icon(
+                    onPressed: isProcessing
+                        ? null
+                        : () =>
+                        _confirmarPresupuestoYEnviarAlCarrito(quotes),
+                    icon: isConfirming
+                        ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                        : const Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'CONFIRMAR',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ],
         ),
@@ -665,10 +946,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   double _quoteDisplayTotal(QuoteMundicam quote) {
     final cachedItems = _quoteItemsCache[quote.id];
-
-    if (cachedItems == null) {
-      return quote.total;
-    }
+    if (cachedItems == null) return quote.total;
 
     return cachedItems.fold<double>(
       0,
@@ -711,7 +989,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
               _activeQuoteId = quote.id;
             } else {
               _expandedQuoteIds.remove(quote.id);
-
               if (_activeQuoteId == quote.id) {
                 _activeQuoteId = null;
               }
@@ -825,15 +1102,29 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              '${item.name} x${item.quantity} = ${_formatMoney(item.total)}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${item.quantity} x ${_formatMoney(item.total / item.quantity)} = ${_formatMoney(item.total)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 8),
@@ -851,7 +1142,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             )
           else
             IconButton(
-              tooltip: 'Eliminar',
+              tooltip: 'Eliminar producto',
               visualDensity: VisualDensity.compact,
               onPressed: item.productId <= 0
                   ? null
@@ -946,7 +1237,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Cuando solicites un presupuesto desde el catálogo aparecerá aquí.',
+              'Cuando solicites un presupuesto desde el catálogo\naparecerá aquí.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -960,7 +1251,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     );
   }
 
-  Widget _buildErrorState(WidgetRef ref) {
+  Widget _buildErrorState() {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -1016,6 +1307,10 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   }
 }
 
+// ────────────────────────────────────────────────────────────
+// MODELOS
+// ────────────────────────────────────────────────────────────
+
 class _QuoteMoveItem {
   final String quoteId;
   final String orderId;
@@ -1064,7 +1359,6 @@ class _QuoteLineItem {
     if (value == null) return fallback;
     if (value is int) return value;
     if (value is num) return value.toInt();
-
     return int.tryParse(value.toString()) ?? fallback;
   }
 
