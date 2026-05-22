@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
@@ -29,33 +31,68 @@ class QuotesPage extends ConsumerStatefulWidget {
 class _QuotesPageState extends ConsumerState<QuotesPage> {
   bool _isLoadingAction = false;
   String? _processingQuoteId;
+
   final Set<String> _hiddenQuoteIds = <String>{};
 
   @override
   void initState() {
     super.initState();
+
     _hiddenQuoteIds.addAll(widget.confirmedQuoteIds);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.invalidate(quotesProvider);
     });
   }
 
+  Future<void> _ocultarPresupuesto(QuoteMundicam quote) async {
+    if (_isLoadingAction) return;
+
+    final quoteId = quote.id.toString();
+
+    HapticFeedback.lightImpact();
+
+    setState(() {
+      _hiddenQuoteIds.add(quoteId);
+    });
+
+    final callback = widget.onQuotesConfirmed;
+    if (callback != null) {
+      await callback(<String>{quoteId});
+    }
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Presupuesto #$quoteId eliminado de pendientes.'),
+        backgroundColor: Colors.green.shade700,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Future<void> _aceptarPresupuesto(QuoteMundicam quote) async {
     if (_isLoadingAction) return;
 
+    final quoteId = quote.id.toString();
+
     setState(() {
       _isLoadingAction = true;
-      _processingQuoteId = quote.id;
+      _processingQuoteId = quoteId;
     });
 
     try {
       final api = ApiService();
-      final orderId = quote.id.replaceAll(RegExp(r'[^0-9]'), '');
+      final orderId = quoteId.replaceAll(RegExp(r'[^0-9]'), '');
+
       if (orderId.isEmpty) {
         throw Exception('No se pudo identificar el ID del presupuesto.');
       }
 
       final orden = await api.getOrdenCompleta(orderId);
+
       if (orden == null || orden['line_items'] == null) {
         throw Exception('No se pudieron cargar los productos del presupuesto.');
       }
@@ -66,12 +103,19 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       for (final item in items) {
         final dynamic rawProductId = item['product_id'];
         final dynamic rawQuantity = item['quantity'];
-        final int productId = rawProductId is int ? rawProductId : int.tryParse(rawProductId.toString()) ?? 0;
-        final int quantity = rawQuantity is int ? rawQuantity : int.tryParse(rawQuantity.toString()) ?? 1;
+
+        final int productId = rawProductId is int
+            ? rawProductId
+            : int.tryParse(rawProductId.toString()) ?? 0;
+
+        final int quantity = rawQuantity is int
+            ? rawQuantity
+            : int.tryParse(rawQuantity.toString()) ?? 1;
 
         if (productId <= 0) continue;
 
         final producto = await api.getProductoById(productId);
+
         if (producto != null) {
           ref.read(cartProvider.notifier).addProduct(producto, quantity);
           productosAnadidos++;
@@ -79,17 +123,18 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       }
 
       if (!mounted) return;
+
       if (productosAnadidos == 0) {
         throw Exception('No se pudo añadir ningún producto al carrito.');
       }
 
       setState(() {
-        _hiddenQuoteIds.add(quote.id);
+        _hiddenQuoteIds.add(quoteId);
       });
 
       final callback = widget.onQuotesConfirmed;
       if (callback != null) {
-        await callback(<String>{quote.id});
+        await callback(<String>{quoteId});
       }
 
       if (!mounted) return;
@@ -97,7 +142,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Presupuesto #${quote.id} aceptado. Productos añadidos al carrito.',
+            'Presupuesto #$quoteId aceptado. Productos añadidos al carrito.',
           ),
           backgroundColor: Colors.green.shade700,
           behavior: SnackBarBehavior.floating,
@@ -115,6 +160,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       }
     } catch (e) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error al aceptar el presupuesto: $e'),
@@ -137,6 +183,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       widget.onGoHome!();
       return;
     }
+
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const HomePage()),
@@ -191,8 +238,11 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
         error: (_, __) => _buildErrorState(ref),
         data: (allQuotes) {
           final quotes = allQuotes.where((quote) {
-            if (_hiddenQuoteIds.contains(quote.id)) return false;
-            if (widget.confirmedQuoteIds.contains(quote.id)) return false;
+            final quoteId = quote.id.toString();
+
+            if (_hiddenQuoteIds.contains(quoteId)) return false;
+            if (widget.confirmedQuoteIds.contains(quoteId)) return false;
+
             return true;
           }).toList();
 
@@ -288,7 +338,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   }
 
   Widget _buildQuoteCard(QuoteMundicam quote) {
-    final bool isProcessing = _processingQuoteId == quote.id;
+    final bool isProcessing = _processingQuoteId == quote.id.toString();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -310,7 +360,14 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           Row(
             children: [
               _buildStatusBadgeCompact(quote),
-              const SizedBox(width: 12),
+              const Spacer(),
+              _deleteButton(quote),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -328,7 +385,9 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      quote.description.isEmpty ? 'Presupuesto pendiente de confirmar' : quote.description,
+                      quote.description.isEmpty
+                          ? 'Presupuesto pendiente de confirmar'
+                          : quote.description,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -381,7 +440,9 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                   : SizedBox(
                 height: 46,
                 child: ElevatedButton.icon(
-                  onPressed: _isLoadingAction ? null : () => _aceptarPresupuesto(quote),
+                  onPressed: _isLoadingAction
+                      ? null
+                      : () => _aceptarPresupuesto(quote),
                   icon: const Icon(
                     Icons.check_circle_outline,
                     size: 18,
@@ -409,6 +470,26 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _deleteButton(QuoteMundicam quote) {
+    return GestureDetector(
+      onTap: _isLoadingAction ? null : () => _ocultarPresupuesto(quote),
+      child: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8EAEA),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFF0D4D4)),
+        ),
+        child: const Icon(
+          Icons.delete_outline_rounded,
+          size: 19,
+          color: AppColors.primary,
+        ),
       ),
     );
   }

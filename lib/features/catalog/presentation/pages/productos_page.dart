@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
@@ -27,9 +26,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
       widget.onGoHome!();
       return;
     }
-
     final navigator = Navigator.of(context);
-
     if (navigator.canPop()) {
       navigator.pop();
     }
@@ -79,9 +76,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
             ..sort((a, b) {
               final pa = _categoryPriority(a.name.toString());
               final pb = _categoryPriority(b.name.toString());
-
               if (pa != pb) return pa.compareTo(pb);
-
               return a.name
                   .toString()
                   .toLowerCase()
@@ -93,17 +88,21 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
             onRefresh: () async {
               ref.invalidate(categoriesProvider);
             },
-            child: ListView.separated(
+            child: GridView.builder(
               physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
               ),
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 22),
+              padding: const EdgeInsets.fromLTRB(14, 16, 14, 22),
               itemCount: categoriasOrdenadas.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.03,
+              ),
               itemBuilder: (context, index) {
                 final cat = categoriasOrdenadas[index];
-
-                return _CategoryRow(
+                return _CategoryTile(
                   cat: cat,
                   icon: _getIconForCategory(cat.name),
                   subtitle: _getSubtitleForCategory(cat.name),
@@ -120,7 +119,6 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 
   int _categoryPriority(String name) {
     final n = name.toLowerCase();
-
     if (n.contains('video ip') || n.contains('ip hd')) return 0;
     if (n.contains('video') || n.contains('cctv')) return 1;
     if (n.contains('intrusión') || n.contains('intrusion') || n.contains('alarma')) {
@@ -136,58 +134,45 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
     }
     if (n.contains('drone')) return 9;
     if (n.contains('outlet')) return 10;
-
     return 99;
   }
 
   String _getSubtitleForCategory(String name) {
     final n = name.toLowerCase();
-
     if (n.contains('video ip') || n.contains('ip hd')) {
-      return 'Cámaras IP, grabadores, analítica y soluciones de vídeo';
+      return 'Cámaras IP y grabadores';
     }
-
     if (n.contains('video') || n.contains('cctv')) {
-      return 'Videovigilancia profesional para instalaciones de seguridad';
+      return 'Videovigilancia profesional';
     }
-
     if (n.contains('intrusión') || n.contains('intrusion') || n.contains('alarma')) {
-      return 'Sistemas de alarma, sensores, centrales y periféricos';
+      return 'Alarmas y sensores';
     }
-
     if (n.contains('incendio')) {
-      return 'Detección y prevención de incendios para proyectos técnicos';
+      return 'Detección y prevención';
     }
-
     if (n.contains('acceso')) {
-      return 'Control de accesos, identificación y gestión de entradas';
+      return 'Control de accesos';
     }
-
     if (n.contains('net')) {
-      return 'Networking, conectividad y comunicaciones profesionales';
+      return 'Redes y conectividad';
     }
-
     if (n.contains('antihurto')) {
-      return 'Soluciones EAS y protección antihurto para comercio';
+      return 'Protección EAS retail';
     }
-
     if (n.contains('complementos')) {
-      return 'Accesorios, soportes, alimentación y material auxiliar';
+      return 'Material auxiliar';
     }
-
     if (n.contains('energía') || n.contains('energia') || n.contains('solar')) {
-      return 'Alimentación, energía solar y soluciones autónomas';
+      return 'Alimentación y autonomía';
     }
-
     if (n.contains('drone')) {
-      return 'Equipos y soluciones profesionales para escenarios avanzados';
+      return 'Soluciones profesionales';
     }
-
     if (n.contains('outlet')) {
-      return 'Referencias disponibles en condiciones especiales';
+      return 'Condiciones especiales';
     }
-
-    return 'Familia de producto profesional MundiCam';
+    return 'Familia profesional';
   }
 
   Widget _buildErrorState(Object err) {
@@ -306,67 +291,51 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 
   IconData _getIconForCategory(String name) {
     final n = name.toLowerCase();
-
     if (n.contains('video') || n.contains('cctv')) {
       return Icons.videocam_rounded;
     }
-
     if (n.contains('ip')) {
       return Icons.settings_remote_rounded;
     }
-
     if (n.contains('antihurto')) {
       return Icons.lock_outline_rounded;
     }
-
     if (n.contains('complementos')) {
       return Icons.extension_rounded;
     }
-
-    if (n.contains('intrusión') ||
-        n.contains('intrusion') ||
-        n.contains('alarma')) {
+    if (n.contains('intrusión') || n.contains('intrusion') || n.contains('alarma')) {
       return Icons.notifications_active_rounded;
     }
-
     if (n.contains('acceso')) {
       return Icons.badge_rounded;
     }
-
     if (n.contains('incendio')) {
       return Icons.local_fire_department_rounded;
     }
-
     if (n.contains('net')) {
       return Icons.hub_outlined;
     }
-
     if (n.contains('drone')) {
       return Icons.flight_takeoff_rounded;
     }
-
-    if (n.contains('energía') ||
-        n.contains('energia') ||
-        n.contains('solar')) {
+    if (n.contains('energía') || n.contains('energia') || n.contains('solar')) {
       return Icons.wb_sunny_rounded;
     }
-
     if (n.contains('outlet')) {
       return Icons.loyalty_rounded;
     }
-
     return Icons.health_and_safety_rounded;
   }
 }
 
-class _CategoryRow extends StatelessWidget {
+class _CategoryTile extends StatelessWidget {
   final dynamic cat;
   final IconData icon;
   final String subtitle;
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
 
-  const _CategoryRow({
+  const _CategoryTile({
     required this.cat,
     required this.icon,
     required this.subtitle,
@@ -377,9 +346,7 @@ class _CategoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String name = cat.name.toString().toUpperCase();
-    final int count = cat.count is int
-        ? cat.count as int
-        : int.tryParse(cat.count.toString()) ?? 0;
+    final int count = cat.count is int ? cat.count as int : int.tryParse(cat.count.toString()) ?? 0;
 
     return Material(
       color: Colors.transparent,
@@ -398,92 +365,85 @@ class _CategoryRow extends StatelessWidget {
           );
         },
         child: Ink(
-          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(22),
             border: Border.all(color: const Color(0xFFE7E7E7)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
+                color: Colors.black.withValues(alpha: 0.032),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
             ],
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF8EAEA),
-                  shape: BoxShape.circle,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 13, 12, 12),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF8EAEA),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 25,
+                    color: AppColors.primary,
+                  ),
                 ),
-                child: Icon(
-                  icon,
-                  size: 26,
-                  color: AppColors.primary,
+                const SizedBox(height: 10),
+                Text(
+                  name,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    letterSpacing: 0.45,
+                    color: AppColors.textPrimary,
+                    fontFamily: 'Oswald',
+                    height: 1.05,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
-                        letterSpacing: 0.4,
-                        color: AppColors.textPrimary,
-                        fontFamily: 'Oswald',
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        height: 1.25,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF7A7A7A),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF0F2F5),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '$count referencias',
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF697386),
-                        ),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 5),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10.8,
+                    height: 1.15,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF7A7A7A),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: Colors.grey.shade400,
-                size: 26,
-              ),
-            ],
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0F2F5),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '$count refs.',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF697386),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
