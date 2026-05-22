@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/providers/badge_provider.dart';
-import 'package:mundicam/shared/widgets/badge_icon.dart';
 import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_page.dart';
 import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
@@ -56,6 +55,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
+
       setState(() {
         _loadBadges = true;
       });
@@ -115,7 +115,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     ref.invalidate(cartBadgeProvider);
   }
 
-  int _visibleQuoteBadgeCount() {
+  int _visibleQuoteBadgeCount(int rawQuoteCount) {
     final quotesAsync = ref.watch(quotesProvider);
 
     return quotesAsync.maybeWhen(
@@ -130,7 +130,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
         }).length;
       },
       orElse: () {
-        final rawQuoteCount = ref.watch(quoteBadgeProvider);
         return math.max(0, rawQuoteCount - _confirmedQuoteIds.length);
       },
     );
@@ -225,7 +224,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   Widget build(BuildContext context) {
     final int cartItemCount = _loadBadges ? ref.watch(cartBadgeProvider) : 0;
-    final int quoteCount = _loadBadges ? _visibleQuoteBadgeCount() : 0;
+    final int rawQuoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
+    final int quoteCount =
+    _loadBadges ? _visibleQuoteBadgeCount(rawQuoteCount) : 0;
 
     return PopScope(
       canPop: false,
@@ -239,6 +240,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
         }
       },
       child: Scaffold(
+        backgroundColor: const Color(0xFFF8F9FB),
         extendBody: false,
         resizeToAvoidBottomInset: false,
         body: IndexedStack(
@@ -283,122 +285,59 @@ class _MainScreenState extends ConsumerState<MainScreen>
             ),
           ],
         ),
-        bottomNavigationBar: _buildBottomNavigationBar(
-          context: context,
-          cartItemCount: cartItemCount,
-          quoteCount: quoteCount,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomNavigationBar({
-    required BuildContext context,
-    required int cartItemCount,
-    required int quoteCount,
-  }) {
-    final mediaQuery = MediaQuery.of(context);
-
-    final double systemBottomInset = math.max(
-      mediaQuery.padding.bottom,
-      mediaQuery.viewPadding.bottom,
-    );
-
-    final double safeBottomPadding =
-    systemBottomInset > 0 ? systemBottomInset + 4 : 10;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        bottom: true,
-        maintainBottomViewPadding: true,
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: 0,
-            right: 0,
-            top: 4,
-            bottom: safeBottomPadding,
-          ),
-          child: SizedBox(
+        bottomNavigationBar: SafeArea(
+          top: false,
+          minimum: EdgeInsets.zero,
+          child: Container(
             height: 58,
-            child: BottomNavigationBar(
-              currentIndex: _selectedIndex,
-              onTap: _onItemTapped,
-              type: BottomNavigationBarType.fixed,
-              backgroundColor: Colors.white,
-              elevation: 0,
-              selectedItemColor: AppColors.primary,
-              unselectedItemColor: const Color(0xFF7B8494),
-              selectedLabelStyle: const TextStyle(
-                fontFamily: 'Oswald',
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                height: 1.1,
-              ),
-              unselectedLabelStyle: const TextStyle(
-                fontFamily: 'Oswald',
-                fontWeight: FontWeight.w500,
-                fontSize: 10.5,
-                height: 1.1,
-              ),
-              selectedFontSize: 11,
-              unselectedFontSize: 10.5,
-              iconSize: 23,
-              items: [
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.home_outlined),
-                  activeIcon: Icon(Icons.home),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                _BottomTabItem(
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home,
                   label: 'Inicio',
+                  isSelected: _selectedIndex == 0,
+                  onTap: () => _onItemTapped(0),
                 ),
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.grid_view),
-                  activeIcon: Icon(Icons.grid_view_rounded),
+                _BottomTabItem(
+                  icon: Icons.grid_view,
+                  activeIcon: Icons.grid_view_rounded,
                   label: 'Productos',
+                  isSelected: _selectedIndex == 1,
+                  onTap: () => _onItemTapped(1),
                 ),
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.local_shipping_outlined),
-                  activeIcon: Icon(Icons.local_shipping),
+                _BottomTabItem(
+                  icon: Icons.local_shipping_outlined,
+                  activeIcon: Icons.local_shipping,
                   label: 'Pedidos',
+                  isSelected: _selectedIndex == 2,
+                  onTap: () => _onItemTapped(2),
                 ),
-                BottomNavigationBarItem(
-                  icon: BadgeIcon(
-                    icon: Icons.description_outlined,
-                    count: quoteCount,
-                    isActive: _selectedIndex == 3,
-                    size: 23,
-                  ),
-                  activeIcon: BadgeIcon(
-                    icon: Icons.description,
-                    count: quoteCount,
-                    isActive: true,
-                    size: 23,
-                  ),
+                _BottomTabItem(
+                  icon: Icons.description_outlined,
+                  activeIcon: Icons.description,
                   label: 'Presupuestos',
+                  isSelected: _selectedIndex == 3,
+                  badgeCount: quoteCount,
+                  onTap: () => _onItemTapped(3),
                 ),
-                BottomNavigationBarItem(
-                  icon: BadgeIcon(
-                    icon: Icons.shopping_cart_outlined,
-                    count: cartItemCount,
-                    isActive: _selectedIndex == 4,
-                    size: 23,
-                  ),
-                  activeIcon: BadgeIcon(
-                    icon: Icons.shopping_cart,
-                    count: cartItemCount,
-                    isActive: true,
-                    size: 23,
-                  ),
+                _BottomTabItem(
+                  icon: Icons.shopping_cart_outlined,
+                  activeIcon: Icons.shopping_cart,
                   label: 'Carrito',
+                  isSelected: _selectedIndex == 4,
+                  badgeCount: cartItemCount,
+                  onTap: () => _onItemTapped(4),
                 ),
               ],
             ),
@@ -424,6 +363,112 @@ class _MainScreenState extends ConsumerState<MainScreen>
           settings: routeSettings,
         );
       },
+    );
+  }
+}
+
+class _BottomTabItem extends StatelessWidget {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool isSelected;
+  final int badgeCount;
+  final VoidCallback onTap;
+
+  const _BottomTabItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+    this.badgeCount = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = isSelected ? AppColors.primary : Colors.grey.shade500;
+    final bool showBadge = badgeCount > 0;
+
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: AppColors.primary.withValues(alpha: 0.08),
+          highlightColor: AppColors.primary.withValues(alpha: 0.04),
+          child: SizedBox(
+            height: 58,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  height: 24,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      Icon(
+                        isSelected ? activeIcon : icon,
+                        size: 21,
+                        color: color,
+                      ),
+                      if (showBadge)
+                        Positioned(
+                          right: -12,
+                          top: -5,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade600,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 1.2,
+                              ),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              badgeCount > 99 ? '99+' : '$badgeCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8.5,
+                                fontWeight: FontWeight.w800,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 3),
+                SizedBox(
+                  height: 13,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: isSelected ? 10.5 : 9.5,
+                        fontWeight:
+                        isSelected ? FontWeight.w800 : FontWeight.w500,
+                        fontFamily: isSelected ? 'Oswald' : null,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
