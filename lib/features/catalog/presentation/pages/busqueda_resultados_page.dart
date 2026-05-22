@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
@@ -67,7 +68,8 @@ class BusquedaResultadosPage extends ConsumerWidget {
             return _buildEmptyState(context, cleanedQuery);
           }
 
-          final List<String> detectedTerms = _SearchEngine.detectedReadableTerms(cleanedQuery);
+          final List<String> detectedTerms =
+          _SearchEngine.detectedReadableTerms(cleanedQuery);
 
           return Column(
             children: [
@@ -275,6 +277,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
 // ------------------------------------------------------------
 // MOTOR LOCAL DE RELEVANCIA PARA BÚSQUEDA
 // ------------------------------------------------------------
+
 class _SearchEngine {
   static final Map<String, List<String>> _synonyms = {
     'camara': [
@@ -400,6 +403,7 @@ class _SearchEngine {
 
   static List<Product> sortByRelevance(List<Product> products, String query) {
     final List<String> terms = _expandedTerms(query);
+
     final List<_ScoredProduct> scored = products.map((product) {
       return _ScoredProduct(
         product: product,
@@ -410,6 +414,7 @@ class _SearchEngine {
     scored.sort((a, b) {
       final int byScore = b.score.compareTo(a.score);
       if (byScore != 0) return byScore;
+
       return a.product.name.compareTo(b.product.name);
     });
 
@@ -421,18 +426,21 @@ class _SearchEngine {
     final String name = _normalize(product.name);
     final String sku = _normalize(product.sku);
     final String description = _normalize(product.shortDescription);
+
     final String fullText = '$name $sku $description';
 
     int score = 0;
 
     if (sku.isNotEmpty && sku == normalizedQuery) score += 500;
     if (sku.isNotEmpty && sku.contains(normalizedQuery)) score += 300;
+
     if (name == normalizedQuery) score += 260;
     if (name.startsWith(normalizedQuery)) score += 210;
     if (name.contains(normalizedQuery)) score += 170;
 
     for (final brand in _knownBrands) {
       final String normalizedBrand = _normalize(brand);
+
       if (normalizedQuery.contains(normalizedBrand)) {
         if (name.contains(normalizedBrand)) score += 120;
         if (description.contains(normalizedBrand)) score += 60;
@@ -442,6 +450,7 @@ class _SearchEngine {
 
     for (final term in terms) {
       if (term.length < 2) continue;
+
       if (name.contains(term)) score += 38;
       if (sku.contains(term)) score += 45;
       if (description.contains(term)) score += 18;
@@ -449,6 +458,7 @@ class _SearchEngine {
     }
 
     if (product.isInstock) score += 8;
+
     if (name.contains('kit') && normalizedQuery.contains('kit')) score += 35;
     if (name.contains('poe') && normalizedQuery.contains('poe')) score += 35;
     if (name.contains('wifi') && normalizedQuery.contains('wifi')) score += 35;
@@ -463,6 +473,7 @@ class _SearchEngine {
 
   static List<String> _expandedTerms(String query) {
     final String normalized = _normalize(query);
+
     final Set<String> terms = {};
 
     for (final raw in normalized.split(' ')) {
@@ -474,10 +485,12 @@ class _SearchEngine {
 
     _synonyms.forEach((key, values) {
       final String normalizedKey = _normalize(key);
+
       if (normalized.contains(normalizedKey) ||
           values.any((v) => normalized.contains(_normalize(v)))) {
         for (final value in values) {
           final normalizedValue = _normalize(value);
+
           for (final part in normalizedValue.split(' ')) {
             if (part.trim().length >= 2) {
               terms.add(part.trim());
@@ -489,6 +502,7 @@ class _SearchEngine {
 
     for (final brand in _knownBrands) {
       final String normalizedBrand = _normalize(brand);
+
       if (normalized.contains(normalizedBrand)) {
         for (final part in normalizedBrand.split(' ')) {
           if (part.trim().length >= 2) {
@@ -628,6 +642,7 @@ class _SearchEngine {
     });
 
     text = text.replaceAll(RegExp(r'\s+'), ' ');
+
     return text.trim();
   }
 
@@ -681,6 +696,7 @@ class _ScoredProduct {
 // ------------------------------------------------------------
 // TILE PRODUCTO RESULTADO BÚSQUEDA
 // ------------------------------------------------------------
+
 class ProductTileBusqueda extends ConsumerStatefulWidget {
   final Product p;
   final FirebaseService firebase;
@@ -696,7 +712,8 @@ class ProductTileBusqueda extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductTileBusqueda> createState() => _ProductTileBusquedaState();
+  ConsumerState<ProductTileBusqueda> createState() =>
+      _ProductTileBusquedaState();
 }
 
 class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
@@ -709,41 +726,24 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   String _formatearPrecio(double value) {
     if (value <= 0) return 'Bajo consulta';
+
     return '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
-  }
-
-  void _closeSearchStackAndGo(VoidCallback callback) {
-    final navigator = Navigator.of(context);
-    if (navigator.canPop()) {
-      navigator.popUntil((route) => route.isFirst);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      callback();
-    });
-  }
-
-  void _goToCartKeepingTabs() {
-    final goCart = widget.onGoCart;
-    if (goCart != null) {
-      _closeSearchStackAndGo(goCart);
-      return;
-    }
-
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$cantidad x ${widget.p.name} añadido al carrito'),
-        backgroundColor: AppColors.primary,
-        duration: const Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
   }
 
   void _goToQuotesKeepingTabs() {
     final goQuotes = widget.onGoQuotes;
+
     if (goQuotes != null) {
-      _closeSearchStackAndGo(goQuotes);
+      final navigator = Navigator.of(context);
+
+      if (navigator.canPop()) {
+        navigator.popUntil((route) => route.isFirst);
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        goQuotes();
+      });
+
       return;
     }
 
@@ -760,11 +760,13 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Future<String?> _getCurrentUserEmail() async {
     final appUser = ref.read(currentUserProvider).value;
+
     if (appUser != null && appUser.email.trim().isNotEmpty) {
       return appUser.email.trim();
     }
 
     final user = FirebaseAuth.instance.currentUser;
+
     if (user == null) return null;
 
     try {
@@ -775,6 +777,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
       if (userDoc.exists && userDoc.data() != null) {
         final email = userDoc.data()?['email']?.toString();
+
         if (email != null && email.trim().isNotEmpty) {
           return email.trim();
         }
@@ -789,6 +792,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
     if (user.providerData.isNotEmpty) {
       final providerEmail = user.providerData.first.email;
+
       if (providerEmail != null && providerEmail.trim().isNotEmpty) {
         return providerEmail.trim();
       }
@@ -803,7 +807,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     final double precio = _precioDouble(p);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: 8),
       color: Colors.white,
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -843,9 +847,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: AppColors.textPrimary,
+                          height: 1.25,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 5),
                       Text(
                         p.isInstock ? '● Disponible' : '○ Sin stock',
                         style: TextStyle(
@@ -867,69 +872,27 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 6),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          _formatearPrecio(precio),
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.primary,
-                            fontFamily: 'Oswald',
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
+
+          const SizedBox(height: 12),
+
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: SizedBox(
-                  height: 36,
-                  child: ElevatedButton(
-                    onPressed: p.isInstock
-                        ? () {
-                      ref
-                          .read(cartProvider.notifier)
-                          .addProduct(p, cantidad);
-                      _goToCartKeepingTabs();
-                    }
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                      p.isInstock ? AppColors.primary : Colors.grey.shade400,
-                      foregroundColor: Colors.white,
-                      elevation: 1,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 0),
-                    ),
-                    child: Text(
-                      p.isInstock ? 'COMPRAR YA' : 'SIN STOCK',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
                 child: Opacity(
-                  opacity: p.isInstock ? 1 : 0.5,
+                  opacity: p.isInstock ? 1.0 : 0.5,
                   child: Container(
-                    height: 36,
+                    height: 38,
                     decoration: BoxDecoration(
+                      color: const Color(0xFFF8F9FB),
                       border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -948,9 +911,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                         Text(
                           '$cantidad',
                           style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: p.isInstock ? Colors.black : Colors.grey,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color:
+                            p.isInstock ? AppColors.textPrimary : Colors.grey,
                           ),
                         ),
                         _qtyBtn(
@@ -970,101 +934,106 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   ),
                 ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    _formatearPrecio(precio),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.primary,
+                      fontFamily: 'Oswald',
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: ElevatedButton(
+              onPressed: p.isInstock
+                  ? () {
+                ref.read(cartProvider.notifier).addProduct(p, cantidad);
+
+                ScaffoldMessenger.of(context).clearSnackBars();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '$cantidad x ${p.name} añadido al carrito',
+                    ),
+                    backgroundColor: AppColors.primary,
+                    duration: const Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                p.isInstock ? AppColors.primary : Colors.grey.shade400,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 0),
+              ),
+              child: Text(
+                p.isInstock ? 'AÑADIR AL CARRITO' : 'SIN STOCK',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+          ),
+
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 36,
-                  child: OutlinedButton(
-                    onPressed: p.isInstock
-                        ? () {
-                      ref
-                          .read(cartProvider.notifier)
-                          .addProduct(p, cantidad);
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            '$cantidad x ${p.name} añadido al carrito',
-                          ),
-                          backgroundColor: AppColors.primary,
-                          duration: const Duration(seconds: 1),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
-                        : null,
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: p.isInstock
-                            ? AppColors.primary
-                            : Colors.grey.shade400,
-                        width: 1.3,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 0),
-                    ),
-                    child: Text(
-                      p.isInstock ? 'AÑADIR CARRITO' : 'SIN STOCK',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color:
-                        p.isInstock ? AppColors.primary : Colors.grey,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
+
+          SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: OutlinedButton(
+              onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: BorderSide(
+                  color: AppColors.primary.withValues(alpha: 0.9),
+                  width: 1.3,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 0),
+              ),
+              child: _isAddingToQuote
+                  ? const SizedBox(
+                width: 15,
+                height: 15,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primary,
+                ),
+              )
+                  : const Text(
+                'AÑADIR AL PRESUPUESTO',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: SizedBox(
-                  height: 36,
-                  child: OutlinedButton.icon(
-                    onPressed:
-                    _isAddingToQuote ? null : () => _addToQuote(p),
-                    icon: _isAddingToQuote
-                        ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.orange,
-                      ),
-                    )
-                        : Icon(
-                      Icons.description_outlined,
-                      size: 14,
-                      color: Colors.orange.shade700,
-                    ),
-                    label: Text(
-                      _isAddingToQuote ? '...' : 'PRESUPUESTO',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.orange.shade700,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.orange.shade700,
-                      side: BorderSide(
-                        color: Colors.orange.shade700,
-                        width: 1.3,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 0),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),
@@ -1079,13 +1048,12 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       }) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
-      child: Container(
-        width: 30,
-        height: 36,
-        alignment: Alignment.center,
+      child: SizedBox(
+        width: 38,
+        height: 38,
         child: Icon(
           icon,
-          size: 16,
+          size: 17,
           color: enabled
               ? (isPrimary ? AppColors.primary : Colors.black87)
               : Colors.grey.shade400,
@@ -1096,6 +1064,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
+
     setState(() {
       _isAddingToQuote = true;
     });
@@ -1114,6 +1083,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
             ),
           );
         }
+
         return;
       }
 
@@ -1156,6 +1126,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       );
     } catch (e) {
       debugPrint('❌ Error en _addToQuote búsqueda: $e');
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1179,7 +1150,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 class ProductImageBusqueda extends StatelessWidget {
   final Product p;
 
-  const ProductImageBusqueda({super.key, required this.p});
+  const ProductImageBusqueda({
+    super.key,
+    required this.p,
+  });
 
   @override
   Widget build(BuildContext context) {
