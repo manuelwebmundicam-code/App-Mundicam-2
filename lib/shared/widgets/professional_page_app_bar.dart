@@ -23,7 +23,7 @@ class ProfessionalPageAppBar extends StatelessWidget
   });
 
   @override
-  Size get preferredSize => const Size.fromHeight(98);
+  Size get preferredSize => const Size.fromHeight(108);
 
   @override
   Widget build(BuildContext context) {
@@ -35,96 +35,128 @@ class ProfessionalPageAppBar extends StatelessWidget
         decoration: const BoxDecoration(
           color: AppColors.primary,
           borderRadius: BorderRadius.only(
-            bottomLeft: Radius.circular(28),
-            bottomRight: Radius.circular(28),
+            bottomLeft: Radius.circular(30),
+            bottomRight: Radius.circular(30),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black12,
-              blurRadius: 8,
-              offset: Offset(0, 2),
+              color: Color(0x22000000),
+              blurRadius: 12,
+              offset: Offset(0, 4),
             ),
           ],
         ),
         child: SafeArea(
           bottom: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Barra superior
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back_ios_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                      onPressed: onBack,
-                      tooltip: backTooltip,
-                    ),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                          letterSpacing: 0.8,
-                          color: Colors.white,
-                          fontFamily: 'Oswald',
+          child: SizedBox(
+            height: 108,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                const SizedBox(height: 5),
+                SizedBox(
+                  height: 48,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Positioned(
+                        left: 4,
+                        top: 0,
+                        bottom: 0,
+                        child: SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            onPressed: onBack,
+                            tooltip: backTooltip,
+                            splashRadius: 22,
+                          ),
                         ),
                       ),
-                    ),
-                    if (onRefresh != null)
-                      IconButton(
-                        icon: const Icon(
-                          Icons.refresh_rounded,
-                          color: Colors.white70,
-                          size: 20,
+                      Positioned.fill(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 72),
+                            child: Text(
+                              title.toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18,
+                                letterSpacing: 1.05,
+                                color: Colors.white,
+                                fontFamily: 'Oswald',
+                                height: 1.05,
+                              ),
+                            ),
+                          ),
                         ),
-                        onPressed: onRefresh,
-                        tooltip: refreshTooltip,
-                      )
-                    else
-                      const SizedBox(width: 48),
-                  ],
+                      ),
+                      Positioned(
+                        right: 4,
+                        top: 0,
+                        bottom: 0,
+                        child: SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: onRefresh != null
+                              ? IconButton(
+                            icon: const Icon(
+                              Icons.refresh_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                            onPressed: onRefresh,
+                            tooltip: refreshTooltip,
+                            splashRadius: 22,
+                          )
+                              : const SizedBox.shrink(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              // Banda inferior
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      icon,
-                      color: Colors.white.withValues(alpha: 0.5),
-                      size: 15,
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w300,
-                          letterSpacing: 0.3,
+                if (subtitle.trim().isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          icon,
+                          color: Colors.white.withValues(alpha: 0.82),
+                          size: 14,
                         ),
-                        textAlign: TextAlign.center,
-                      ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w400,
+                              letterSpacing: 0.25,
+                              height: 1.1,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-            ],
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),

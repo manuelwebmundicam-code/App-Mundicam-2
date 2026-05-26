@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
@@ -13,6 +12,7 @@ import 'package:mundicam/features/quotes/presentation/providers/quote_provider.d
 import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class BusquedaResultadosPage extends ConsumerWidget {
   final String query;
@@ -33,15 +33,12 @@ class BusquedaResultadosPage extends ConsumerWidget {
     final FirebaseService firebase = FirebaseService();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F2F2),
-      appBar: AppBar(
-        title: Text(
-          'Resultados: "$cleanedQuery"',
-          style: const TextStyle(fontSize: 16, fontFamily: 'Oswald'),
-        ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        centerTitle: true,
+      backgroundColor: const Color(0xFFF5F6F8),
+      appBar: ProfessionalPageAppBar(
+        title: cleanedQuery.isEmpty ? 'RESULTADOS' : 'RESULTADOS: $cleanedQuery',
+        subtitle: '',
+        icon: Icons.search_rounded,
+        onBack: () => Navigator.of(context).pop(),
       ),
       body: searchAsync.when(
         loading: () => const Center(
@@ -68,32 +65,43 @@ class BusquedaResultadosPage extends ConsumerWidget {
             return _buildEmptyState(context, cleanedQuery);
           }
 
-          final List<String> detectedTerms =
-          _SearchEngine.detectedReadableTerms(cleanedQuery);
+          final detectedTerms = _SearchEngine.detectedReadableTerms(cleanedQuery);
 
           return Column(
             children: [
               Container(
                 width: double.infinity,
-                color: Colors.white,
-                padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
+                margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFFE7E7E7)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.search_rounded,
-                          size: 17,
-                          color: Colors.grey[700],
+                          size: 18,
+                          color: AppColors.primary,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '${productos.length} producto${productos.length != 1 ? 's' : ''} encontrado${productos.length != 1 ? 's' : ''}',
-                            style: TextStyle(
-                              color: Colors.grey[800],
-                              fontWeight: FontWeight.w700,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w800,
                               fontSize: 13,
                             ),
                           ),
@@ -115,16 +123,14 @@ class BusquedaResultadosPage extends ConsumerWidget {
                               color: AppColors.primary.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: AppColors.primary.withValues(
-                                  alpha: 0.18,
-                                ),
+                                color: AppColors.primary.withValues(alpha: 0.18),
                               ),
                             ),
                             child: Text(
                               term,
                               style: const TextStyle(
                                 fontSize: 11,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w800,
                                 color: AppColors.primary,
                               ),
                             ),
@@ -137,7 +143,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
               ),
               Expanded(
                 child: ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                   itemCount: productos.length,
                   itemBuilder: (context, index) {
                     return ProductTileBusqueda(
@@ -163,14 +169,27 @@ class BusquedaResultadosPage extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 60, color: Colors.red),
-            const SizedBox(height: 16),
+            Container(
+              width: 96,
+              height: 96,
+              decoration: const BoxDecoration(
+                color: Color(0xFFF8EAEA),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.error_outline,
+                size: 48,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 18),
             const Text(
               'Error al buscar productos',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                fontFamily: 'Oswald',
+                fontWeight: FontWeight.w900,
                 color: Colors.black87,
               ),
             ),
@@ -178,7 +197,10 @@ class BusquedaResultadosPage extends ConsumerWidget {
             Text(
               '$error',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 13,
+              ),
             ),
             const SizedBox(height: 18),
             OutlinedButton.icon(
@@ -197,7 +219,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
   }
 
   Widget _buildEmptyState(BuildContext context, String cleanedQuery) {
-    final List<String> suggestions = _SearchEngine.suggestionsFor(cleanedQuery);
+    final suggestions = _SearchEngine.suggestionsFor(cleanedQuery);
 
     return Center(
       child: Padding(
@@ -205,14 +227,27 @@ class BusquedaResultadosPage extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded, size: 90, color: Colors.grey[350]),
+            Container(
+              width: 110,
+              height: 110,
+              decoration: const BoxDecoration(
+                color: Color(0xFFF8EAEA),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.search_off_rounded,
+                size: 58,
+                color: AppColors.primary,
+              ),
+            ),
             const SizedBox(height: 20),
             Text(
               'No encontramos "$cleanedQuery"',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 20,
-                fontWeight: FontWeight.bold,
+                fontFamily: 'Oswald',
+                fontWeight: FontWeight.w900,
                 color: Colors.black87,
               ),
             ),
@@ -273,10 +308,6 @@ class BusquedaResultadosPage extends ConsumerWidget {
     );
   }
 }
-
-// ------------------------------------------------------------
-// MOTOR LOCAL DE RELEVANCIA PARA BÚSQUEDA
-// ------------------------------------------------------------
 
 class _SearchEngine {
   static final Map<String, List<String>> _synonyms = {
@@ -350,7 +381,15 @@ class _SearchEngine {
       'tplink',
       'tp-link',
     ],
-    '4g': ['4g', 'lte', 'sim', 'm2m', 'iot', 'router 4g', 'multioperador'],
+    '4g': [
+      '4g',
+      'lte',
+      'sim',
+      'm2m',
+      'iot',
+      'router 4g',
+      'multioperador',
+    ],
     'solar': [
       'solar',
       'panel solar',
@@ -402,19 +441,19 @@ class _SearchEngine {
   }
 
   static List<Product> sortByRelevance(List<Product> products, String query) {
-    final List<String> terms = _expandedTerms(query);
-
-    final List<_ScoredProduct> scored = products.map((product) {
-      return _ScoredProduct(
+    final terms = _expandedTerms(query);
+    final scored = products
+        .map(
+          (product) => _ScoredProduct(
         product: product,
         score: _score(product, query, terms),
-      );
-    }).toList();
+      ),
+    )
+        .toList();
 
     scored.sort((a, b) {
-      final int byScore = b.score.compareTo(a.score);
+      final byScore = b.score.compareTo(a.score);
       if (byScore != 0) return byScore;
-
       return a.product.name.compareTo(b.product.name);
     });
 
@@ -422,25 +461,22 @@ class _SearchEngine {
   }
 
   static int _score(Product product, String query, List<String> terms) {
-    final String normalizedQuery = _normalize(query);
-    final String name = _normalize(product.name);
-    final String sku = _normalize(product.sku);
-    final String description = _normalize(product.shortDescription);
-
-    final String fullText = '$name $sku $description';
+    final normalizedQuery = _normalize(query);
+    final name = _normalize(product.name);
+    final sku = _normalize(product.sku);
+    final description = _normalize(product.shortDescription);
+    final fullText = '$name $sku $description';
 
     int score = 0;
 
     if (sku.isNotEmpty && sku == normalizedQuery) score += 500;
     if (sku.isNotEmpty && sku.contains(normalizedQuery)) score += 300;
-
     if (name == normalizedQuery) score += 260;
     if (name.startsWith(normalizedQuery)) score += 210;
     if (name.contains(normalizedQuery)) score += 170;
 
     for (final brand in _knownBrands) {
-      final String normalizedBrand = _normalize(brand);
-
+      final normalizedBrand = _normalize(brand);
       if (normalizedQuery.contains(normalizedBrand)) {
         if (name.contains(normalizedBrand)) score += 120;
         if (description.contains(normalizedBrand)) score += 60;
@@ -450,7 +486,6 @@ class _SearchEngine {
 
     for (final term in terms) {
       if (term.length < 2) continue;
-
       if (name.contains(term)) score += 38;
       if (sku.contains(term)) score += 45;
       if (description.contains(term)) score += 18;
@@ -472,42 +507,31 @@ class _SearchEngine {
   }
 
   static List<String> _expandedTerms(String query) {
-    final String normalized = _normalize(query);
-
-    final Set<String> terms = {};
+    final normalized = _normalize(query);
+    final terms = <String>{};
 
     for (final raw in normalized.split(' ')) {
       final term = raw.trim();
-      if (term.length >= 2) {
-        terms.add(term);
-      }
+      if (term.length >= 2) terms.add(term);
     }
 
     _synonyms.forEach((key, values) {
-      final String normalizedKey = _normalize(key);
-
+      final normalizedKey = _normalize(key);
       if (normalized.contains(normalizedKey) ||
           values.any((v) => normalized.contains(_normalize(v)))) {
         for (final value in values) {
-          final normalizedValue = _normalize(value);
-
-          for (final part in normalizedValue.split(' ')) {
-            if (part.trim().length >= 2) {
-              terms.add(part.trim());
-            }
+          for (final part in _normalize(value).split(' ')) {
+            if (part.trim().length >= 2) terms.add(part.trim());
           }
         }
       }
     });
 
     for (final brand in _knownBrands) {
-      final String normalizedBrand = _normalize(brand);
-
+      final normalizedBrand = _normalize(brand);
       if (normalized.contains(normalizedBrand)) {
         for (final part in normalizedBrand.split(' ')) {
-          if (part.trim().length >= 2) {
-            terms.add(part.trim());
-          }
+          if (part.trim().length >= 2) terms.add(part.trim());
         }
       }
     }
@@ -516,8 +540,8 @@ class _SearchEngine {
   }
 
   static List<String> detectedReadableTerms(String query) {
-    final String normalized = _normalize(query);
-    final List<String> detected = [];
+    final normalized = _normalize(query);
+    final detected = <String>[];
 
     for (final brand in _knownBrands) {
       if (normalized.contains(_normalize(brand))) {
@@ -525,15 +549,10 @@ class _SearchEngine {
       }
     }
 
-    if (_containsAny(normalized, [
-      'camara',
-      'camaras',
-      'cctv',
-      'turret',
-      'bullet',
-      'domo',
-      'ptz',
-    ])) {
+    if (_containsAny(
+      normalized,
+      ['camara', 'camaras', 'cctv', 'turret', 'bullet', 'domo', 'ptz'],
+    )) {
       detected.add('CCTV / Cámaras');
     }
 
@@ -541,13 +560,10 @@ class _SearchEngine {
       detected.add('Grabadores');
     }
 
-    if (_containsAny(normalized, [
-      'alarma',
-      'intrusion',
-      'hub',
-      'detector',
-      'sirena',
-    ])) {
+    if (_containsAny(
+      normalized,
+      ['alarma', 'intrusion', 'hub', 'detector', 'sirena'],
+    )) {
       detected.add('Intrusión');
     }
 
@@ -555,14 +571,10 @@ class _SearchEngine {
       detected.add('Incendio');
     }
 
-    if (_containsAny(normalized, [
-      'poe',
-      'switch',
-      'router',
-      'wifi',
-      'networking',
-      'red',
-    ])) {
+    if (_containsAny(
+      normalized,
+      ['poe', 'switch', 'router', 'wifi', 'networking', 'red'],
+    )) {
       detected.add('Networking');
     }
 
@@ -574,7 +586,7 @@ class _SearchEngine {
   }
 
   static List<String> suggestionsFor(String query) {
-    final String normalized = _normalize(query);
+    final normalized = _normalize(query);
 
     if (_containsAny(normalized, ['camara', 'camera', 'cctv'])) {
       return ['cámara IP', 'cámara PoE', 'cámara Dahua', 'cámara Hikvision'];
@@ -602,7 +614,7 @@ class _SearchEngine {
   static String _normalize(String value) {
     String text = value.toLowerCase().trim();
 
-    const Map<String, String> replacements = {
+    const replacements = {
       'á': 'a',
       'à': 'a',
       'ä': 'a',
@@ -637,13 +649,9 @@ class _SearchEngine {
       ']': ' ',
     };
 
-    replacements.forEach((from, to) {
-      text = text.replaceAll(from, to);
-    });
+    replacements.forEach((from, to) => text = text.replaceAll(from, to));
 
-    text = text.replaceAll(RegExp(r'\s+'), ' ');
-
-    return text.trim();
+    return text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   static bool _containsAny(String source, List<String> values) {
@@ -693,10 +701,6 @@ class _ScoredProduct {
   });
 }
 
-// ------------------------------------------------------------
-// TILE PRODUCTO RESULTADO BÚSQUEDA
-// ------------------------------------------------------------
-
 class ProductTileBusqueda extends ConsumerStatefulWidget {
   final Product p;
   final FirebaseService firebase;
@@ -712,8 +716,7 @@ class ProductTileBusqueda extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductTileBusqueda> createState() =>
-      _ProductTileBusquedaState();
+  ConsumerState<ProductTileBusqueda> createState() => _ProductTileBusquedaState();
 }
 
 class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
@@ -725,28 +728,17 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   }
 
   String _formatearPrecio(double value) {
-    if (value <= 0) return 'Bajo consulta';
-
-    return '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
+    return value <= 0 ? 'Bajo consulta' : '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
   }
 
   void _goToQuotesKeepingTabs() {
     final goQuotes = widget.onGoQuotes;
-
     if (goQuotes != null) {
       final navigator = Navigator.of(context);
-
-      if (navigator.canPop()) {
-        navigator.popUntil((route) => route.isFirst);
-      }
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        goQuotes();
-      });
-
+      if (navigator.canPop()) navigator.popUntil((route) => route.isFirst);
+      WidgetsBinding.instance.addPostFrameCallback((_) => goQuotes());
       return;
     }
-
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -760,13 +752,11 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Future<String?> _getCurrentUserEmail() async {
     final appUser = ref.read(currentUserProvider).value;
-
     if (appUser != null && appUser.email.trim().isNotEmpty) {
       return appUser.email.trim();
     }
 
     final user = FirebaseAuth.instance.currentUser;
-
     if (user == null) return null;
 
     try {
@@ -774,10 +764,8 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
           .collection('users')
           .doc(user.uid)
           .get();
-
       if (userDoc.exists && userDoc.data() != null) {
         final email = userDoc.data()?['email']?.toString();
-
         if (email != null && email.trim().isNotEmpty) {
           return email.trim();
         }
@@ -792,247 +780,294 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
     if (user.providerData.isNotEmpty) {
       final providerEmail = user.providerData.first.email;
-
       if (providerEmail != null && providerEmail.trim().isNotEmpty) {
         return providerEmail.trim();
       }
     }
-
     return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final Product p = widget.p;
-    final double precio = _precioDouble(p);
+    final p = widget.p;
+    final precio = _precioDouble(p);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      color: Colors.white,
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ProductDetailScreen(
-                    product: p,
-                    onGoCart: widget.onGoCart,
-                    onGoQuotes: widget.onGoQuotes,
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE7E7E7)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProductDetailScreen(
+                      product: p,
+                      onGoCart: widget.onGoCart,
+                      onGoQuotes: widget.onGoQuotes,
+                    ),
                   ),
-                ),
-              );
-            },
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Hero(
-                  tag: 'search_${p.id}',
-                  child: ProductImageBusqueda(p: p),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        p.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
-                          height: 1.25,
+                );
+              },
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Hero(
+                    tag: 'search_${p.id}',
+                    child: ProductImageBusqueda(p: p),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                p.name,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.textPrimary,
+                                  height: 1.17,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            _stockChip(p),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        p.isInstock ? '● Disponible' : '○ Sin stock',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: p.isInstock ? Colors.green : Colors.red,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (p.shortDescription.trim().isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                        if (p.shortDescription.trim().isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            p.shortDescription,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF6B7280),
+                              height: 1.25,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 10),
                         Text(
-                          p.shortDescription,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                            height: 1.25,
+                          _formatearPrecio(precio),
+                          style: TextStyle(
+                            fontSize: precio > 0 ? 22 : 18,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.primary,
+                            fontFamily: 'Oswald',
+                            height: 1,
                           ),
                         ),
                       ],
-                    ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _quantitySelector(p),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SizedBox(
+                    height: 44,
+                    child: ElevatedButton.icon(
+                      onPressed: p.isInstock
+                          ? () {
+                        ref
+                            .read(cartProvider.notifier)
+                            .addProduct(p, cantidad);
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '$cantidad x ${p.name} añadido al carrito',
+                            ),
+                            backgroundColor: AppColors.primary,
+                            duration: const Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                          : null,
+                      icon: Icon(
+                        p.isInstock ? Icons.shopping_cart_outlined : Icons.block_rounded,
+                        size: 17,
+                        color: Colors.white,
+                      ),
+                      label: Text(
+                        p.isInstock ? 'AÑADIR CARRITO' : 'SIN STOCK',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.2,
+                          color: Colors.white,
+                          fontFamily: 'Oswald',
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: p.isInstock ? AppColors.primary : Colors.grey.shade400,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
-          ),
-
-          const SizedBox(height: 12),
-
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Opacity(
-                  opacity: p.isInstock ? 1.0 : 0.5,
-                  child: Container(
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8F9FB),
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _qtyBtn(
-                          Icons.remove,
-                          enabled: p.isInstock,
-                          onTap: () {
-                            if (cantidad > 1) {
-                              setState(() {
-                                cantidad--;
-                              });
-                            }
-                          },
-                        ),
-                        Text(
-                          '$cantidad',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color:
-                            p.isInstock ? AppColors.textPrimary : Colors.grey,
-                          ),
-                        ),
-                        _qtyBtn(
-                          Icons.add,
-                          enabled: p.isInstock,
-                          isPrimary: p.isInstock,
-                          onTap: () {
-                            if (p.isInstock) {
-                              setState(() {
-                                cantidad++;
-                              });
-                            }
-                          },
-                        ),
-                      ],
-                    ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 42,
+              child: OutlinedButton.icon(
+                onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
+                icon: _isAddingToQuote
+                    ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primary,
+                  ),
+                )
+                    : const Icon(Icons.description_outlined, size: 17),
+                label: Text(
+                  _isAddingToQuote ? 'AÑADIENDO...' : 'AÑADIR AL PRESUPUESTO',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11.8,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.2,
+                    fontFamily: 'Oswald',
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    _formatearPrecio(precio),
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 21,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.primary,
-                      fontFamily: 'Oswald',
-                      height: 1,
-                    ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.textPrimary,
+                  disabledForegroundColor: Colors.grey.shade500,
+                  side: const BorderSide(
+                    color: Color(0xFFD9DEE7),
+                    width: 1.2,
                   ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 10),
-
-          SizedBox(
-            width: double.infinity,
-            height: 40,
-            child: ElevatedButton(
-              onPressed: p.isInstock
-                  ? () {
-                ref.read(cartProvider.notifier).addProduct(p, cantidad);
-
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      '$cantidad x ${p.name} añadido al carrito',
-                    ),
-                    backgroundColor: AppColors.primary,
-                    duration: const Duration(seconds: 1),
-                    behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                );
-              }
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                p.isInstock ? AppColors.primary : Colors.grey.shade400,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 0),
-              ),
-              child: Text(
-                p.isInstock ? 'AÑADIR AL CARRITO' : 'SIN STOCK',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.2,
                 ),
               ),
             ),
-          ),
+          ],
+        ),
+      ),
+    );
+  }
 
-          const SizedBox(height: 8),
-
-          SizedBox(
-            width: double.infinity,
-            height: 40,
-            child: OutlinedButton(
-              onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                side: BorderSide(
-                  color: AppColors.primary.withValues(alpha: 0.9),
-                  width: 1.3,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 0),
-              ),
-              child: _isAddingToQuote
-                  ? const SizedBox(
-                width: 15,
-                height: 15,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.primary,
-                ),
-              )
-                  : const Text(
-                'AÑADIR AL PRESUPUESTO',
+  Widget _quantitySelector(Product p) {
+    return Opacity(
+      opacity: p.isInstock ? 1.0 : 0.55,
+      child: Container(
+        height: 44,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8F9FB),
+          border: Border.all(color: const Color(0xFFE1E4EA)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _qtyBtn(
+              Icons.remove,
+              enabled: p.isInstock,
+              onTap: () {
+                if (cantidad > 1) setState(() => cantidad--);
+              },
+            ),
+            SizedBox(
+              width: 34,
+              child: Text(
+                '$cantidad',
+                textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.2,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  color: p.isInstock ? AppColors.textPrimary : Colors.grey,
                 ),
               ),
+            ),
+            _qtyBtn(
+              Icons.add,
+              enabled: p.isInstock,
+              isPrimary: p.isInstock,
+              onTap: () {
+                if (p.isInstock) setState(() => cantidad++);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _stockChip(Product p) {
+    final hasStock = p.isInstock;
+    final bgColor = hasStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
+    final textColor = hasStock ? const Color(0xFF218047) : const Color(0xFFC62828);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: textColor.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: textColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            hasStock ? 'En stock' : 'Sin stock',
+            style: TextStyle(
+              fontSize: 10.5,
+              color: textColor,
+              fontWeight: FontWeight.w800,
+              height: 1,
             ),
           ),
         ],
@@ -1049,8 +1084,8 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: SizedBox(
-        width: 38,
-        height: 38,
+        width: 34,
+        height: 42,
         child: Icon(
           icon,
           size: 17,
@@ -1064,10 +1099,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
-
-    setState(() {
-      _isAddingToQuote = true;
-    });
+    setState(() => _isAddingToQuote = true);
 
     try {
       final api = ApiService();
@@ -1083,7 +1115,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
             ),
           );
         }
-
         return;
       }
 
@@ -1091,8 +1122,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         throw Exception('ID de producto no válido');
       }
 
-      final precio =
-          double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
+      final precio = double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
 
       final ok = await api.crearPresupuesto(
         email: email,
@@ -1126,7 +1156,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       );
     } catch (e) {
       debugPrint('❌ Error en _addToQuote búsqueda: $e');
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1139,9 +1168,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       }
     } finally {
       if (mounted) {
-        setState(() {
-          _isAddingToQuote = false;
-        });
+        setState(() => _isAddingToQuote = false);
       }
     }
   }
@@ -1158,21 +1185,24 @@ class ProductImageBusqueda extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 80,
-      height: 80,
+      width: 96,
+      height: 96,
+      padding: const EdgeInsets.all(7),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade100),
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE7E7E7)),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(14),
         child: CachedNetworkImage(
           imageUrl: p.imageUrl,
           fit: BoxFit.contain,
           placeholder: (context, url) => Container(color: Colors.grey[100]),
-          errorWidget: (context, url, error) =>
-          const Icon(Icons.broken_image, color: Colors.grey),
+          errorWidget: (context, url, error) => const Icon(
+            Icons.broken_image,
+            color: Colors.grey,
+          ),
         ),
       ),
     );
