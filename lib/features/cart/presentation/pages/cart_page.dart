@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
@@ -23,12 +22,10 @@ class CartPage extends ConsumerWidget {
       onGoBack!();
       return;
     }
-
     if (onGoHome != null) {
       onGoHome!();
       return;
     }
-
     final navigator = Navigator.of(context);
     if (navigator.canPop()) {
       navigator.pop();
@@ -40,7 +37,6 @@ class CartPage extends ConsumerWidget {
       onGoHome!();
       return;
     }
-
     final navigator = Navigator.of(context);
     if (navigator.canPop()) {
       navigator.pop();
@@ -50,7 +46,6 @@ class CartPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cartItems = ref.watch(cartProvider);
-
     final totalUnits = cartItems.fold<int>(
       0,
           (sum, item) => sum + item.quantity,
@@ -60,7 +55,7 @@ class CartPage extends ConsumerWidget {
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: ProfessionalPageAppBar(
         title: 'MI CESTA',
-        subtitle: 'Resumen de productos y tramitación del pedido',
+        subtitle: '',
         icon: Icons.shopping_cart_outlined,
         onBack: () => _handleBack(context),
       ),
@@ -149,7 +144,6 @@ class CartPage extends ConsumerWidget {
                   item.product.price.replaceAll(',', '.'),
                 ) ??
                     0;
-
                 return _buildProductItem(ref, item, price);
               },
             ),

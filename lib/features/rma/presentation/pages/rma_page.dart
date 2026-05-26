@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/features/rma/presentation/providers/rma_provider.dart';
 
 class RmaPage extends ConsumerWidget {
@@ -12,23 +14,12 @@ class RmaPage extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text("GESTIÓN DE RMA"),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-            onPressed: () => ref.invalidate(rmaProvider),
-            tooltip: 'Actualizar',
-          ),
-        ],
+      appBar: ProfessionalPageAppBar(
+        title: 'GESTIÓN DE RMA',
+        subtitle: '',
+        icon: Icons.build_outlined,
+        onBack: () => Navigator.pop(context),
+        onRefresh: () => ref.invalidate(rmaProvider),
       ),
       body: rmaAsync.when(
         loading: () => const Center(

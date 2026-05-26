@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_from_page.dart';
@@ -24,7 +24,6 @@ class OrdersPage extends ConsumerWidget {
       onGoHome!();
       return;
     }
-
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const HomePage()),
@@ -38,37 +37,12 @@ class OrdersPage extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: _pageBg,
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-          onPressed: () => _goToHome(context),
-        ),
-        title: const Text(
-          'MIS PEDIDOS',
-          style: TextStyle(
-            fontFamily: 'Oswald',
-            fontWeight: FontWeight.w900,
-            fontSize: 19,
-            letterSpacing: 0.7,
-            color: Colors.white,
-          ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Actualizar pedidos',
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-            onPressed: () => ref.invalidate(ordersProvider),
-          ),
-        ],
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.only(
-            bottomLeft: Radius.circular(24),
-            bottomRight: Radius.circular(24),
-          ),
-        ),
+      appBar: ProfessionalPageAppBar(
+        title: 'MIS PEDIDOS',
+        subtitle: '',
+        icon: Icons.local_shipping_outlined,
+        onBack: () => _goToHome(context),
+        onRefresh: () => ref.invalidate(ordersProvider),
       ),
       body: ordersAsync.when(
         loading: () => const _OrdersLoadingState(),
@@ -77,7 +51,6 @@ class OrdersPage extends ConsumerWidget {
           if (orders.isEmpty) {
             return _buildEmptyState(context);
           }
-
           return Column(
             children: [
               _OrdersSummaryHeader(count: orders.length),
@@ -89,8 +62,7 @@ class OrdersPage extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: orders.length,
-                    itemBuilder: (context, index) =>
-                        _buildOrderCard(context, orders[index]),
+                    itemBuilder: (context, index) => _buildOrderCard(context, orders[index]),
                   ),
                 ),
               ),
@@ -234,8 +206,7 @@ class OrdersPage extends ConsumerWidget {
                               color: AppColors.primary.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color:
-                                AppColors.primary.withValues(alpha: 0.08),
+                                color: AppColors.primary.withValues(alpha: 0.08),
                               ),
                             ),
                             child: Text(
@@ -280,8 +251,7 @@ class OrdersPage extends ConsumerWidget {
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: AppColors.primary,
                                   side: BorderSide(
-                                    color: AppColors.primary
-                                        .withValues(alpha: 0.55),
+                                    color: AppColors.primary.withValues(alpha: 0.55),
                                     width: 1.1,
                                   ),
                                   shape: RoundedRectangleBorder(
@@ -446,9 +416,7 @@ class OrdersPage extends ConsumerWidget {
         .replaceAll('-', ' ')
         .trim()
         .toLowerCase();
-
     if (clean.isEmpty) return 'Estado';
-
     return clean
         .split(' ')
         .where((word) => word.trim().isNotEmpty)

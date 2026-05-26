@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
   final Product product;
@@ -25,14 +27,14 @@ class ProductDetailScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductDetailScreen> createState() => _ProductDetailScreenState();
+  ConsumerState<ProductDetailScreen> createState() =>
+      _ProductDetailScreenState();
 }
 
 class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   int _cantidad = 1;
   bool _isAddingToCart = false;
   bool _isAddingToQuote = false;
-  bool _specsExpanded = true;
   bool _descriptionExpanded = true;
   bool _cargandoRecomendados = true;
   List<Product> _recomendados = [];
@@ -83,7 +85,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         if (marca != null) {
           for (final a in p.attributes) {
             if (a.name.toLowerCase().contains('marca') &&
-                a.options.any((o) => o.toLowerCase() == marca!.toLowerCase())) {
+                a.options.any(
+                      (o) => o.toLowerCase() == marca!.toLowerCase(),
+                )) {
               score += 100;
             }
           }
@@ -296,26 +300,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          categoriaVisual ?? 'Detalle producto',
-          style: const TextStyle(
-            fontFamily: 'Oswald',
-            fontSize: 20,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0.4,
-            color: Colors.white,
-          ),
-          overflow: TextOverflow.ellipsis,
-        ),
-        centerTitle: true,
+      appBar: ProfessionalPageAppBar(
+        title: categoriaVisual ?? 'DETALLE PRODUCTO',
+        subtitle: '',
+        icon: Icons.inventory_2_outlined,
+        onBack: () => Navigator.pop(context),
       ),
       bottomNavigationBar: _bottomActions(p, enStock),
       body: ListView(
@@ -396,7 +385,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           imageUrl: p.imageUrl,
           fit: BoxFit.contain,
           placeholder: (_, __) => const Center(
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppColors.primary,
+            ),
           ),
           errorWidget: (_, __, ___) => const Icon(
             Icons.broken_image,
@@ -513,7 +505,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
                               color: AppColors.primary.withValues(alpha: 0.10),
                               borderRadius: BorderRadius.circular(999),
@@ -566,11 +561,22 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: fg, shape: BoxShape.circle)),
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: fg,
+              shape: BoxShape.circle,
+            ),
+          ),
           const SizedBox(width: 7),
           Text(
             enStock ? 'En stock' : 'Sin stock',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: fg),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              color: fg,
+            ),
           ),
         ],
       ),
@@ -599,7 +605,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             child: Text(
               '$_cantidad',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _dark),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                color: _dark,
+              ),
             ),
           ),
           _qtyBtn(Icons.add_rounded, _cantidad < p.maxPurchaseQty, () {
@@ -628,7 +638,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           Expanded(
             child: Text(
               'Producto sin stock. Puedes añadirlo al presupuesto para consultar disponibilidad.',
-              style: TextStyle(fontSize: 12.5, color: Colors.red, height: 1.35),
+              style: TextStyle(
+                fontSize: 12.5,
+                color: Colors.red,
+                height: 1.35,
+              ),
             ),
           ),
         ],
@@ -683,9 +697,17 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   )
-                      : Icon(enStock ? Icons.shopping_cart_outlined : Icons.block, size: 18),
+                      : Icon(
+                    enStock
+                        ? Icons.shopping_cart_outlined
+                        : Icons.block,
+                    size: 18,
+                  ),
                   label: Text(
                     enStock ? 'Añadir carrito' : 'Sin stock',
                     maxLines: 1,
@@ -693,10 +715,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: enStock ? AppColors.primary : Colors.grey.shade400,
+                    backgroundColor:
+                    enStock ? AppColors.primary : Colors.grey.shade400,
                     foregroundColor: Colors.white,
                     elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                   ),
                 ),
               ),
@@ -708,7 +733,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 child: OutlinedButton.icon(
                   onPressed: _isAddingToQuote ? null : _addToQuote,
                   icon: _isAddingToQuote
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                       : const Icon(Icons.description_outlined, size: 18),
                   label: Text(
                     _isAddingToQuote ? 'Añadiendo...' : 'Presupuesto',
@@ -718,8 +747,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: Color(0xFFD9DEE7), width: 1.2),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    side: const BorderSide(
+                      color: Color(0xFFD9DEE7),
+                      width: 1.2,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                   ),
                 ),
               ),
@@ -816,7 +850,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           ...List.generate(lines.length, (index) {
             final line = lines[index];
             return Padding(
-              padding: EdgeInsets.only(bottom: index == lines.length - 1 ? 0 : 8),
+              padding: EdgeInsets.only(
+                bottom: index == lines.length - 1 ? 0 : 8,
+              ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -865,7 +901,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+            onTap: () =>
+                setState(() => _descriptionExpanded = !_descriptionExpanded),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
@@ -885,7 +922,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   AnimatedRotation(
                     duration: const Duration(milliseconds: 200),
                     turns: _descriptionExpanded ? 0.5 : 0,
-                    child: const Icon(Icons.keyboard_arrow_down_rounded, color: _muted),
+                    child: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: _muted,
+                    ),
                   ),
                 ],
               ),
@@ -907,12 +947,19 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     final isLast = index == rows.length - 1;
 
                     return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
-                        color: index.isEven ? Colors.white : const Color(0xFFF8FAFC),
+                        color:
+                        index.isEven ? Colors.white : const Color(0xFFF8FAFC),
                         borderRadius: BorderRadius.vertical(
-                          top: index == 0 ? const Radius.circular(14) : Radius.zero,
-                          bottom: isLast ? const Radius.circular(14) : Radius.zero,
+                          top: index == 0
+                              ? const Radius.circular(14)
+                              : Radius.zero,
+                          bottom:
+                          isLast ? const Radius.circular(14) : Radius.zero,
                         ),
                         border: isLast
                             ? null
@@ -980,7 +1027,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
+            onTap: () =>
+                setState(() => _descriptionExpanded = !_descriptionExpanded),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
@@ -990,13 +1038,20 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   Expanded(
                     child: Text(
                       title,
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: _dark),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14,
+                        color: _dark,
+                      ),
                     ),
                   ),
                   AnimatedRotation(
                     duration: const Duration(milliseconds: 200),
                     turns: _descriptionExpanded ? 0.5 : 0,
-                    child: const Icon(Icons.keyboard_arrow_down_rounded, color: _muted),
+                    child: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: _muted,
+                    ),
                   ),
                 ],
               ),
@@ -1008,10 +1063,16 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Text(
                 text,
-                style: const TextStyle(fontSize: 13.5, color: _muted, height: 1.55),
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  color: _muted,
+                  height: 1.55,
+                ),
               ),
             ),
-            crossFadeState: _descriptionExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _descriptionExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 220),
             sizeCurve: Curves.easeOut,
           ),
@@ -1035,15 +1096,23 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            Expanded(
+            const Expanded(
               child: Text(
                 'Productos relacionados',
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: _dark),
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                  color: _dark,
+                ),
               ),
             ),
             Text(
               '${_recomendados.length} productos',
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _muted),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: _muted,
+              ),
             ),
           ],
         ),
@@ -1087,7 +1156,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           ClipRRect(
-                            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(16),
+                            ),
                             child: SizedBox(
                               height: 100,
                               width: double.infinity,
@@ -1097,10 +1168,16 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                 placeholder: (_, __) => Center(
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: AppColors.primary.withValues(alpha: 0.3),
+                                    color: AppColors.primary.withValues(
+                                      alpha: 0.3,
+                                    ),
                                   ),
                                 ),
-                                errorWidget: (_, __, ___) => const Icon(Icons.broken_image, size: 40, color: _border),
+                                errorWidget: (_, __, ___) => const Icon(
+                                  Icons.broken_image,
+                                  size: 40,
+                                  color: _border,
+                                ),
                               ),
                             ),
                           ),
@@ -1113,12 +1190,21 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                   rp.name,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12, height: 1.2, fontWeight: FontWeight.w800, color: _dark),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    height: 1.2,
+                                    fontWeight: FontWeight.w800,
+                                    color: _dark,
+                                  ),
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
                                   _formatearPrecio(precioRp),
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: AppColors.primary),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.primary,
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 SizedBox(
@@ -1127,29 +1213,44 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                   child: ElevatedButton(
                                     onPressed: rp.hasStock
                                         ? () {
-                                      ref.read(cartProvider.notifier).addProduct(rp, 1);
+                                      ref
+                                          .read(cartProvider.notifier)
+                                          .addProduct(rp, 1);
                                       HapticFeedback.mediumImpact();
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
                                         SnackBar(
-                                          content: Text('${rp.name} añadido'),
-                                          backgroundColor: AppColors.primary,
-                                          behavior: SnackBarBehavior.floating,
-                                          duration: const Duration(seconds: 1),
+                                          content:
+                                          Text('${rp.name} añadido'),
+                                          backgroundColor:
+                                          AppColors.primary,
+                                          behavior:
+                                          SnackBarBehavior.floating,
+                                          duration:
+                                          const Duration(seconds: 1),
                                         ),
                                       );
                                     }
                                         : null,
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: rp.hasStock ? AppColors.primary : Colors.grey.shade300,
+                                      backgroundColor: rp.hasStock
+                                          ? AppColors.primary
+                                          : Colors.grey.shade300,
                                       foregroundColor: Colors.white,
                                       elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
                                       padding: EdgeInsets.zero,
-                                      disabledBackgroundColor: Colors.grey.shade300,
+                                      disabledBackgroundColor:
+                                      Colors.grey.shade300,
                                     ),
                                     child: Text(
                                       rp.hasStock ? 'Añadir' : 'Sin stock',
-                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1177,7 +1278,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         Text(
           label,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _dark, height: 1.2),
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: _dark,
+            height: 1.2,
+          ),
         ),
       ],
     );
@@ -1190,7 +1296,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       child: SizedBox(
         width: 36,
         height: 40,
-        child: Icon(icon, size: 18, color: enabled ? _dark : const Color(0xFF9CA3AF)),
+        child: Icon(
+          icon,
+          size: 18,
+          color: enabled ? _dark : const Color(0xFF9CA3AF),
+        ),
       ),
     );
   }
@@ -1239,7 +1349,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           backgroundColor: AppColors.primary,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
-          action: SnackBarAction(label: 'VER', textColor: Colors.white, onPressed: _goToQuotesKeepingTabs),
+          action: SnackBarAction(
+            label: 'VER',
+            textColor: Colors.white,
+            onPressed: _goToQuotesKeepingTabs,
+          ),
         ),
       );
     } catch (e) {

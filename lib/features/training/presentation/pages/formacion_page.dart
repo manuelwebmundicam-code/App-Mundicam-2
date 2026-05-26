@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/features/training/data/models/cursos_model.dart';
 import 'package:mundicam/features/training/presentation/providers/academy_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 const Color _pageBg = Color(0xFFF4F7FB);
 const Color _dark = Color(0xFF111827);
@@ -31,21 +32,15 @@ class FormacionPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final academyAsync = ref.watch(academyProvider);
+
     return Scaffold(
       backgroundColor: _pageBg,
-      appBar: AppBar(
-        title: const Text(
-          'MUNDICAM ACADEMY',
-          style: TextStyle(
-            fontFamily: 'Oswald',
-            fontWeight: FontWeight.w900,
-            fontSize: 19,
-            letterSpacing: 0.7,
-          ),
-        ),
-        backgroundColor: AppColors.primary,
-        elevation: 0,
-        centerTitle: true,
+      appBar: ProfessionalPageAppBar(
+        title: 'MUNDICAM ACADEMY',
+        subtitle: 'Formación técnica para profesionales',
+        icon: Icons.school_outlined,
+        onBack: () => Navigator.of(context).maybePop(),
+        onRefresh: () => ref.invalidate(academyProvider),
       ),
       body: academyAsync.when(
         loading: () => const Center(

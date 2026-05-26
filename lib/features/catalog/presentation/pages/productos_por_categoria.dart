@@ -1,11 +1,9 @@
 import 'dart:async';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'package:mundicam/core/cache/image_cache_service.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
@@ -33,16 +31,13 @@ class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductosPorCategoriaScreen> createState() =>
-      _ProductosPorCategoriaScreenState();
+  ConsumerState<ProductosPorCategoriaScreen> createState() => _ProductosPorCategoriaScreenState();
 }
 
-class _ProductosPorCategoriaScreenState
-    extends ConsumerState<ProductosPorCategoriaScreen> {
+class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCategoriaScreen> {
   final FirebaseService _firebase = FirebaseService();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ScrollController _scrollController = ScrollController();
-
   Timer? _scrollTimer;
   bool _isLoadingMore = false;
 
@@ -61,19 +56,14 @@ class _ProductosPorCategoriaScreenState
 
   void _onScrollThrottled() {
     if (_scrollTimer?.isActive ?? false) return;
-
     _scrollTimer = Timer(const Duration(milliseconds: 100), () {
       if (!_scrollController.hasClients) return;
-
-      if (_scrollController.position.pixels >=
-          _scrollController.position.maxScrollExtent - 300) {
+      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 300) {
         final notifier = ref.read(
           productsPaginatedProvider(widget.categoryId).notifier,
         );
-
         if (!notifier.isLoading && notifier.hasMore && !_isLoadingMore) {
           _isLoadingMore = true;
-
           notifier.loadNextPage().then((_) {
             _isLoadingMore = false;
           });
@@ -97,7 +87,6 @@ class _ProductosPorCategoriaScreenState
     final productosState = ref.watch(
       productsPaginatedProvider(widget.categoryId),
     );
-
     final notifier = ref.watch(
       productsPaginatedProvider(widget.categoryId).notifier,
     );
@@ -110,32 +99,10 @@ class _ProductosPorCategoriaScreenState
         categoryName: widget.categoryName,
         productosEnPantalla: productosState,
       ),
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          widget.categoryName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontFamily: 'Oswald',
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0.5,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.tune_rounded),
-            tooltip: 'Filtros',
-            onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-          ),
-        ],
+      appBar: _CatalogCategoryAppBar(
+        title: widget.categoryName,
+        onBack: () => Navigator.of(context).pop(),
+        onFilters: () => _scaffoldKey.currentState?.openEndDrawer(),
       ),
       body: RepaintBoundary(
         child: productosState.isEmpty && !notifier.isLoading
@@ -164,7 +131,6 @@ class _ProductosPorCategoriaScreenState
                 ),
               );
             }
-
             return ProductTile(
               key: ValueKey(productosState[index].id),
               p: productosState[index],
@@ -174,6 +140,102 @@ class _ProductosPorCategoriaScreenState
               onGoQuotes: widget.onGoQuotes,
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _CatalogCategoryAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final String title;
+  final VoidCallback onBack;
+  final VoidCallback onFilters;
+
+  const _CatalogCategoryAppBar({
+    required this.title,
+    required this.onBack,
+    required this.onFilters,
+  });
+
+  @override
+  Size get preferredSize => const Size.fromHeight(86);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 0,
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.only(
+            bottomLeft: Radius.circular(30),
+            bottomRight: Radius.circular(30),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x22000000),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: SizedBox(
+            height: 86,
+            child: Row(
+              children: [
+                const SizedBox(width: 4),
+                SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    onPressed: onBack,
+                    tooltip: 'Volver',
+                    splashRadius: 22,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    title.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      letterSpacing: 1.05,
+                      color: Colors.white,
+                      fontFamily: 'Oswald',
+                      height: 1.05,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.tune_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                    onPressed: onFilters,
+                    tooltip: 'Filtros',
+                    splashRadius: 22,
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -277,19 +339,16 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
   String _formatearPrecioCompleto(double precio) {
     if (precio <= 0) return 'Bajo consulta';
-
     final parts = precio.toStringAsFixed(2).split('.');
     final enteros = parts[0];
     final decimales = parts.length > 1 ? parts[1] : '00';
     final buffer = StringBuffer();
-
     for (int i = 0; i < enteros.length; i++) {
       if (i > 0 && (enteros.length - i) % 3 == 0) {
         buffer.write('.');
       }
       buffer.write(enteros[i]);
     }
-
     return '${buffer.toString()},$decimales €';
   }
 
@@ -301,7 +360,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       widget.onGoQuotes!();
       return;
     }
-
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -315,13 +373,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   Future<String?> _getCurrentUserEmail() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
-
     try {
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
-
       if (userDoc.exists && userDoc.data() != null) {
         final email = userDoc.data()?['email']?.toString();
         if (email != null && email.trim().isNotEmpty) {
@@ -331,18 +387,15 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     } catch (e) {
       debugPrint('Error al leer email de Firestore: $e');
     }
-
     if (user.email != null && user.email!.trim().isNotEmpty) {
       return user.email!.trim();
     }
-
     if (user.providerData.isNotEmpty) {
       final providerEmail = user.providerData.first.email;
       if (providerEmail != null && providerEmail.trim().isNotEmpty) {
         return providerEmail.trim();
       }
     }
-
     return null;
   }
 
@@ -463,7 +516,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           ref
                               .read(cartProvider.notifier)
                               .addProduct(widget.p, cantidad);
-
                           ScaffoldMessenger.of(context).clearSnackBars();
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
@@ -478,9 +530,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         }
                             : null,
                         icon: Icon(
-                          _tieneStock
-                              ? Icons.shopping_cart_outlined
-                              : Icons.block_rounded,
+                          _tieneStock ? Icons.shopping_cart_outlined : Icons.block_rounded,
                           size: 17,
                           color: Colors.white,
                         ),
@@ -497,9 +547,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           ),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _tieneStock
-                              ? AppColors.primary
-                              : Colors.grey.shade400,
+                          backgroundColor: _tieneStock ? AppColors.primary : Colors.grey.shade400,
                           foregroundColor: Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
@@ -517,8 +565,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                 width: double.infinity,
                 height: 42,
                 child: OutlinedButton.icon(
-                  onPressed:
-                  _isAddingToQuote ? null : () => _addToQuote(widget.p),
+                  onPressed: _isAddingToQuote ? null : () => _addToQuote(widget.p),
                   icon: _isAddingToQuote
                       ? const SizedBox(
                     width: 15,
@@ -530,9 +577,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                   )
                       : const Icon(Icons.description_outlined, size: 17),
                   label: Text(
-                    _isAddingToQuote
-                        ? 'AÑADIENDO...'
-                        : 'AÑADIR AL PRESUPUESTO',
+                    _isAddingToQuote ? 'AÑADIENDO...' : 'AÑADIR AL PRESUPUESTO',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -606,11 +651,8 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   Widget _stockChip() {
-    final Color bgColor =
-    _tieneStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
-    final Color textColor =
-    _tieneStock ? const Color(0xFF218047) : const Color(0xFFC62828);
-
+    final Color bgColor = _tieneStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
+    final Color textColor = _tieneStock ? const Color(0xFF218047) : const Color(0xFFC62828);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -668,7 +710,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
-
     setState(() {
       _isAddingToQuote = true;
     });
@@ -694,8 +735,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         throw Exception('ID de producto no válido.');
       }
 
-      final precioDouble =
-          double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
+      final precioDouble = double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
 
       final ok = await apiService.crearPresupuesto(
         email: email,
@@ -731,7 +771,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       );
     } catch (e) {
       debugPrint('❌ Error en _addToQuote: $e');
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

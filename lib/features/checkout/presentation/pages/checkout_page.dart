@@ -697,7 +697,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: ProfessionalPageAppBar(
         title: "FINALIZAR PEDIDO",
-        subtitle: "Revisa y confirma los datos del pedido",
+        subtitle: '',
         icon: Icons.shopping_cart_checkout_rounded,
         onBack: () => Navigator.pop(context),
       ),

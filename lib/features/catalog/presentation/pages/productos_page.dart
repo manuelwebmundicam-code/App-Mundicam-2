@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class ProductosPage extends ConsumerStatefulWidget {
   final VoidCallback? onGoHome;
@@ -38,29 +39,11 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        elevation: 0,
-        centerTitle: true,
-        toolbarHeight: 64,
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: Colors.white,
-            size: 20,
-          ),
-          onPressed: _handleBack,
-        ),
-        title: const Text(
-          'CATÁLOGO MUNDICAM',
-          style: TextStyle(
-            color: Colors.white,
-            fontFamily: 'Oswald',
-            fontSize: 20,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0.8,
-          ),
-        ),
+      appBar: ProfessionalPageAppBar(
+        title: 'CATÁLOGO MUNDICAM',
+        subtitle: '',
+        icon: Icons.grid_view_rounded,
+        onBack: _handleBack,
       ),
       body: categoriasAsync.when(
         loading: () => const Center(

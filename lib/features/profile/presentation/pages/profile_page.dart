@@ -123,6 +123,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
   }
 
+  void _refreshProfile() {
+    setState(() {
+      _loadingData = true;
+      _errorMessage = null;
+    });
+    _cargarDatosUsuario();
+  }
+
   String _getInicial() {
     if (_wooCustomer != null) {
       final n = _wooCustomer!['first_name']?.toString() ?? '';
@@ -217,17 +225,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
     final value = raw.toLowerCase();
     final masked = _maskSensitivePaymentData(raw);
-    if (value.contains('bacs') ||
-        value.contains('transferencia') ||
-        value.contains('bank') ||
-        value.contains('iban')) {
+
+    if (value.contains('bacs') || value.contains('transferencia') || value.contains('bank') || value.contains('iban')) {
       return masked == raw ? 'Transferencia bancaria' : 'Transferencia bancaria · $masked';
     }
-    if (value.contains('redsys') ||
-        value.contains('tarjeta') ||
-        value.contains('card') ||
-        value.contains('tpv') ||
-        value.contains('stripe')) {
+    if (value.contains('redsys') || value.contains('tarjeta') || value.contains('card') || value.contains('tpv') || value.contains('stripe')) {
       final last4Match = RegExp(r'\*{2,}\d{4}').firstMatch(masked);
       if (last4Match != null) {
         return 'Tarjeta terminada en ${last4Match.group(0)}';
@@ -237,13 +239,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     if (value.contains('paypal')) {
       return 'PayPal';
     }
-    if (value.contains('cheque') ||
-        value.contains('giro') ||
-        value.contains('pagare') ||
-        value.contains('pagaré') ||
-        value.contains('aplazado') ||
-        value.contains('credito') ||
-        value.contains('crédito')) {
+    if (value.contains('cheque') || value.contains('giro') || value.contains('pagare') || value.contains('pagaré') || value.contains('aplazado') || value.contains('credito') || value.contains('crédito')) {
       return 'Giro / pago aplazado';
     }
     return masked;
@@ -251,12 +247,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   String _creditLimitLabel() {
     final credit = _getMeta('credit_limit').trim();
-    if (credit.isEmpty ||
-        credit == '—' ||
-        credit == '0' ||
-        credit == '0.0' ||
-        credit == '0.00' ||
-        credit.toLowerCase() == 'null') {
+    if (credit.isEmpty || credit == '—' || credit == '0' || credit == '0.0' || credit == '0.00' || credit.toLowerCase() == 'null') {
       return 'No aplica';
     }
     if (credit.contains('€')) return credit;
@@ -266,39 +257,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
       backgroundColor: _pageBg,
-      appBar: AppBar(
-        title: const Text(
-          "MI CUENTA",
-          style: TextStyle(
-            fontFamily: 'Oswald',
-            fontWeight: FontWeight.w900,
-            fontSize: 19,
-            letterSpacing: 0.7,
-          ),
-        ),
-        centerTitle: true,
-        elevation: 0,
+      appBar: _ProfilePageAppBar(
+        title: 'MI CUENTA',
         backgroundColor: _brandColor,
-        actions: [
-          IconButton(
-            tooltip: 'Actualizar datos',
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-            onPressed: () {
-              setState(() {
-                _loadingData = true;
-                _errorMessage = null;
-              });
-              _cargarDatosUsuario();
-            },
-          ),
-          IconButton(
-            tooltip: 'Cerrar sesión',
-            icon: const Icon(Icons.logout_rounded, color: Colors.white),
-            onPressed: () => _confirmSignOut(context),
-          ),
-        ],
+        onRefresh: _refreshProfile,
+        onLogout: () => _confirmSignOut(context),
       ),
       body: user == null
           ? const Center(child: Text("No has iniciado sesión"))
@@ -367,10 +333,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Widget _buildHeader() {
     final company = _getCompany();
     final email = _wooCustomer?['email']?.toString() ?? '';
+
     return Container(
       width: double.infinity,
-      color: _brandColor,
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+      color: _pageBg,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
         decoration: BoxDecoration(
@@ -378,11 +345,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
+              color: Colors.black.withValues(alpha: 0.06),
               blurRadius: 18,
               offset: const Offset(0, 8),
             ),
           ],
+          border: Border.all(color: _border),
         ),
         child: Row(
           children: [
@@ -431,66 +399,74 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   ),
               ],
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _getDisplayName(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _dark,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      fontFamily: 'Oswald',
-                      height: 1.1,
-                    ),
-                  ),
-                  if (company.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
                     Text(
-                      company,
+                      _getDisplayName(),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _dark,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Oswald',
+                        height: 1.1,
+                      ),
+                    ),
+                    if (company.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        company,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _muted,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 5),
+                    Text(
+                      email,
+                      textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: _muted,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 12.2,
+                        fontWeight: FontWeight.w500,
                       ),
+                    ),
+                    const SizedBox(height: 9),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 7,
+                      runSpacing: 6,
+                      children: [
+                        _profilePill(
+                          icon: Icons.business_center_outlined,
+                          text: 'Cliente profesional',
+                          color: _brandColor,
+                        ),
+                        if (_isAdmin)
+                          _profilePill(
+                            icon: Icons.admin_panel_settings_outlined,
+                            text: 'Administrador',
+                            color: Colors.deepPurple,
+                          ),
+                      ],
                     ),
                   ],
-                  const SizedBox(height: 5),
-                  Text(
-                    email,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 12.2,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 9),
-                  Wrap(
-                    spacing: 7,
-                    runSpacing: 6,
-                    children: [
-                      _profilePill(
-                        icon: Icons.business_center_outlined,
-                        text: 'Cliente profesional',
-                        color: _brandColor,
-                      ),
-                      if (_isAdmin)
-                        _profilePill(
-                          icon: Icons.admin_panel_settings_outlined,
-                          text: 'Administrador',
-                          color: Colors.deepPurple,
-                        ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           ],
@@ -563,13 +539,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _loadingData = true;
-                  _errorMessage = null;
-                });
-                _cargarDatosUsuario();
-              },
+              onPressed: _refreshProfile,
               icon: const Icon(Icons.refresh),
               label: const Text(
                 "REINTENTAR",
@@ -591,6 +561,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         ),
       );
     }
+
     if (_wooCustomer == null) {
       return Container(
         width: double.infinity,
@@ -601,7 +572,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         ),
       );
     }
+
     final billing = _wooCustomer!['billing'] as Map<String, dynamic>? ?? {};
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -1038,10 +1011,119 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             },
             child: const Text(
               "CERRAR SESIÓN",
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final String title;
+  final Color backgroundColor;
+  final VoidCallback onRefresh;
+  final VoidCallback onLogout;
+
+  const _ProfilePageAppBar({
+    required this.title,
+    required this.backgroundColor,
+    required this.onRefresh,
+    required this.onLogout,
+  });
+
+  @override
+  Size get preferredSize => const Size.fromHeight(86);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 0,
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: const BorderRadius.only(
+            bottomLeft: Radius.circular(30),
+            bottomRight: Radius.circular(30),
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x22000000),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: SizedBox(
+            height: 86,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 110),
+                    child: Text(
+                      title.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                        letterSpacing: 1.05,
+                        color: Colors.white,
+                        fontFamily: 'Oswald',
+                        height: 1.05,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: 52,
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: IconButton(
+                      tooltip: 'Actualizar datos',
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      onPressed: onRefresh,
+                      splashRadius: 22,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: 4,
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: IconButton(
+                      tooltip: 'Cerrar sesión',
+                      icon: const Icon(
+                        Icons.logout_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      onPressed: onLogout,
+                      splashRadius: 22,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

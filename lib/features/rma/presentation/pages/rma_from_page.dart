@@ -2,8 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class RmaFormPage extends ConsumerStatefulWidget {
   final int orderId;
@@ -53,10 +55,14 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
           .collection('users')
           .doc(user.uid)
           .get();
+
       if (doc.exists && doc.data() != null) {
         return doc.get('email') as String?;
       }
-    } catch (e) {}
+    } catch (e) {
+      debugPrint('Error al obtener email para RMA: $e');
+    }
+
     return user.email ?? user.providerData.firstOrNull?.email;
   }
 
@@ -66,6 +72,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
     final motivo = _selectedMotivo == 'Otro'
         ? _motivoController.text
         : _selectedMotivo;
+
     if (motivo == null || motivo.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -102,7 +109,6 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
         );
         Navigator.pop(context);
       } else {
-        // Si el endpoint no existe, mostramos mensaje alternativo
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Solicitud registrada. Te contactaremos pronto."),
@@ -114,7 +120,10 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text("Error: $e"),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -126,16 +135,11 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text("SOLICITAR RMA"),
-        centerTitle: true,
+      appBar: ProfessionalPageAppBar(
+        title: 'SOLICITAR RMA',
+        subtitle: '',
+        icon: Icons.handyman_outlined,
+        onBack: () => Navigator.pop(context),
       ),
       body: Form(
         key: _formKey,
@@ -145,7 +149,6 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Producto
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -203,10 +206,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 24),
-
-              // Motivo
               const Text(
                 "MOTIVO DE LA DEVOLUCIÓN",
                 style: TextStyle(
@@ -226,6 +226,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                 child: Column(
                   children: _motivos.map((motivo) {
                     final isSelected = _selectedMotivo == motivo;
+
                     return InkWell(
                       onTap: () => setState(() => _selectedMotivo = motivo),
                       child: Container(
@@ -253,16 +254,18 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                                   : Colors.grey,
                             ),
                             const SizedBox(width: 12),
-                            Text(
-                              motivo,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: isSelected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : Colors.black87,
+                            Expanded(
+                              child: Text(
+                                motivo,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: isSelected
+                                      ? AppColors.primary
+                                      : Colors.black87,
+                                ),
                               ),
                             ),
                           ],
@@ -272,7 +275,6 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                   }).toList(),
                 ),
               ),
-
               if (_selectedMotivo == 'Otro') ...[
                 const SizedBox(height: 16),
                 TextFormField(
@@ -289,10 +291,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                   validator: (v) => v!.isEmpty ? "Campo requerido" : null,
                 ),
               ],
-
               const SizedBox(height: 24),
-
-              // Descripción
               const Text(
                 "DESCRIPCIÓN DEL PROBLEMA",
                 style: TextStyle(
@@ -307,8 +306,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                 controller: _descripcionController,
                 maxLines: 5,
                 decoration: InputDecoration(
-                  hintText:
-                      "Describe el problema que tienes con el producto...",
+                  hintText: "Describe el problema que tienes con el producto...",
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -318,10 +316,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                 ),
                 validator: (v) => v!.isEmpty ? "Campo requerido" : null,
               ),
-
               const SizedBox(height: 32),
-
-              // Botón enviar
               SizedBox(
                 width: double.infinity,
                 height: 52,
@@ -337,23 +332,22 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                   ),
                   child: _isLoading
                       ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
                       : const Text(
-                          "ENVIAR SOLICITUD",
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+                    "ENVIAR SOLICITUD",
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
-
               const SizedBox(height: 40),
             ],
           ),

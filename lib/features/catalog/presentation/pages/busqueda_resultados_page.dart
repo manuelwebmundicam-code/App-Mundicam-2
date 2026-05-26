@@ -12,6 +12,7 @@ import 'package:mundicam/features/quotes/presentation/providers/quote_provider.d
 import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class BusquedaResultadosPage extends ConsumerWidget {
   final String query;
@@ -33,17 +34,11 @@ class BusquedaResultadosPage extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
-      appBar: AppBar(
-        title: Text(
-          'Resultados: "$cleanedQuery"',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 16, fontFamily: 'Oswald'),
-        ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        centerTitle: true,
-        elevation: 0,
+      appBar: ProfessionalPageAppBar(
+        title: cleanedQuery.isEmpty ? 'RESULTADOS' : 'RESULTADOS: $cleanedQuery',
+        subtitle: '',
+        icon: Icons.search_rounded,
+        onBack: () => Navigator.of(context).pop(),
       ),
       body: searchAsync.when(
         loading: () => const Center(
@@ -52,7 +47,10 @@ class BusquedaResultadosPage extends ConsumerWidget {
             children: [
               CircularProgressIndicator(color: AppColors.primary),
               SizedBox(height: 16),
-              Text('Buscando productos...', style: TextStyle(color: Colors.grey)),
+              Text(
+                'Buscando productos...',
+                style: TextStyle(color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -63,7 +61,9 @@ class BusquedaResultadosPage extends ConsumerWidget {
             cleanedQuery,
           );
 
-          if (productos.isEmpty) return _buildEmptyState(context, cleanedQuery);
+          if (productos.isEmpty) {
+            return _buildEmptyState(context, cleanedQuery);
+          }
 
           final detectedTerms = _SearchEngine.detectedReadableTerms(cleanedQuery);
 
@@ -90,7 +90,11 @@ class BusquedaResultadosPage extends ConsumerWidget {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.search_rounded, size: 18, color: AppColors.primary),
+                        const Icon(
+                          Icons.search_rounded,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -111,7 +115,10 @@ class BusquedaResultadosPage extends ConsumerWidget {
                         runSpacing: 6,
                         children: detectedTerms.map((term) {
                           return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: AppColors.primary.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(20),
@@ -169,7 +176,11 @@ class BusquedaResultadosPage extends ConsumerWidget {
                 color: Color(0xFFF8EAEA),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.error_outline, size: 48, color: AppColors.primary),
+              child: const Icon(
+                Icons.error_outline,
+                size: 48,
+                color: AppColors.primary,
+              ),
             ),
             const SizedBox(height: 18),
             const Text(
@@ -186,7 +197,10 @@ class BusquedaResultadosPage extends ConsumerWidget {
             Text(
               '$error',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 13,
+              ),
             ),
             const SizedBox(height: 18),
             OutlinedButton.icon(
@@ -220,7 +234,11 @@ class BusquedaResultadosPage extends ConsumerWidget {
                 color: Color(0xFFF8EAEA),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.search_off_rounded, size: 58, color: AppColors.primary),
+              child: const Icon(
+                Icons.search_off_rounded,
+                size: 58,
+                color: AppColors.primary,
+              ),
             ),
             const SizedBox(height: 20),
             Text(
@@ -237,7 +255,11 @@ class BusquedaResultadosPage extends ConsumerWidget {
             Text(
               'Prueba con una búsqueda más general, una marca, una referencia o una tecnología concreta.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey[600], height: 1.5),
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[600],
+                height: 1.5,
+              ),
             ),
             if (suggestions.isNotEmpty) ...[
               const SizedBox(height: 18),
@@ -249,7 +271,10 @@ class BusquedaResultadosPage extends ConsumerWidget {
                   return ActionChip(
                     label: Text(
                       suggestion,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
                     ),
                     onPressed: () {
                       Navigator.pushReplacement(
@@ -286,31 +311,152 @@ class BusquedaResultadosPage extends ConsumerWidget {
 
 class _SearchEngine {
   static final Map<String, List<String>> _synonyms = {
-    'camara': ['camara', 'camaras', 'camera', 'cctv', 'ip', 'hd', 'hdcvi', 'turret', 'bullet', 'domo', 'ptz', 'lente', 'varifocal'],
-    'grabador': ['grabador', 'nvr', 'xvr', 'dvr', 'recorder', 'canales', 'h265', 'h.265', 'poe'],
-    'alarma': ['alarma', 'alarmas', 'intrusion', 'intrusión', 'hub', 'detector', 'sirena', 'teclado', 'contacto', 'jeweller', 'fibra'],
-    'incendio': ['incendio', 'fuego', 'detector humo', 'detector termico', 'sirena incendio', 'en54', 'teletek'],
-    'acceso': ['acceso', 'control acceso', 'lector', 'tarjeta', 'biometrico', 'biométrico', 'cerradura', 'terminal'],
-    'networking': ['networking', 'red', 'switch', 'router', 'poe', 'wifi', 'omada', 'vigi', 'tplink', 'tp-link'],
-    '4g': ['4g', 'lte', 'sim', 'm2m', 'iot', 'router 4g', 'multioperador'],
-    'solar': ['solar', 'panel solar', 'autonomo', 'autónomo', 'bateria', 'batería', 'torre', 'pod', 'evolve'],
-    'analitica': ['analitica', 'analítica', 'ia', 'ai', 'deteccion', 'detección', 'persona', 'vehiculo', 'vehículo', 'perimetral', 'secury360'],
+    'camara': [
+      'camara',
+      'camaras',
+      'camera',
+      'cctv',
+      'ip',
+      'hd',
+      'hdcvi',
+      'turret',
+      'bullet',
+      'domo',
+      'ptz',
+      'lente',
+      'varifocal',
+    ],
+    'grabador': [
+      'grabador',
+      'nvr',
+      'xvr',
+      'dvr',
+      'recorder',
+      'canales',
+      'h265',
+      'h.265',
+      'poe',
+    ],
+    'alarma': [
+      'alarma',
+      'alarmas',
+      'intrusion',
+      'intrusión',
+      'hub',
+      'detector',
+      'sirena',
+      'teclado',
+      'contacto',
+      'jeweller',
+      'fibra',
+    ],
+    'incendio': [
+      'incendio',
+      'fuego',
+      'detector humo',
+      'detector termico',
+      'sirena incendio',
+      'en54',
+      'teletek',
+    ],
+    'acceso': [
+      'acceso',
+      'control acceso',
+      'lector',
+      'tarjeta',
+      'biometrico',
+      'biométrico',
+      'cerradura',
+      'terminal',
+    ],
+    'networking': [
+      'networking',
+      'red',
+      'switch',
+      'router',
+      'poe',
+      'wifi',
+      'omada',
+      'vigi',
+      'tplink',
+      'tp-link',
+    ],
+    '4g': [
+      '4g',
+      'lte',
+      'sim',
+      'm2m',
+      'iot',
+      'router 4g',
+      'multioperador',
+    ],
+    'solar': [
+      'solar',
+      'panel solar',
+      'autonomo',
+      'autónomo',
+      'bateria',
+      'batería',
+      'torre',
+      'pod',
+      'evolve',
+    ],
+    'analitica': [
+      'analitica',
+      'analítica',
+      'ia',
+      'ai',
+      'deteccion',
+      'detección',
+      'persona',
+      'vehiculo',
+      'vehículo',
+      'perimetral',
+      'secury360',
+    ],
   };
 
   static final List<String> _knownBrands = [
-    'ajax', 'dahua', 'hikvision', 'ksenia', 'teletek', 'tp-link', 'tplink', 'vigi', 'omada', 'mobotix', 'secury360', 'evolve', 'wisim', 'softguard', 'mci', 'powersafe', 'power safe',
+    'ajax',
+    'dahua',
+    'hikvision',
+    'ksenia',
+    'teletek',
+    'tp-link',
+    'tplink',
+    'vigi',
+    'omada',
+    'mobotix',
+    'secury360',
+    'evolve',
+    'wisim',
+    'softguard',
+    'mci',
+    'powersafe',
+    'power safe',
   ];
 
-  static String cleanQuery(String value) => value.trim().replaceAll(RegExp(r'\s+'), ' ');
+  static String cleanQuery(String value) {
+    return value.trim().replaceAll(RegExp(r'\s+'), ' ');
+  }
 
   static List<Product> sortByRelevance(List<Product> products, String query) {
     final terms = _expandedTerms(query);
-    final scored = products.map((product) => _ScoredProduct(product: product, score: _score(product, query, terms))).toList();
+    final scored = products
+        .map(
+          (product) => _ScoredProduct(
+        product: product,
+        score: _score(product, query, terms),
+      ),
+    )
+        .toList();
+
     scored.sort((a, b) {
       final byScore = b.score.compareTo(a.score);
       if (byScore != 0) return byScore;
       return a.product.name.compareTo(b.product.name);
     });
+
     return scored.map((item) => item.product).toList();
   }
 
@@ -322,6 +468,7 @@ class _SearchEngine {
     final fullText = '$name $sku $description';
 
     int score = 0;
+
     if (sku.isNotEmpty && sku == normalizedQuery) score += 500;
     if (sku.isNotEmpty && sku.contains(normalizedQuery)) score += 300;
     if (name == normalizedQuery) score += 260;
@@ -346,12 +493,16 @@ class _SearchEngine {
     }
 
     if (product.isInstock) score += 8;
+
     if (name.contains('kit') && normalizedQuery.contains('kit')) score += 35;
     if (name.contains('poe') && normalizedQuery.contains('poe')) score += 35;
     if (name.contains('wifi') && normalizedQuery.contains('wifi')) score += 35;
     if (name.contains('4g') && normalizedQuery.contains('4g')) score += 35;
     if (name.contains('en54') && normalizedQuery.contains('en54')) score += 45;
-    if (name.contains('grado') && normalizedQuery.contains('grado')) score += 30;
+    if (name.contains('grado') && normalizedQuery.contains('grado')) {
+      score += 30;
+    }
+
     return score;
   }
 
@@ -366,7 +517,8 @@ class _SearchEngine {
 
     _synonyms.forEach((key, values) {
       final normalizedKey = _normalize(key);
-      if (normalized.contains(normalizedKey) || values.any((v) => normalized.contains(_normalize(v)))) {
+      if (normalized.contains(normalizedKey) ||
+          values.any((v) => normalized.contains(_normalize(v)))) {
         for (final value in values) {
           for (final part in _normalize(value).split(' ')) {
             if (part.trim().length >= 2) terms.add(part.trim());
@@ -392,43 +544,119 @@ class _SearchEngine {
     final detected = <String>[];
 
     for (final brand in _knownBrands) {
-      if (normalized.contains(_normalize(brand))) detected.add(_brandLabel(brand));
+      if (normalized.contains(_normalize(brand))) {
+        detected.add(_brandLabel(brand));
+      }
     }
-    if (_containsAny(normalized, ['camara', 'camaras', 'cctv', 'turret', 'bullet', 'domo', 'ptz'])) detected.add('CCTV / Cámaras');
-    if (_containsAny(normalized, ['nvr', 'xvr', 'dvr', 'grabador'])) detected.add('Grabadores');
-    if (_containsAny(normalized, ['alarma', 'intrusion', 'hub', 'detector', 'sirena'])) detected.add('Intrusión');
-    if (_containsAny(normalized, ['incendio', 'fuego', 'en54', 'humo'])) detected.add('Incendio');
-    if (_containsAny(normalized, ['poe', 'switch', 'router', 'wifi', 'networking', 'red'])) detected.add('Networking');
-    if (_containsAny(normalized, ['4g', 'lte', 'sim', 'm2m', 'iot'])) detected.add('IoT / M2M');
+
+    if (_containsAny(
+      normalized,
+      ['camara', 'camaras', 'cctv', 'turret', 'bullet', 'domo', 'ptz'],
+    )) {
+      detected.add('CCTV / Cámaras');
+    }
+
+    if (_containsAny(normalized, ['nvr', 'xvr', 'dvr', 'grabador'])) {
+      detected.add('Grabadores');
+    }
+
+    if (_containsAny(
+      normalized,
+      ['alarma', 'intrusion', 'hub', 'detector', 'sirena'],
+    )) {
+      detected.add('Intrusión');
+    }
+
+    if (_containsAny(normalized, ['incendio', 'fuego', 'en54', 'humo'])) {
+      detected.add('Incendio');
+    }
+
+    if (_containsAny(
+      normalized,
+      ['poe', 'switch', 'router', 'wifi', 'networking', 'red'],
+    )) {
+      detected.add('Networking');
+    }
+
+    if (_containsAny(normalized, ['4g', 'lte', 'sim', 'm2m', 'iot'])) {
+      detected.add('IoT / M2M');
+    }
 
     return detected.toSet().take(6).toList();
   }
 
   static List<String> suggestionsFor(String query) {
     final normalized = _normalize(query);
-    if (_containsAny(normalized, ['camara', 'camera', 'cctv'])) return ['cámara IP', 'cámara PoE', 'cámara Dahua', 'cámara Hikvision'];
-    if (_containsAny(normalized, ['grabador', 'nvr', 'xvr', 'dvr'])) return ['NVR Dahua', 'grabador IP', 'XVR', 'NVR PoE'];
-    if (_containsAny(normalized, ['alarma', 'intrusion', 'intrusión'])) return ['Ajax Hub', 'detector Ajax', 'sirena Ajax', 'Ksenia lares'];
-    if (_containsAny(normalized, ['incendio', 'fuego', 'en54'])) return ['Teletek EN54', 'Ajax EN54', 'detector humo', 'central incendio'];
-    if (_containsAny(normalized, ['red', 'poe', 'switch', 'router', 'wifi'])) return ['switch PoE', 'router 4G', 'Omada', 'VIGI'];
+
+    if (_containsAny(normalized, ['camara', 'camera', 'cctv'])) {
+      return ['cámara IP', 'cámara PoE', 'cámara Dahua', 'cámara Hikvision'];
+    }
+
+    if (_containsAny(normalized, ['grabador', 'nvr', 'xvr', 'dvr'])) {
+      return ['NVR Dahua', 'grabador IP', 'XVR', 'NVR PoE'];
+    }
+
+    if (_containsAny(normalized, ['alarma', 'intrusion', 'intrusión'])) {
+      return ['Ajax Hub', 'detector Ajax', 'sirena Ajax', 'Ksenia lares'];
+    }
+
+    if (_containsAny(normalized, ['incendio', 'fuego', 'en54'])) {
+      return ['Teletek EN54', 'Ajax EN54', 'detector humo', 'central incendio'];
+    }
+
+    if (_containsAny(normalized, ['red', 'poe', 'switch', 'router', 'wifi'])) {
+      return ['switch PoE', 'router 4G', 'Omada', 'VIGI'];
+    }
+
     return ['Dahua', 'Ajax', 'Hikvision', 'cámara IP', 'NVR', 'switch PoE'];
   }
 
   static String _normalize(String value) {
     String text = value.toLowerCase().trim();
+
     const replacements = {
-      'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a',
-      'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
-      'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
-      'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o',
-      'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
-      'ñ': 'n', '/': ' ', '-': ' ', '_': ' ', '.': ' ', ',': ' ', ';': ' ', ':': ' ', '(': ' ', ')': ' ', '[': ' ', ']': ' ',
+      'á': 'a',
+      'à': 'a',
+      'ä': 'a',
+      'â': 'a',
+      'é': 'e',
+      'è': 'e',
+      'ë': 'e',
+      'ê': 'e',
+      'í': 'i',
+      'ì': 'i',
+      'ï': 'i',
+      'î': 'i',
+      'ó': 'o',
+      'ò': 'o',
+      'ö': 'o',
+      'ô': 'o',
+      'ú': 'u',
+      'ù': 'u',
+      'ü': 'u',
+      'û': 'u',
+      'ñ': 'n',
+      '/': ' ',
+      '-': ' ',
+      '_': ' ',
+      '.': ' ',
+      ',': ' ',
+      ';': ' ',
+      ':': ' ',
+      '(': ' ',
+      ')': ' ',
+      '[': ' ',
+      ']': ' ',
     };
+
     replacements.forEach((from, to) => text = text.replaceAll(from, to));
+
     return text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
-  static bool _containsAny(String source, List<String> values) => values.any((value) => source.contains(_normalize(value)));
+  static bool _containsAny(String source, List<String> values) {
+    return values.any((value) => source.contains(_normalize(value)));
+  }
 
   static String _brandLabel(String brand) {
     switch (_normalize(brand)) {
@@ -466,7 +694,11 @@ class _SearchEngine {
 class _ScoredProduct {
   final Product product;
   final int score;
-  const _ScoredProduct({required this.product, required this.score});
+
+  const _ScoredProduct({
+    required this.product,
+    required this.score,
+  });
 }
 
 class ProductTileBusqueda extends ConsumerStatefulWidget {
@@ -491,8 +723,13 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   int cantidad = 1;
   bool _isAddingToQuote = false;
 
-  double _precioDouble(Product p) => double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
-  String _formatearPrecio(double value) => value <= 0 ? 'Bajo consulta' : '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
+  double _precioDouble(Product p) {
+    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
+  }
+
+  String _formatearPrecio(double value) {
+    return value <= 0 ? 'Bajo consulta' : '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
+  }
 
   void _goToQuotesKeepingTabs() {
     final goQuotes = widget.onGoQuotes;
@@ -515,25 +752,37 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Future<String?> _getCurrentUserEmail() async {
     final appUser = ref.read(currentUserProvider).value;
-    if (appUser != null && appUser.email.trim().isNotEmpty) return appUser.email.trim();
+    if (appUser != null && appUser.email.trim().isNotEmpty) {
+      return appUser.email.trim();
+    }
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
 
     try {
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (userDoc.exists && userDoc.data() != null) {
         final email = userDoc.data()?['email']?.toString();
-        if (email != null && email.trim().isNotEmpty) return email.trim();
+        if (email != null && email.trim().isNotEmpty) {
+          return email.trim();
+        }
       }
     } catch (e) {
       debugPrint('Error al leer email de Firestore: $e');
     }
 
-    if (user.email != null && user.email!.trim().isNotEmpty) return user.email!.trim();
+    if (user.email != null && user.email!.trim().isNotEmpty) {
+      return user.email!.trim();
+    }
+
     if (user.providerData.isNotEmpty) {
       final providerEmail = user.providerData.first.email;
-      if (providerEmail != null && providerEmail.trim().isNotEmpty) return providerEmail.trim();
+      if (providerEmail != null && providerEmail.trim().isNotEmpty) {
+        return providerEmail.trim();
+      }
     }
     return null;
   }
@@ -579,7 +828,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Hero(tag: 'search_${p.id}', child: ProductImageBusqueda(p: p)),
+                  Hero(
+                    tag: 'search_${p.id}',
+                    child: ProductImageBusqueda(p: p),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -646,11 +898,15 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                     child: ElevatedButton.icon(
                       onPressed: p.isInstock
                           ? () {
-                        ref.read(cartProvider.notifier).addProduct(p, cantidad);
+                        ref
+                            .read(cartProvider.notifier)
+                            .addProduct(p, cantidad);
                         ScaffoldMessenger.of(context).clearSnackBars();
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('$cantidad x ${p.name} añadido al carrito'),
+                            content: Text(
+                              '$cantidad x ${p.name} añadido al carrito',
+                            ),
                             backgroundColor: AppColors.primary,
                             duration: const Duration(seconds: 1),
                             behavior: SnackBarBehavior.floating,
@@ -658,7 +914,11 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                         );
                       }
                           : null,
-                      icon: Icon(p.isInstock ? Icons.shopping_cart_outlined : Icons.block_rounded, size: 17, color: Colors.white),
+                      icon: Icon(
+                        p.isInstock ? Icons.shopping_cart_outlined : Icons.block_rounded,
+                        size: 17,
+                        color: Colors.white,
+                      ),
                       label: Text(
                         p.isInstock ? 'AÑADIR CARRITO' : 'SIN STOCK',
                         maxLines: 1,
@@ -675,7 +935,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                         backgroundColor: p.isInstock ? AppColors.primary : Colors.grey.shade400,
                         foregroundColor: Colors.white,
                         elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
                     ),
@@ -690,7 +952,14 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
               child: OutlinedButton.icon(
                 onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
                 icon: _isAddingToQuote
-                    ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
+                    ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primary,
+                  ),
+                )
                     : const Icon(Icons.description_outlined, size: 17),
                 label: Text(
                   _isAddingToQuote ? 'AÑADIENDO...' : 'AÑADIR AL PRESUPUESTO',
@@ -707,8 +976,13 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   backgroundColor: Colors.white,
                   foregroundColor: AppColors.textPrimary,
                   disabledForegroundColor: Colors.grey.shade500,
-                  side: const BorderSide(color: Color(0xFFD9DEE7), width: 1.2),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  side: const BorderSide(
+                    color: Color(0xFFD9DEE7),
+                    width: 1.2,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
               ),
             ),
@@ -731,9 +1005,13 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _qtyBtn(Icons.remove, enabled: p.isInstock, onTap: () {
-              if (cantidad > 1) setState(() => cantidad--);
-            }),
+            _qtyBtn(
+              Icons.remove,
+              enabled: p.isInstock,
+              onTap: () {
+                if (cantidad > 1) setState(() => cantidad--);
+              },
+            ),
             SizedBox(
               width: 34,
               child: Text(
@@ -746,9 +1024,14 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                 ),
               ),
             ),
-            _qtyBtn(Icons.add, enabled: p.isInstock, isPrimary: p.isInstock, onTap: () {
-              if (p.isInstock) setState(() => cantidad++);
-            }),
+            _qtyBtn(
+              Icons.add,
+              enabled: p.isInstock,
+              isPrimary: p.isInstock,
+              onTap: () {
+                if (p.isInstock) setState(() => cantidad++);
+              },
+            ),
           ],
         ),
       ),
@@ -769,18 +1052,35 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 5, height: 5, decoration: BoxDecoration(color: textColor, shape: BoxShape.circle)),
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: textColor,
+              shape: BoxShape.circle,
+            ),
+          ),
           const SizedBox(width: 5),
           Text(
             hasStock ? 'En stock' : 'Sin stock',
-            style: TextStyle(fontSize: 10.5, color: textColor, fontWeight: FontWeight.w800, height: 1),
+            style: TextStyle(
+              fontSize: 10.5,
+              color: textColor,
+              fontWeight: FontWeight.w800,
+              height: 1,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _qtyBtn(IconData icon, {required bool enabled, required VoidCallback onTap, bool isPrimary = false}) {
+  Widget _qtyBtn(
+      IconData icon, {
+        required bool enabled,
+        required VoidCallback onTap,
+        bool isPrimary = false,
+      }) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: SizedBox(
@@ -789,7 +1089,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         child: Icon(
           icon,
           size: 17,
-          color: enabled ? (isPrimary ? AppColors.primary : Colors.black87) : Colors.grey.shade400,
+          color: enabled
+              ? (isPrimary ? AppColors.primary : Colors.black87)
+              : Colors.grey.shade400,
         ),
       ),
     );
@@ -816,9 +1118,12 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         return;
       }
 
-      if (product.id == 0) throw Exception('ID de producto no válido');
+      if (product.id == 0) {
+        throw Exception('ID de producto no válido');
+      }
 
       final precio = double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
+
       final ok = await api.crearPresupuesto(
         email: email,
         productId: product.id,
@@ -828,9 +1133,13 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       );
 
       if (!mounted) return;
-      if (!ok) throw Exception('No se pudo añadir el producto al presupuesto.');
+
+      if (!ok) {
+        throw Exception('No se pudo añadir el producto al presupuesto.');
+      }
 
       ref.invalidate(quotesProvider);
+
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -838,7 +1147,11 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
           backgroundColor: Colors.green.shade700,
           duration: const Duration(seconds: 2),
           behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(label: 'VER', textColor: Colors.white, onPressed: _goToQuotesKeepingTabs),
+          action: SnackBarAction(
+            label: 'VER',
+            textColor: Colors.white,
+            onPressed: _goToQuotesKeepingTabs,
+          ),
         ),
       );
     } catch (e) {
@@ -854,7 +1167,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isAddingToQuote = false);
+      if (mounted) {
+        setState(() => _isAddingToQuote = false);
+      }
     }
   }
 }
@@ -862,7 +1177,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 class ProductImageBusqueda extends StatelessWidget {
   final Product p;
 
-  const ProductImageBusqueda({super.key, required this.p});
+  const ProductImageBusqueda({
+    super.key,
+    required this.p,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -881,7 +1199,10 @@ class ProductImageBusqueda extends StatelessWidget {
           imageUrl: p.imageUrl,
           fit: BoxFit.contain,
           placeholder: (context, url) => Container(color: Colors.grey[100]),
-          errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.grey),
+          errorWidget: (context, url, error) => const Icon(
+            Icons.broken_image,
+            color: Colors.grey,
+          ),
         ),
       ),
     );
