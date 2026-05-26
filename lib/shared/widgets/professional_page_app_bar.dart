@@ -23,7 +23,7 @@ class ProfessionalPageAppBar extends StatelessWidget
   });
 
   @override
-  Size get preferredSize => const Size.fromHeight(86);
+  Size get preferredSize => const Size.fromHeight(108);
 
   @override
   Widget build(BuildContext context) {
@@ -49,57 +49,112 @@ class ProfessionalPageAppBar extends StatelessWidget
         child: SafeArea(
           bottom: false,
           child: SizedBox(
-            height: 86,
-            child: Row(
+            height: 108,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                const SizedBox(width: 4),
+                const SizedBox(height: 5),
                 SizedBox(
-                  width: 48,
                   height: 48,
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                    onPressed: onBack,
-                    tooltip: backTooltip,
-                    splashRadius: 22,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Positioned(
+                        left: 4,
+                        top: 0,
+                        bottom: 0,
+                        child: SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            onPressed: onBack,
+                            tooltip: backTooltip,
+                            splashRadius: 22,
+                          ),
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 72),
+                            child: Text(
+                              title.toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18,
+                                letterSpacing: 1.05,
+                                color: Colors.white,
+                                fontFamily: 'Oswald',
+                                height: 1.05,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 4,
+                        top: 0,
+                        bottom: 0,
+                        child: SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: onRefresh != null
+                              ? IconButton(
+                            icon: const Icon(
+                              Icons.refresh_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                            onPressed: onRefresh,
+                            tooltip: refreshTooltip,
+                            splashRadius: 22,
+                          )
+                              : const SizedBox.shrink(),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                Expanded(
-                  child: Text(
-                    title.toUpperCase(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 18,
-                      letterSpacing: 1.05,
-                      color: Colors.white,
-                      fontFamily: 'Oswald',
-                      height: 1.05,
+                if (subtitle.trim().isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          icon,
+                          color: Colors.white.withValues(alpha: 0.82),
+                          size: 14,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w400,
+                              letterSpacing: 0.25,
+                              height: 1.1,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                SizedBox(
-                  width: 48,
-                  height: 48,
-                  child: onRefresh != null
-                      ? IconButton(
-                    icon: const Icon(
-                      Icons.refresh_rounded,
-                      color: Colors.white,
-                      size: 22,
-                    ),
-                    onPressed: onRefresh,
-                    tooltip: refreshTooltip,
-                    splashRadius: 22,
-                  )
-                      : const SizedBox.shrink(),
-                ),
-                const SizedBox(width: 4),
+                ],
               ],
             ),
           ),

@@ -263,6 +263,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       appBar: _ProfilePageAppBar(
         title: 'MI CUENTA',
         backgroundColor: _brandColor,
+        onBack: () => Navigator.of(context).maybePop(),
         onRefresh: _refreshProfile,
         onLogout: () => _confirmSignOut(context),
       ),
@@ -1023,15 +1024,21 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// APP BAR PERSONALIZADO PARA PERFIL (CON FLECHA VISIBLE Y TÍTULO CENTRADO)
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final Color backgroundColor;
+  final VoidCallback onBack;
   final VoidCallback onRefresh;
   final VoidCallback onLogout;
 
   const _ProfilePageAppBar({
     required this.title,
     required this.backgroundColor,
+    required this.onBack,
     required this.onRefresh,
     required this.onLogout,
   });
@@ -1041,57 +1048,67 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      elevation: 0,
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: const BorderRadius.only(
-            bottomLeft: Radius.circular(30),
-            bottomRight: Radius.circular(30),
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x22000000),
-              blurRadius: 12,
-              offset: Offset(0, 4),
-            ),
-          ],
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(30),
+          bottomRight: Radius.circular(30),
         ),
-        child: SafeArea(
-          bottom: false,
-          child: SizedBox(
-            height: 86,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 110),
-                    child: Text(
-                      title.toUpperCase(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 18,
-                        letterSpacing: 1.05,
-                        color: Colors.white,
-                        fontFamily: 'Oswald',
-                        height: 1.05,
-                      ),
-                    ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: 86,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Flecha izquierda
+              Positioned(
+                left: 8,
+                child: IconButton(
+                  tooltip: 'Volver',
+                  icon: const Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  onPressed: onBack,
+                  splashRadius: 22,
+                ),
+              ),
+              // Título centrado
+              Center(
+                child: Text(
+                  title.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                    letterSpacing: 1.05,
+                    color: Colors.white,
+                    fontFamily: 'Oswald',
+                    height: 1.05,
                   ),
                 ),
-                Positioned(
-                  right: 52,
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: IconButton(
+              ),
+              // Botones derecha
+              Positioned(
+                right: 8,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
                       tooltip: 'Actualizar datos',
                       icon: const Icon(
                         Icons.refresh_rounded,
@@ -1101,14 +1118,7 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
                       onPressed: onRefresh,
                       splashRadius: 22,
                     ),
-                  ),
-                ),
-                Positioned(
-                  right: 4,
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: IconButton(
+                    IconButton(
                       tooltip: 'Cerrar sesión',
                       icon: const Icon(
                         Icons.logout_rounded,
@@ -1118,10 +1128,10 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
                       onPressed: onLogout,
                       splashRadius: 22,
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

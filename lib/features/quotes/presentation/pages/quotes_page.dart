@@ -31,6 +31,12 @@ class QuotesPage extends ConsumerStatefulWidget {
 
 class _QuotesPageState extends ConsumerState<QuotesPage> {
   static const String _confirmedQuoteIdsKey = 'mundicam_confirmed_quote_ids';
+  static const Color _pageBg = Color(0xFFF8F9FB);
+  static const Color _cardBorder = Color(0xFFE5E7EB);
+  static const Color _mutedText = Color(0xFF6B7280);
+  static const Color _softRedBg = Color(0xFFFFF1F2);
+  static const Color _softSurface = Color(0xFFFAFBFC);
+  static const Color _softBlue = Color(0xFF2563EB);
 
   bool _isLoadingAction = false;
   String? _processingQuoteId;
@@ -180,10 +186,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       _quoteItemsFutures.remove(quote.id);
     }
   }
-
-  // ═══════════════════════════════════════════════════════════════
-  // CONFIRMAR PRESUPUESTOS Y ENVIAR PRODUCTOS AL CARRITO
-  // ═══════════════════════════════════════════════════════════════
 
   Future<void> _confirmarPresupuestoYEnviarAlCarrito(
       List<QuoteMundicam> quotes,
@@ -336,15 +338,42 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(22),
           ),
-          title: const Text(
-            'Confirmar presupuesto',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-            ),
+          titlePadding: const EdgeInsets.fromLTRB(22, 22, 22, 0),
+          contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.check_circle_outline_rounded,
+                  color: AppColors.primary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Confirmar presupuesto',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.textPrimary,
+                    fontSize: 18,
+                    fontFamily: 'Oswald',
+                  ),
+                ),
+              ),
+            ],
           ),
           content: Text(
             'Se moverán los productos de tus presupuestos al carrito '
@@ -353,27 +382,37 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                 'Total: ${_formatMoney(total)}\n\n'
                 '¿Quieres continuar?',
             style: const TextStyle(
-              height: 1.4,
+              height: 1.45,
               color: AppColors.textSecondary,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancelar'),
+              child: const Text(
+                'Cancelar',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(dialogContext, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 11,
+                ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
               child: const Text(
                 'Confirmar',
-                style: TextStyle(fontWeight: FontWeight.w800),
+                style: TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
           ],
@@ -390,10 +429,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // GUARDAR PRESUPUESTO POR EMAIL Y OCULTARLO
-  // ═══════════════════════════════════════════════════════════════
-
   Future<bool> _confirmarGuardarPresupuestoDialog({
     required int totalPresupuestos,
     required double total,
@@ -403,15 +438,42 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(22),
           ),
-          title: const Text(
-            'Guardar presupuesto',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-            ),
+          titlePadding: const EdgeInsets.fromLTRB(22, 22, 22, 0),
+          contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _softBlue.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.save_alt_rounded,
+                  color: _softBlue,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Guardar presupuesto',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.textPrimary,
+                    fontSize: 18,
+                    fontFamily: 'Oswald',
+                  ),
+                ),
+              ),
+            ],
           ),
           content: Text(
             'Se abrirá tu aplicación de correo con el presupuesto listo '
@@ -420,27 +482,37 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                 'Total: ${_formatMoney(total)}\n\n'
                 '¿Quieres continuar?',
             style: const TextStyle(
-              height: 1.4,
+              height: 1.45,
               color: AppColors.textSecondary,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancelar'),
+              child: const Text(
+                'Cancelar',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(dialogContext, true),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade700,
+                backgroundColor: _softBlue,
                 foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 11,
+                ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
               child: const Text(
                 'Guardar',
-                style: TextStyle(fontWeight: FontWeight.w800),
+                style: TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
           ],
@@ -581,10 +653,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // ELIMINAR PRODUCTO DE PRESUPUESTO
-  // ═══════════════════════════════════════════════════════════════
-
   Future<void> _deleteQuoteItem(
       QuoteMundicam quote,
       _QuoteLineItem item,
@@ -698,7 +766,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     final quotesAsync = ref.watch(quotesProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FB),
+      backgroundColor: _pageBg,
       appBar: ProfessionalPageAppBar(
         title: 'MIS PRESUPUESTOS',
         subtitle: '',
@@ -726,70 +794,18 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             return _buildEmptyState(context);
           }
 
-          return Column(
-            children: [
-              _buildSummaryBar(quotes),
-              Expanded(
-                child: RefreshIndicator(
-                  color: AppColors.primary,
-                  onRefresh: _refreshQuotes,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: quotes.length,
-                    itemBuilder: (context, index) =>
-                        _buildQuoteCard(quotes[index]),
-                  ),
-                ),
-              ),
-            ],
+          return RefreshIndicator(
+            color: AppColors.primary,
+            onRefresh: _refreshQuotes,
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 132),
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: quotes.length,
+              itemBuilder: (context, index) =>
+                  _buildQuoteCard(quotes[index]),
+            ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildSummaryBar(List<QuoteMundicam> quotes) {
-    final total = _combinedVisibleTotal(quotes);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      color: Colors.white,
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.request_quote_outlined,
-              color: AppColors.primary,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              '${quotes.length} presupuesto${quotes.length != 1 ? 's' : ''} pendiente${quotes.length != 1 ? 's' : ''}',
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-          Text(
-            'Total: ${_formatMoney(total)}',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 14,
-              color: AppColors.primary,
-              fontFamily: 'Oswald',
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -811,119 +827,143 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 18,
-              offset: const Offset(0, -4),
+              color: Colors.black.withOpacity(0.09),
+              blurRadius: 22,
+              offset: const Offset(0, -6),
             ),
           ],
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'TOTAL PRESUPUESTOS',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.grey,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    _formatMoney(total),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.primary,
-                      fontFamily: 'Oswald',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              mainAxisSize: MainAxisSize.min,
+            Row(
               children: [
-                SizedBox(
-                  width: 180,
-                  height: 36,
-                  child: OutlinedButton.icon(
-                    onPressed: isProcessing
-                        ? null
-                        : () => _guardarPresupuestoPorEmail(quotes),
-                    icon: isSaving
-                        ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.blue,
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: _softRedBg,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.receipt_long_rounded,
+                    color: AppColors.primary,
+                    size: 19,
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'TOTAL PRESUPUESTOS',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          color: _mutedText,
+                          letterSpacing: 0.5,
+                        ),
                       ),
-                    )
-                        : const Icon(Icons.save_alt_rounded, size: 16),
-                    label: const Text(
-                      'GUARDAR PRESUP.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                      const SizedBox(height: 2),
+                      Text(
+                        _formatMoney(total),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.primary,
+                          fontFamily: 'Oswald',
+                          height: 1,
+                        ),
                       ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.blue.shade700,
-                      side: BorderSide(color: Colors.blue.shade300),
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 11),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 44,
+                    child: OutlinedButton.icon(
+                      onPressed: isProcessing
+                          ? null
+                          : () => _guardarPresupuestoPorEmail(quotes),
+                      icon: isSaving
+                          ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _softBlue,
+                        ),
+                      )
+                          : const Icon(Icons.save_alt_rounded, size: 17),
+                      label: const Text(
+                        'GUARDAR',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          fontFamily: 'Oswald',
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _softBlue,
+                        side: BorderSide(color: _softBlue.withOpacity(0.45)),
+                        backgroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                SizedBox(
-                  width: 180,
-                  height: 40,
-                  child: ElevatedButton.icon(
-                    onPressed: isProcessing
-                        ? null
-                        : () =>
-                        _confirmarPresupuestoYEnviarAlCarrito(quotes),
-                    icon: isConfirming
-                        ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SizedBox(
+                    height: 44,
+                    child: ElevatedButton.icon(
+                      onPressed: isProcessing
+                          ? null
+                          : () => _confirmarPresupuestoYEnviarAlCarrito(quotes),
+                      icon: isConfirming
+                          ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                          : const Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 18,
                         color: Colors.white,
                       ),
-                    )
-                        : const Icon(
-                      Icons.check_circle_outline_rounded,
-                      size: 18,
-                      color: Colors.white,
-                    ),
-                    label: const Text(
-                      'CONFIRMAR',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                        fontSize: 12,
+                      label: const Text(
+                        'CONFIRMAR',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontFamily: 'Oswald',
+                          letterSpacing: 0.3,
+                        ),
                       ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      disabledBackgroundColor: Colors.grey.shade300,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                   ),
@@ -961,86 +1001,107 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: isActive
-              ? AppColors.primary.withOpacity(0.45)
-              : Colors.grey.shade200,
-          width: isActive ? 2 : 1,
+              ? AppColors.primary.withOpacity(0.18)
+              : _cardBorder,
+          width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.045),
+            blurRadius: 16,
+            offset: const Offset(0, 7),
           ),
         ],
       ),
-      child: ExpansionTile(
-        key: ValueKey<String>('quote_${quote.id}_$isExpanded'),
-        initiallyExpanded: isExpanded,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        onExpansionChanged: (expanded) {
-          setState(() {
-            if (expanded) {
-              _expandedQuoteIds.add(quote.id);
-              _activeQuoteId = quote.id;
-            } else {
-              _expandedQuoteIds.remove(quote.id);
-              if (_activeQuoteId == quote.id) {
-                _activeQuoteId = null;
-              }
-            }
-          });
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: Theme(
+          data: Theme.of(context).copyWith(
+            dividerColor: Colors.transparent,
+            splashColor: AppColors.primary.withOpacity(0.04),
+            highlightColor: AppColors.primary.withOpacity(0.03),
+          ),
+          child: ExpansionTile(
+            key: ValueKey<String>('quote_${quote.id}_$isExpanded'),
+            initiallyExpanded: isExpanded,
+            tilePadding: const EdgeInsets.fromLTRB(16, 10, 14, 10),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            backgroundColor: Colors.white,
+            collapsedBackgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            collapsedShape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            onExpansionChanged: (expanded) {
+              setState(() {
+                if (expanded) {
+                  _expandedQuoteIds.add(quote.id);
+                  _activeQuoteId = quote.id;
+                } else {
+                  _expandedQuoteIds.remove(quote.id);
+                  if (_activeQuoteId == quote.id) {
+                    _activeQuoteId = null;
+                  }
+                }
+              });
 
-          if (expanded) {
-            _loadQuoteItems(quote);
-          }
-        },
-        leading: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(
-            Icons.description_outlined,
-            color: AppColors.primary,
-            size: 21,
+              if (expanded) {
+                _loadQuoteItems(quote);
+              }
+            },
+            leading: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: _softRedBg,
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Icon(
+                Icons.receipt_long_rounded,
+                color: AppColors.primary,
+                size: 22,
+              ),
+            ),
+            title: Text(
+              'Presupuesto #${quote.id}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 15,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                'Total: ${_formatMoney(_quoteDisplayTotal(quote))}',
+                style: const TextStyle(
+                  color: _mutedText,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            trailing: AnimatedRotation(
+              turns: isExpanded ? 0.5 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: AppColors.textPrimary,
+                size: 26,
+              ),
+            ),
+            children: [
+              _buildExpandedQuoteContent(quote),
+            ],
           ),
         ),
-        title: Text(
-          'Presupuesto #${quote.id}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 15,
-            color: Color(0xFF1A1A1A),
-          ),
-        ),
-        subtitle: Text(
-          'Total: ${_formatMoney(_quoteDisplayTotal(quote))}',
-          style: TextStyle(
-            color: Colors.grey[500],
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        trailing: AnimatedRotation(
-          turns: isExpanded ? 0.5 : 0,
-          duration: const Duration(milliseconds: 180),
-          child: const Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: AppColors.textPrimary,
-            size: 26,
-          ),
-        ),
-        children: [
-          _buildExpandedQuoteContent(quote),
-        ],
       ),
     );
   }
@@ -1051,7 +1112,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
+            padding: EdgeInsets.symmetric(vertical: 24),
             child: Center(
               child: CircularProgressIndicator(color: AppColors.primary),
             ),
@@ -1070,8 +1131,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
         return Column(
           children: [
-            const Divider(height: 1),
-            const SizedBox(height: 8),
+            const Divider(height: 1, color: _cardBorder),
+            const SizedBox(height: 10),
             ...items.map(
                   (item) => _buildQuoteLineItem(
                 quote: quote,
@@ -1092,14 +1153,29 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     final isDeleting = _deletingLineItemKeys.contains(deleteKey);
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade100),
-        ),
+        color: _softSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _cardBorder),
       ),
       child: Row(
         children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: _softRedBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.inventory_2_outlined,
+              size: 18,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(width: 11),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1110,29 +1186,30 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                    fontWeight: FontWeight.w800,
                     color: AppColors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 5),
                 Text(
                   '${item.quantity} x ${_formatMoney(item.total / item.quantity)} = ${_formatMoney(item.total)}',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
+                    color: _mutedText,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           if (isDeleting)
             const SizedBox(
-              width: 34,
-              height: 34,
+              width: 36,
+              height: 36,
               child: Padding(
-                padding: EdgeInsets.all(8),
+                padding: EdgeInsets.all(9),
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   color: AppColors.primary,
@@ -1140,17 +1217,22 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
               ),
             )
           else
-            IconButton(
-              tooltip: 'Eliminar producto',
-              visualDensity: VisualDensity.compact,
-              onPressed: item.productId <= 0
-                  ? null
-                  : () => _deleteQuoteItem(quote, item),
-              icon: Icon(
-                Icons.delete_outline_rounded,
-                color: item.productId <= 0
-                    ? Colors.grey.shade400
-                    : Colors.red.shade600,
+            SizedBox(
+              width: 38,
+              height: 38,
+              child: IconButton(
+                tooltip: 'Eliminar producto',
+                visualDensity: VisualDensity.compact,
+                onPressed: item.productId <= 0
+                    ? null
+                    : () => _deleteQuoteItem(quote, item),
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 21,
+                  color: item.productId <= 0
+                      ? Colors.grey.shade400
+                      : Colors.red.shade600,
+                ),
               ),
             ),
         ],
@@ -1161,19 +1243,24 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Widget _buildQuoteItemsError(QuoteMundicam quote) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.red.shade100),
       ),
       child: Column(
         children: [
-          const Icon(Icons.error_outline, color: Colors.red, size: 28),
+          Icon(Icons.error_outline, color: Colors.red.shade600, size: 30),
           const SizedBox(height: 8),
           const Text(
             'No se pudieron cargar los productos.',
             textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
@@ -1185,6 +1272,13 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             },
             icon: const Icon(Icons.refresh),
             label: const Text('Reintentar'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: BorderSide(color: AppColors.primary.withOpacity(0.35)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
           ),
         ],
       ),
@@ -1194,15 +1288,20 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Widget _buildNoItemsState() {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
+        color: _softSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _cardBorder),
       ),
       child: const Text(
         'Este presupuesto no tiene productos.',
         textAlign: TextAlign.center,
+        style: TextStyle(
+          color: _mutedText,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -1211,40 +1310,60 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                shape: BoxShape.circle,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: _cardBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.035),
+                blurRadius: 16,
+                offset: const Offset(0, 7),
               ),
-              child: Icon(
-                Icons.description_outlined,
-                size: 64,
-                color: Colors.grey.shade400,
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(22),
+                decoration: const BoxDecoration(
+                  color: _softRedBg,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.description_outlined,
+                  size: 54,
+                  color: AppColors.primary,
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'No tienes presupuestos pendientes',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
+              const SizedBox(height: 22),
+              const Text(
+                'No tienes presupuestos pendientes',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.textPrimary,
+                  fontFamily: 'Oswald',
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Cuando solicites un presupuesto desde el catálogo\naparecerá aquí.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey,
-                height: 1.5,
+              const SizedBox(height: 8),
+              const Text(
+                'Cuando solicites un presupuesto desde el catálogo aparecerá aquí.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _mutedText,
+                  height: 1.45,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1254,33 +1373,63 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              size: 48,
-              color: Colors.redAccent,
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Error al cargar presupuestos',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: _cardBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.035),
+                blurRadius: 16,
+                offset: const Offset(0, 7),
               ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _refreshQuotes,
-              icon: const Icon(Icons.refresh),
-              label: const Text('REINTENTAR'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 52,
+                color: Colors.red.shade500,
               ),
-            ),
-          ],
+              const SizedBox(height: 18),
+              const Text(
+                'Error al cargar presupuestos',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.textPrimary,
+                  fontFamily: 'Oswald',
+                ),
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(
+                onPressed: _refreshQuotes,
+                icon: const Icon(Icons.refresh),
+                label: const Text(
+                  'REINTENTAR',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1305,10 +1454,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     return '$sign${groups.join('.')},$decimalPart €';
   }
 }
-
-// ────────────────────────────────────────────────────────────
-// MODELOS
-// ────────────────────────────────────────────────────────────
 
 class _QuoteMoveItem {
   final String quoteId;

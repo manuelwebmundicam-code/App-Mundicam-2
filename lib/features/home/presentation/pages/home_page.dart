@@ -31,6 +31,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _showSecondaryContent = false;
   bool _showChatBox = false;
 
+  static const Color _pageBg = Colors.white;
   static const Color _footerBg = Color(0xFFEAF0F6);
   static const Color _footerBlack = Color(0xFF111827);
   static const Color _footerMuted = Color(0xFF5F6B7A);
@@ -39,10 +40,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
+
     Future.delayed(const Duration(milliseconds: 250), () {
       if (!mounted) return;
       setState(() => _showSecondaryContent = true);
     });
+
     Future.delayed(const Duration(milliseconds: 800), () {
       if (!mounted) return;
       setState(() => _showChatBox = true);
@@ -67,7 +70,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
+      backgroundColor: _pageBg,
       body: SafeArea(
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
@@ -81,7 +84,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: ClampingScrollPhysics(),
                   ),
-                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                  keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -95,14 +99,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                         const BrandsBanner(),
                         const SizedBox(height: 22),
                         _buildNewsPanel(),
-                        const SizedBox(height: 18),
                         _buildMundicamFooter(),
                       ] else ...[
                         const SizedBox(height: 18),
                         _buildSkeletonBlock(height: 66),
                         const SizedBox(height: 22),
                         _buildNewsSkeletonPanel(),
-                        const SizedBox(height: 18),
                         _buildSkeletonBlock(height: 150),
                       ],
                     ],
