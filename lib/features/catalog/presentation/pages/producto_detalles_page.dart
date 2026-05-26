@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
@@ -27,8 +26,7 @@ class ProductDetailScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductDetailScreen> createState() =>
-      _ProductDetailScreenState();
+  ConsumerState<ProductDetailScreen> createState() => _ProductDetailScreenState();
 }
 
 class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
@@ -55,10 +53,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       final api = ApiService();
       final product = widget.product;
       String? marca;
-
       for (final attr in product.attributes) {
-        if (attr.name.toLowerCase().contains('marca') &&
-            attr.options.isNotEmpty) {
+        if (attr.name.toLowerCase().contains('marca') && attr.options.isNotEmpty) {
           marca = attr.options.first;
           break;
         }
@@ -75,9 +71,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       final seen = <int>{};
       todos = todos.where((p) => seen.add(p.id)).toList();
 
-      final precioActual =
-          double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0;
-
+      final precioActual = double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0;
       final recomendados = todos
           .where((p) => p.id != product.id && p.hasStock)
           .map((p) {
@@ -165,7 +159,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   String? _resolveVisualCategory(Product p) {
     final fromContext = widget.contextCategoryName?.trim();
     if (fromContext != null && fromContext.isNotEmpty) return fromContext;
-
     final short = _limpiarHtml(p.shortDescription);
     if (short.isNotEmpty) {
       final firstLine = short.split('\n').map((e) => e.trim()).firstWhere(
@@ -174,7 +167,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       );
       if (firstLine.isNotEmpty && firstLine.length <= 40) return firstLine;
     }
-
     return null;
   }
 
@@ -193,36 +185,29 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
-
     if (lines.length < 4) return <MapEntry<String, String>>[];
-
     var startIndex = 0;
     if (lines.length >= 2 &&
         lines[0].toLowerCase() == 'parámetro' &&
         lines[1].toLowerCase() == 'valor') {
       startIndex = 2;
     }
-
     final rows = <MapEntry<String, String>>[];
     for (var i = startIndex; i < lines.length - 1; i += 2) {
       final key = lines[i].trim();
       final value = lines[i + 1].trim();
-
       if (key.isEmpty || value.isEmpty) continue;
       if (key.toLowerCase() == 'parámetro' && value.toLowerCase() == 'valor') {
         continue;
       }
-
       rows.add(MapEntry(key, value));
     }
-
     return rows.length >= 2 ? rows : <MapEntry<String, String>>[];
   }
 
   Future<String?> _getCurrentUserEmail() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
-
     try {
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
@@ -235,7 +220,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     } catch (e) {
       debugPrint('Error al leer email de Firestore: $e');
     }
-
     if (user.email != null && user.email!.trim().isNotEmpty) {
       return user.email!.trim();
     }
@@ -280,9 +264,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     final precio = _precioDouble(p);
     final precioRegular = _precioRegularDouble(p);
     final tieneDescuento = precioRegular > precio && precio > 0;
-    final descuento = tieneDescuento
-        ? ((precioRegular - precio) / precioRegular * 100).round()
-        : 0;
+    final descuento =
+    tieneDescuento ? ((precioRegular - precio) / precioRegular * 100).round() : 0;
     final ahorro = tieneDescuento ? precioRegular - precio : 0.0;
     final enStock = p.hasStock;
     final descCorta = _normalizeMultilineText(_limpiarHtml(p.shortDescription));
@@ -315,7 +298,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           const SizedBox(height: 14),
           _productHeader(
             p: p,
-            categoriaVisual: categoriaVisual,
+            marca: marca,
             precio: precio,
             precioRegular: precioRegular,
             tieneDescuento: tieneDescuento,
@@ -402,7 +385,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   Widget _productHeader({
     required Product p,
-    required String? categoriaVisual,
+    required String? marca,
     required double precio,
     required double precioRegular,
     required bool tieneDescuento,
@@ -410,6 +393,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     required double ahorro,
     required bool enStock,
   }) {
+    final marcaText = marca?.trim();
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -423,22 +407,29 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           Row(
             children: [
               _stockBadge(enStock),
-              const Spacer(),
-              if (p.sku.isNotEmpty)
-                Flexible(
-                  child: Text(
-                    'REF: ${p.sku}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: _muted,
-                      fontWeight: FontWeight.w700,
-                    ),
+              if (marcaText != null && marcaText.isNotEmpty) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _brandTopLabel(marcaText),
                   ),
                 ),
+              ] else const Spacer(),
             ],
           ),
+          if (p.sku.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              'REF: ${p.sku}',
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: _muted,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Text(
             p.name,
@@ -449,27 +440,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               color: _dark,
             ),
           ),
-          if (categoriaVisual != null) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.14),
-                ),
-              ),
-              child: Text(
-                categoriaVisual,
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary,
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 16),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -547,10 +517,49 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
+  Widget _brandTopLabel(String marca) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.verified_outlined,
+          size: 16,
+          color: AppColors.primary,
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: RichText(
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            text: TextSpan(
+              children: [
+                const TextSpan(
+                  text: 'Marca: ',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: _muted,
+                  ),
+                ),
+                TextSpan(
+                  text: marca.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w900,
+                    color: _dark,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _stockBadge(bool enStock) {
     final bg = enStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
     final fg = enStock ? const Color(0xFF218047) : const Color(0xFFC62828);
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -703,9 +712,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     ),
                   )
                       : Icon(
-                    enStock
-                        ? Icons.shopping_cart_outlined
-                        : Icons.block,
+                    enStock ? Icons.shopping_cart_outlined : Icons.block,
                     size: 18,
                   ),
                   label: Text(
@@ -715,8 +722,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                    enStock ? AppColors.primary : Colors.grey.shade400,
+                    backgroundColor: enStock ? AppColors.primary : Colors.grey.shade400,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
@@ -766,13 +772,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   Future<void> _addToCart() async {
     if (!widget.product.hasStock || _isAddingToCart) return;
-
     setState(() => _isAddingToCart = true);
     ref.read(cartProvider.notifier).addProduct(widget.product, _cantidad);
     HapticFeedback.mediumImpact();
-
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('$_cantidad x ${widget.product.name} añadido al carrito'),
@@ -781,7 +784,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         duration: const Duration(seconds: 1),
       ),
     );
-
     if (mounted) setState(() => _isAddingToCart = false);
   }
 
@@ -819,7 +821,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
-
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
@@ -901,8 +902,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: () =>
-                setState(() => _descriptionExpanded = !_descriptionExpanded),
+            onTap: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
@@ -945,21 +945,16 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   children: List.generate(rows.length, (index) {
                     final row = rows[index];
                     final isLast = index == rows.length - 1;
-
                     return Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        color:
-                        index.isEven ? Colors.white : const Color(0xFFF8FAFC),
+                        color: index.isEven ? Colors.white : const Color(0xFFF8FAFC),
                         borderRadius: BorderRadius.vertical(
-                          top: index == 0
-                              ? const Radius.circular(14)
-                              : Radius.zero,
-                          bottom:
-                          isLast ? const Radius.circular(14) : Radius.zero,
+                          top: index == 0 ? const Radius.circular(14) : Radius.zero,
+                          bottom: isLast ? const Radius.circular(14) : Radius.zero,
                         ),
                         border: isLast
                             ? null
@@ -1027,8 +1022,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: () =>
-                setState(() => _descriptionExpanded = !_descriptionExpanded),
+            onTap: () => setState(() => _descriptionExpanded = !_descriptionExpanded),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
@@ -1220,14 +1214,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                       ScaffoldMessenger.of(context)
                                           .showSnackBar(
                                         SnackBar(
-                                          content:
-                                          Text('${rp.name} añadido'),
-                                          backgroundColor:
-                                          AppColors.primary,
-                                          behavior:
-                                          SnackBarBehavior.floating,
-                                          duration:
-                                          const Duration(seconds: 1),
+                                          content: Text('${rp.name} añadido'),
+                                          backgroundColor: AppColors.primary,
+                                          behavior: SnackBarBehavior.floating,
+                                          duration: const Duration(seconds: 1),
                                         ),
                                       );
                                     }
@@ -1242,8 +1232,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       padding: EdgeInsets.zero,
-                                      disabledBackgroundColor:
-                                      Colors.grey.shade300,
+                                      disabledBackgroundColor: Colors.grey.shade300,
                                     ),
                                     child: Text(
                                       rp.hasStock ? 'Añadir' : 'Sin stock',
@@ -1308,11 +1297,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   Future<void> _addToQuote() async {
     if (_isAddingToQuote) return;
     setState(() => _isAddingToQuote = true);
-
     try {
       final api = ApiService();
       final email = await _getCurrentUserEmail();
-
       if (email == null || email.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1326,10 +1313,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         }
         return;
       }
-
       final prod = widget.product;
       if (prod.id == 0) throw Exception('ID de producto no válido.');
-
       final precio = _precioDouble(prod);
       final ok = await api.crearPresupuesto(
         email: email,
@@ -1338,10 +1323,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         price: precio,
         quantity: _cantidad,
       );
-
       if (!mounted) return;
       if (!ok) throw Exception('No se pudo añadir el producto al presupuesto.');
-
       ref.invalidate(quotesProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

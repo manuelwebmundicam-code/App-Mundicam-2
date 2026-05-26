@@ -32,12 +32,10 @@ class Product {
   // =========================
 
   bool get hasStock {
-    // WooCommerce stock numérico
     if (stockQuantity > 0) {
       return true;
     }
 
-    // Productos instock sin gestión numérica
     if (isInstock) {
       return true;
     }
@@ -50,18 +48,35 @@ class Product {
   // =========================
 
   int get maxPurchaseQty {
-    // Si WooCommerce controla stock real
     if (stockQuantity > 0) {
       return stockQuantity;
     }
 
-    // Si WooCommerce dice instock
-    // pero sin stock_quantity
     if (isInstock) {
       return 999;
     }
 
     return 0;
+  }
+
+  // =========================
+  // MARCA
+  // =========================
+
+  String? get brandName {
+    for (final attr in attributes) {
+      final attrName = attr.name.toLowerCase().trim();
+
+      if ((attrName.contains('marca') ||
+          attrName.contains('brand') ||
+          attrName == 'pa_marca') &&
+          attr.options.isNotEmpty) {
+        final value = attr.options.first.trim();
+        if (value.isNotEmpty) return value;
+      }
+    }
+
+    return null;
   }
 
   factory Product.fromJson(Map<String, dynamic> json) {
@@ -94,8 +109,36 @@ class Product {
 
     final String cleanLong = rawLong.replaceAll(RegExp(r'<[^>]*>|&[^;]+;'), '');
 
+    // =========================
+    // ATRIBUTOS + MARCA
+    // =========================
+
+    final parsedAttributes =
+        (json['attributes'] as List?)
+            ?.map((attr) => ProductAttribute.fromJson(attr))
+            .toList() ??
+            <ProductAttribute>[];
+
+    final extractedBrand = _extractBrandFromJson(json);
+
+    final hasMarcaAttribute = parsedAttributes.any((attr) {
+      final name = attr.name.toLowerCase().trim();
+      return name.contains('marca') || name.contains('brand') || name == 'pa_marca';
+    });
+
+    if (extractedBrand != null &&
+        extractedBrand.trim().isNotEmpty &&
+        !hasMarcaAttribute) {
+      parsedAttributes.add(
+        ProductAttribute(
+          name: 'Marca',
+          options: [extractedBrand.trim()],
+        ),
+      );
+    }
+
     return Product(
-      id: json['id'] ?? 0,
+      id: _parseInt(json['id']),
 
       name: json['name'] ?? 'Sin nombre',
 
@@ -107,10 +150,7 @@ class Product {
 
       sku: (json['sku'] ?? '').toString(),
 
-      // =========================
-      // STOCK SEGURO
-      // =========================
-      stockQuantity: (json['stock_quantity'] ?? 0) as int,
+      stockQuantity: _parseInt(json['stock_quantity']),
 
       onSale: json['on_sale'] ?? false,
 
@@ -124,12 +164,84 @@ class Product {
           ? 'Sin descripción detallada'
           : cleanLong.trim(),
 
-      attributes:
-          (json['attributes'] as List?)
-              ?.map((attr) => ProductAttribute.fromJson(attr))
-              .toList() ??
-          [],
+      attributes: parsedAttributes,
     );
+  }
+
+  static String? _extractBrandFromJson(Map<String, dynamic> json) {
+    final directBrand = json['brand'];
+    if (directBrand != null) {
+      if (directBrand is String && directBrand.trim().isNotEmpty) {
+        return directBrand.trim();
+      }
+
+      if (directBrand is Map) {
+        final name = directBrand['name']?.toString().trim();
+        if (name != null && name.isNotEmpty) return name;
+      }
+    }
+
+    final brands = json['brands'];
+    if (brands is List && brands.isNotEmpty) {
+      final firstBrand = brands.first;
+
+      if (firstBrand is String && firstBrand.trim().isNotEmpty) {
+        return firstBrand.trim();
+      }
+
+      if (firstBrand is Map) {
+        final name = firstBrand['name']?.toString().trim();
+        if (name != null && name.isNotEmpty) return name;
+
+        final slug = firstBrand['slug']?.toString().trim();
+        if (slug != null && slug.isNotEmpty) return slug;
+      }
+    }
+
+    final categories = json['categories'];
+    if (categories is List && categories.isNotEmpty) {
+      for (final category in categories) {
+        if (category is! Map) continue;
+
+        final name = category['name']?.toString().trim();
+        final slug = category['slug']?.toString().trim();
+
+        final candidate = name ?? slug;
+        if (candidate == null || candidate.isEmpty) continue;
+
+        final lower = candidate.toLowerCase();
+
+        const knownBrands = [
+          'dahua',
+          'hikvision',
+          'ajax',
+          'ksenia',
+          'tplink',
+          'tp-link',
+          'mobotix',
+          'teletek',
+          'wisat',
+          'wisim',
+          'evolve',
+          'secury360',
+        ];
+
+        for (final brand in knownBrands) {
+          if (lower == brand || lower.contains(brand)) {
+            return candidate;
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  static int _parseInt(dynamic value, {int fallback = 0}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? fallback;
   }
 
   Map<String, dynamic> toJson() => {
