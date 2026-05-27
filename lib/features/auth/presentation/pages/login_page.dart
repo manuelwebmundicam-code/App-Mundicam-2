@@ -271,7 +271,7 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover)),
+          Positioned.fill(child: Image.asset('assets/gif/fondo2.gif', fit: BoxFit.cover)),
           Positioned.fill(child: Container(color: Colors.black.withValues(alpha: 0.3))),
           Center(
             child: SingleChildScrollView(

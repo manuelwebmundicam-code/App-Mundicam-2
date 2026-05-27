@@ -38,7 +38,7 @@ class MenuBarWidget extends ConsumerWidget {
         MaterialPageRoute(
           builder: (context) => ProductosPorCategoriaScreen(
             categoryId: outletId,
-            categoryName: "OUTLET",
+            categoryName: "OFERTAS",
           ),
         ),
       );

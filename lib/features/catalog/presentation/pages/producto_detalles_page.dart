@@ -11,6 +11,10 @@ import 'package:mundicam/features/quotes/presentation/providers/quote_provider.d
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
+import '../../../quotes/data/models/local_quote_model.dart';
+import '../../../quotes/presentation/providers/local_quote_provider.dart';
+import '../../../quotes/presentation/widgets/quote_selection_dialog.dart';
+
 class ProductDetailScreen extends ConsumerStatefulWidget {
   final Product product;
   final VoidCallback? onGoCart;
@@ -1296,49 +1300,87 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   Future<void> _addToQuote() async {
     if (_isAddingToQuote) return;
-    setState(() => _isAddingToQuote = true);
-    try {
-      final api = ApiService();
-      final email = await _getCurrentUserEmail();
-      if (email == null || email.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No se pudo obtener tu email.'),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-        return;
-      }
-      final prod = widget.product;
-      if (prod.id == 0) throw Exception('ID de producto no válido.');
-      final precio = _precioDouble(prod);
-      final ok = await api.crearPresupuesto(
-        email: email,
-        productId: prod.id,
+
+    final prod = widget.product;
+    if (prod.id == 0) return;
+
+    final precio = _precioDouble(prod);
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => QuoteSelectionDialog(
         productName: prod.name,
+        productId: prod.id,
         price: precio,
         quantity: _cantidad,
-      );
-      if (!mounted) return;
-      if (!ok) throw Exception('No se pudo añadir el producto al presupuesto.');
-      ref.invalidate(quotesProvider);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$_cantidad x ${prod.name} añadido al presupuesto'),
-          backgroundColor: AppColors.primary,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-          action: SnackBarAction(
-            label: 'VER',
-            textColor: Colors.white,
-            onPressed: _goToQuotesKeepingTabs,
+      ),
+    );
+
+    if (result == null || !mounted) return; // Canceló
+
+    setState(() => _isAddingToQuote = true);
+
+    try {
+      final action = result['action'] as String;
+      final notifier = ref.read(localQuotesProvider.notifier);
+      String mensaje = '';
+
+      if (action == 'crear_y_anadir') {
+        // ──── NUEVO PRESUPUESTO ────
+        final nombre = result['nombre'] as String;
+        // Si no puso nombre, usamos el timestamp como ID y nombre
+        final orderId = DateTime.now().millisecondsSinceEpoch.toString();
+        final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
+
+        await notifier.crearPresupuesto(
+          orderId: orderId,
+          nombre: nombreFinal,
+        );
+
+        await notifier.anadirItem(
+          orderId: orderId,
+          item: LocalQuoteItem(
+            productId: prod.id,
+            productName: prod.name,
+            quantity: _cantidad,
+            price: precio,
           ),
-        ),
-      );
+        );
+
+        mensaje = '✅ Añadido a "$nombreFinal"';
+      } else if (action == 'anadir_existente') {
+        // ──── PRESUPUESTO EXISTENTE ────
+        final orderId = result['orderId'] as String;
+        final nombre = result['nombre'] as String;
+
+        await notifier.anadirItem(
+          orderId: orderId,
+          item: LocalQuoteItem(
+            productId: prod.id,
+            productName: prod.name,
+            quantity: _cantidad,
+            price: precio,
+          ),
+        );
+
+        mensaje = '✅ Añadido a "$nombre"';
+      }
+
+      if (mounted && mensaje.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(mensaje),
+            backgroundColor: Colors.green.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+            action: SnackBarAction(
+              label: 'VER',
+              textColor: Colors.white,
+              onPressed: _goToQuotesKeepingTabs,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint('❌ Error en _addToQuote: $e');
       if (mounted) {

@@ -1,3 +1,4 @@
+// busqueda_resultados_page.dart - COMPLETO ARREGLADO
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,10 +10,14 @@ import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
+
+import '../../../quotes/presentation/widgets/quote_selection_dialog.dart';
 
 class BusquedaResultadosPage extends ConsumerWidget {
   final String query;
@@ -750,43 +755,6 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     );
   }
 
-  Future<String?> _getCurrentUserEmail() async {
-    final appUser = ref.read(currentUserProvider).value;
-    if (appUser != null && appUser.email.trim().isNotEmpty) {
-      return appUser.email.trim();
-    }
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return null;
-
-    try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (userDoc.exists && userDoc.data() != null) {
-        final email = userDoc.data()?['email']?.toString();
-        if (email != null && email.trim().isNotEmpty) {
-          return email.trim();
-        }
-      }
-    } catch (e) {
-      debugPrint('Error al leer email de Firestore: $e');
-    }
-
-    if (user.email != null && user.email!.trim().isNotEmpty) {
-      return user.email!.trim();
-    }
-
-    if (user.providerData.isNotEmpty) {
-      final providerEmail = user.providerData.first.email;
-      if (providerEmail != null && providerEmail.trim().isNotEmpty) {
-        return providerEmail.trim();
-      }
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final p = widget.p;
@@ -1097,63 +1065,93 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // NUEVO: AÑADIR AL PRESUPUESTO CON QuoteSelectionDialog
+  // ═══════════════════════════════════════════════════════════════
+
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
+    if (product.id == 0) return;
+
+    final precio = _precioDouble(product);
+
+    // Mostrar el diálogo de selección de presupuesto
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => QuoteSelectionDialog(
+        productName: product.name,
+        productId: product.id,
+        price: precio,
+        quantity: cantidad,
+      ),
+    );
+
+    // Usuario canceló el diálogo
+    if (result == null || !mounted) return;
+
     setState(() => _isAddingToQuote = true);
 
     try {
-      final api = ApiService();
-      final email = await _getCurrentUserEmail();
+      final action = result['action'] as String;
+      final notifier = ref.read(localQuotesProvider.notifier);
+      String mensaje = '';
 
-      if (email == null || email.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Debes iniciar sesión para crear presupuestos'),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
+      if (action == 'crear_y_anadir') {
+        // ──── CREAR NUEVO PRESUPUESTO ────
+        final nombre = result['nombre'] as String;
+        final orderId = DateTime.now().millisecondsSinceEpoch.toString();
+        final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
 
-      if (product.id == 0) {
-        throw Exception('ID de producto no válido');
-      }
+        await notifier.crearPresupuesto(
+          orderId: orderId,
+          nombre: nombreFinal,
+        );
 
-      final precio = double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
-
-      final ok = await api.crearPresupuesto(
-        email: email,
-        productId: product.id,
-        productName: product.name,
-        price: precio,
-        quantity: cantidad,
-      );
-
-      if (!mounted) return;
-
-      if (!ok) {
-        throw Exception('No se pudo añadir el producto al presupuesto.');
-      }
-
-      ref.invalidate(quotesProvider);
-
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$cantidad x ${product.name} añadido al presupuesto'),
-          backgroundColor: Colors.green.shade700,
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(
-            label: 'VER',
-            textColor: Colors.white,
-            onPressed: _goToQuotesKeepingTabs,
+        await notifier.anadirItem(
+          orderId: orderId,
+          item: LocalQuoteItem(
+            productId: product.id,
+            productName: product.name,
+            quantity: cantidad,
+            price: precio,
           ),
-        ),
-      );
+        );
+
+        mensaje = '$cantidad x ${product.name} añadido a "$nombreFinal"';
+      } else if (action == 'anadir_existente') {
+        // ──── AÑADIR A PRESUPUESTO EXISTENTE ────
+        final orderId = result['orderId'] as String;
+        final nombre = result['nombre'] as String;
+
+        await notifier.anadirItem(
+          orderId: orderId,
+          item: LocalQuoteItem(
+            productId: product.id,
+            productName: product.name,
+            quantity: cantidad,
+            price: precio,
+          ),
+        );
+
+        mensaje = '$cantidad x ${product.name} añadido a "$nombre"';
+      }
+
+      if (mounted && mensaje.isNotEmpty) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(mensaje),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'VER',
+              textColor: Colors.white,
+              onPressed: _goToQuotesKeepingTabs,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint('❌ Error en _addToQuote búsqueda: $e');
       if (mounted) {
