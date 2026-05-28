@@ -274,8 +274,12 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 
   IconData _getIconForCategory(String name) {
     final n = name.toLowerCase();
+
+    if (n.contains('video ip') || n.contains('ip hd')) {
+      return Icons.settings_remote_rounded;
+    }
     if (n.contains('video') || n.contains('cctv')) {
-      return Icons.videocam_rounded;
+      return Icons.videocam_outlined;
     }
     if (n.contains('ip')) {
       return Icons.settings_remote_rounded;
