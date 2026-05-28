@@ -58,53 +58,26 @@ class ApiService {
   List<String>? _cachedBrandNames;
 
   static const List<String> _fallbackBrandNames = <String>[
-    'Dahua',
-    'Hikvision',
-    'Ajax',
-    'Ksenia',
-    'TP-Link',
-    'TPLINK',
-    'Mobotix',
-    'Teletek',
-    'Wisim',
-    'Wisat',
-    'Evolve',
-    'Secury360',
-    'Securiton',
-    'Ruijie',
-    'Reyee',
-    'ZKTeco',
-    'Imou',
-    'Safire',
-    'Uniview',
-    'Ubiquiti',
-    'Fermax',
-    'Golmar',
-    'Hikmicro',
-    'Akuvox',
-    'Milesight',
-    'Cambium',
-    'Aritech',
-    'Paradox',
-    'DSC',
-    'Honeywell',
+    'Dahua', 'Hikvision', 'Ajax', 'Ksenia', 'TP-Link', 'TPLINK', 'Mobotix',
+    'Teletek', 'Wisim', 'Wisat', 'Evolve', 'Secury360', 'Securiton', 'Ruijie',
+    'Reyee', 'ZKTeco', 'Imou', 'Safire', 'Uniview', 'Ubiquiti', 'Fermax',
+    'Golmar', 'Hikmicro', 'Akuvox', 'Milesight', 'Cambium', 'Aritech',
+    'Paradox', 'DSC', 'Honeywell',
   ];
 
   ApiService._internal() {
-    _dio = Dio(
-      BaseOptions(
-        baseUrl: 'https://www.mundicam.com',
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
-        headers: {'Accept': 'application/json'},
-      ),
-    );
+    _dio = Dio(BaseOptions(
+      baseUrl: 'https://www.mundicam.com',
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+      headers: const {'Accept': 'application/json', 'Content-Type': 'application/json'},
+    ));
     _loadKeys();
   }
 
-  // ================================================================
-  // CARGA SEGURA DE KEYS DESDE REMOTE CONFIG
-  // ================================================================
+  // ═══════════════════════════════════════════════
+  // KEYS
+  // ═══════════════════════════════════════════════
 
   Future<void> _loadKeys() async {
     try {
@@ -126,14 +99,8 @@ class ApiService {
   }
 
   Future<void> _ensureInitialized() async {
-    if (!_initialized) {
-      await _loadKeys();
-    }
+    if (!_initialized) await _loadKeys();
   }
-
-  // ================================================================
-  // AUTENTICACIÓN WOOCOMMERCE
-  // ================================================================
 
   String get _basicAuth {
     if (_consumerKey.isEmpty || _consumerSecret.isEmpty) {
@@ -145,66 +112,117 @@ class ApiService {
 
   Options get _wooOptions => Options(headers: {'Authorization': _basicAuth});
 
-  // ================================================================
-  // NORMALIZACIÓN / MARCAS
-  // ================================================================
+  // ═══════════════════════════════════════════════
+  // HELPERS
+  // ═══════════════════════════════════════════════
+
+  int _parseIntValue(dynamic value, {int fallback = 0}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    final raw = value.toString().trim();
+    if (raw.isEmpty) return fallback;
+    return int.tryParse(raw) ?? double.tryParse(raw)?.toInt() ?? fallback;
+  }
+
+  double _parseDoubleValue(dynamic value, {double fallback = 0}) {
+    if (value == null) return fallback;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+    final raw = value.toString().trim().replaceAll('€', '').replaceAll(RegExp(r'\s+'), '');
+    if (raw.contains(',') && raw.contains('.')) {
+      return double.tryParse(raw.replaceAll('.', '').replaceAll(',', '.')) ?? fallback;
+    }
+    return double.tryParse(raw.replaceAll(',', '.')) ?? fallback;
+  }
+
+  List<Map<String, dynamic>> _sanitizeNewOrderLineItems(dynamic rawLineItems) {
+    final rawList = rawLineItems is List ? rawLineItems : <dynamic>[];
+    final Map<String, Map<String, dynamic>> grouped = <String, Map<String, dynamic>>{};
+    for (final rawItem in rawList) {
+      if (rawItem is! Map) continue;
+      final item = Map<String, dynamic>.from(rawItem);
+      final productId = _parseIntValue(item['product_id'] ?? item['productId']);
+      final variationId = _parseIntValue(item['variation_id'] ?? item['variationId']);
+      final quantity = _parseIntValue(item['quantity'] ?? item['qty'], fallback: 1);
+      if (productId <= 0 || quantity <= 0) continue;
+      final key = '$productId-$variationId';
+      if (grouped.containsKey(key)) {
+        grouped[key]!['quantity'] = _parseIntValue(grouped[key]!['quantity']) + quantity;
+      } else {
+        grouped[key] = {
+          'product_id': productId,
+          if (variationId > 0) 'variation_id': variationId,
+          'quantity': quantity,
+        };
+      }
+    }
+    return grouped.values.toList();
+  }
+
+  List<Map<String, dynamic>> _buildMinimalWooLineItemsForUpdate(dynamic rawLineItems) {
+    final rawList = rawLineItems is List ? rawLineItems : <dynamic>[];
+    final result = <Map<String, dynamic>>[];
+    for (final rawItem in rawList) {
+      if (rawItem is! Map) continue;
+      final item = Map<String, dynamic>.from(rawItem);
+      final id = _parseIntValue(item['id']);
+      final productId = _parseIntValue(item['product_id']);
+      final variationId = _parseIntValue(item['variation_id']);
+      final quantity = _parseIntValue(item['quantity']);
+      if (productId <= 0 || quantity <= 0) continue;
+      result.add({
+        if (id > 0) 'id': id,
+        'product_id': productId,
+        if (variationId > 0) 'variation_id': variationId,
+        'quantity': quantity,
+      });
+    }
+    return result;
+  }
+
+  void _debugLineItems(String title, List<Map<String, dynamic>> lineItems) {
+    debugPrint('════════ $title ════════');
+    debugPrint('🧾 Total líneas: ${lineItems.length}');
+    for (final item in lineItems) {
+      debugPrint('➡️ product_id: ${item['product_id']} | variation_id: ${item['variation_id'] ?? '-'} | qty: ${item['quantity']}');
+    }
+    debugPrint('════════════════════════════');
+  }
+
+  // ═══════════════════════════════════════════════
+  // MARCAS
+  // ═══════════════════════════════════════════════
 
   String _normalizeBrandValue(String value) {
-    return value
-        .toLowerCase()
-        .trim()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ü', 'u')
-        .replaceAll('ñ', 'n')
-        .replaceAll(RegExp(r'[\s\-_]+'), '')
+    return value.toLowerCase().trim()
+        .replaceAll('á', 'a').replaceAll('é', 'e').replaceAll('í', 'i')
+        .replaceAll('ó', 'o').replaceAll('ú', 'u').replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n').replaceAll(RegExp(r'[\s\-_]+'), '')
         .replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
   bool _isBrandAttributeName(String value) {
     final normalized = _normalizeBrandValue(value);
-    return normalized.contains('marca') ||
-        normalized.contains('brand') ||
-        normalized == 'pamarca' ||
-        normalized == 'productbrand';
+    return normalized.contains('marca') || normalized.contains('brand') || normalized == 'pamarca' || normalized == 'productbrand';
   }
 
   String? _cleanBrandCandidate(String? value) {
     if (value == null) return null;
-    final clean = value
-        .replaceAll(RegExp(r'<[^>]*>'), '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&amp;', '&')
-        .trim();
+    final clean = value.replaceAll(RegExp(r'<[^>]*>'), '').replaceAll('&nbsp;', ' ').replaceAll('&amp;', '&').trim();
     if (clean.isEmpty) return null;
     final normalized = clean.toLowerCase();
-    if (normalized == '0' ||
-        normalized == 'null' ||
-        normalized == 'false' ||
-        normalized == 'sin marca') {
-      return null;
-    }
+    if (normalized == '0' || normalized == 'null' || normalized == 'false' || normalized == 'sin marca') return null;
     return clean;
   }
 
   String? _brandCandidateFromValue(dynamic value) {
     if (value == null) return null;
-    if (value is String) {
-      return _cleanBrandCandidate(value);
-    }
+    if (value is String) return _cleanBrandCandidate(value);
     if (value is Map) {
       final map = Map<dynamic, dynamic>.from(value);
-      final possibleKeys = <String>[
-        'name',
-        'label',
-        'value',
-        'slug',
-        'title',
-      ];
-      for (final key in possibleKeys) {
+      for (final key in ['name', 'label', 'value', 'slug', 'title']) {
         final candidate = _brandCandidateFromValue(map[key]);
         if (candidate != null) return candidate;
       }
@@ -225,14 +243,10 @@ class ApiService {
       final attr = Map<dynamic, dynamic>.from(rawAttr);
       final attrName = attr['name']?.toString() ?? '';
       final attrSlug = attr['slug']?.toString() ?? '';
-      if (!_isBrandAttributeName(attrName) && !_isBrandAttributeName(attrSlug)) {
-        continue;
-      }
-      final options = attr['options'];
-      final option = attr['option'];
-      final candidateFromOptions = _brandCandidateFromValue(options);
+      if (!_isBrandAttributeName(attrName) && !_isBrandAttributeName(attrSlug)) continue;
+      final candidateFromOptions = _brandCandidateFromValue(attr['options']);
       if (candidateFromOptions != null) return candidateFromOptions;
-      final candidateFromOption = _brandCandidateFromValue(option);
+      final candidateFromOption = _brandCandidateFromValue(attr['option']);
       if (candidateFromOption != null) return candidateFromOption;
     }
     return null;
@@ -241,71 +255,46 @@ class ApiService {
   String? _findKnownBrandInText(String text, List<String> knownBrands) {
     final normalizedText = _normalizeBrandValue(text);
     if (normalizedText.isEmpty) return null;
-    final orderedBrands = List<String>.from(knownBrands)
-      ..sort((a, b) => b.length.compareTo(a.length));
+    final orderedBrands = List<String>.from(knownBrands)..sort((a, b) => b.length.compareTo(a.length));
     for (final brand in orderedBrands) {
       final cleanBrand = _cleanBrandCandidate(brand);
       if (cleanBrand == null) continue;
       final normalizedBrand = _normalizeBrandValue(cleanBrand);
       if (normalizedBrand.length < 3) continue;
-      if (normalizedText.contains(normalizedBrand)) {
-        return cleanBrand;
-      }
+      if (normalizedText.contains(normalizedBrand)) return cleanBrand;
     }
     return null;
   }
 
   Future<List<String>> _getKnownBrandNames() async {
     await _ensureInitialized();
-    if (_cachedBrandNames != null && _cachedBrandNames!.isNotEmpty) {
-      return _cachedBrandNames!;
-    }
-
+    if (_cachedBrandNames != null && _cachedBrandNames!.isNotEmpty) return _cachedBrandNames!;
     final brands = <String>{..._fallbackBrandNames};
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products/attributes/pa_marca/terms',
-        queryParameters: {'per_page': 100, 'hide_empty': false},
-        options: _wooOptions,
-      );
+      final response = await _dio.get('/wp-json/wc/v3/products/attributes/pa_marca/terms', queryParameters: {'per_page': 100, 'hide_empty': false}, options: _wooOptions);
       if (response.statusCode == 200 && response.data is List) {
         for (final term in response.data as List) {
-          if (term is Map) {
-            final name = term['name']?.toString().trim();
-            if (name != null && name.isNotEmpty) {
-              brands.add(name);
-            }
-            final slug = term['slug']?.toString().trim();
-            if (slug != null && slug.isNotEmpty) {
-              brands.add(slug);
-            }
-          }
+          if (term is! Map) continue;
+          final name = term['name']?.toString().trim();
+          if (name != null && name.isNotEmpty) brands.add(name);
+          final slug = term['slug']?.toString().trim();
+          if (slug != null && slug.isNotEmpty) brands.add(slug);
         }
       }
     } catch (e) {
-      debugPrint('⚠️ No se pudieron cargar marcas para enriquecer productos: $e');
+      debugPrint('⚠️ No se pudieron cargar marcas: $e');
     }
-
-    _cachedBrandNames = brands
-        .map((brand) => brand.trim())
-        .where((brand) => brand.isNotEmpty)
-        .toList();
+    _cachedBrandNames = brands.map((b) => b.trim()).where((b) => b.isNotEmpty).toList();
     return _cachedBrandNames!;
   }
 
-  String? _extractBrandFromRawProduct(
-      Map<String, dynamic> json,
-      List<String> knownBrands,
-      ) {
+  String? _extractBrandFromRawProduct(Map<String, dynamic> json, List<String> knownBrands) {
     final fromAttributes = _extractBrandFromAttributes(json['attributes']);
     if (fromAttributes != null) return fromAttributes;
-
     final fromDirectBrand = _brandCandidateFromValue(json['brand']);
     if (fromDirectBrand != null) return fromDirectBrand;
-
     final fromBrands = _brandCandidateFromValue(json['brands']);
     if (fromBrands != null) return fromBrands;
-
     final metaData = json['meta_data'];
     if (metaData is List) {
       for (final rawMeta in metaData) {
@@ -317,66 +306,29 @@ class ApiService {
         if (fromMeta != null) return fromMeta;
       }
     }
-
     final categories = json['categories'];
     if (categories is List) {
       for (final rawCategory in categories) {
         if (rawCategory is! Map) continue;
         final category = Map<dynamic, dynamic>.from(rawCategory);
-        final categoryName = category['name']?.toString() ?? '';
-        final categorySlug = category['slug']?.toString() ?? '';
-        final fromCategoryName = _findKnownBrandInText(
-          categoryName,
-          knownBrands,
-        );
+        final fromCategoryName = _findKnownBrandInText(category['name']?.toString() ?? '', knownBrands);
         if (fromCategoryName != null) return fromCategoryName;
-        final fromCategorySlug = _findKnownBrandInText(
-          categorySlug,
-          knownBrands,
-        );
+        final fromCategorySlug = _findKnownBrandInText(category['slug']?.toString() ?? '', knownBrands);
         if (fromCategorySlug != null) return fromCategorySlug;
       }
     }
-
-    final searchableText = <String>[
-      json['name']?.toString() ?? '',
-      json['short_description']?.toString() ?? '',
-      json['description']?.toString() ?? '',
-      json['sku']?.toString() ?? '',
-    ].join(' ');
-
+    final searchableText = '${json['name'] ?? ''} ${json['short_description'] ?? ''} ${json['description'] ?? ''} ${json['sku'] ?? ''}';
     return _findKnownBrandInText(searchableText, knownBrands);
   }
 
-  Map<String, dynamic> _injectBrandAttributeIfNeeded(
-      Map<String, dynamic> json,
-      List<String> knownBrands,
-      ) {
+  Map<String, dynamic> _injectBrandAttributeIfNeeded(Map<String, dynamic> json, List<String> knownBrands) {
     final existingBrand = _extractBrandFromAttributes(json['attributes']);
     if (existingBrand != null) return json;
-
     final extractedBrand = _extractBrandFromRawProduct(json, knownBrands);
-    if (extractedBrand == null || extractedBrand.trim().isEmpty) {
-      return json;
-    }
-
-    final attributes = json['attributes'] is List
-        ? List<dynamic>.from(json['attributes'] as List)
-        : <dynamic>[];
-
-    attributes.add({
-      'name': 'Marca',
-      'options': [extractedBrand.trim()],
-    });
-
+    if (extractedBrand == null || extractedBrand.trim().isEmpty) return json;
+    final attributes = json['attributes'] is List ? List<dynamic>.from(json['attributes'] as List) : <dynamic>[];
+    attributes.add({'name': 'Marca', 'options': [extractedBrand.trim()]});
     json['attributes'] = attributes;
-
-    if (kDebugMode) {
-      debugPrint(
-        '🏷️ Marca inyectada en producto ${json['id']}: ${extractedBrand.trim()}',
-      );
-    }
-
     return json;
   }
 
@@ -406,30 +358,22 @@ class ApiService {
     for (final attr in product.attributes) {
       if (!_isBrandAttributeName(attr.name)) continue;
       for (final option in attr.options) {
-        if (_normalizeBrandValue(option) == queryMarca) {
-          return true;
-        }
+        if (_normalizeBrandValue(option) == queryMarca) return true;
       }
     }
     return false;
   }
 
-  // ================================================================
+  // ═══════════════════════════════════════════════
   // CLIENTES
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
   Future<Map<String, dynamic>?> getCustomerByEmail(String email) async {
     await _ensureInitialized();
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/customers',
-        queryParameters: {'email': email, 'role': 'all'},
-        options: _wooOptions,
-      );
-      if (response.statusCode == 200 &&
-          response.data is List &&
-          response.data.isNotEmpty) {
-        return (response.data as List).first as Map<String, dynamic>;
+      final response = await _dio.get('/wp-json/wc/v3/customers', queryParameters: {'email': email, 'role': 'all'}, options: _wooOptions);
+      if (response.statusCode == 200 && response.data is List && response.data.isNotEmpty) {
+        return Map<String, dynamic>.from((response.data as List).first as Map);
       }
       return null;
     } catch (e) {
@@ -441,13 +385,8 @@ class ApiService {
   Future<Map<String, dynamic>?> getCustomerById(int id) async {
     await _ensureInitialized();
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/customers/$id',
-        options: _wooOptions,
-      );
-      if (response.statusCode == 200) {
-        return response.data as Map<String, dynamic>;
-      }
+      final response = await _dio.get('/wp-json/wc/v3/customers/$id', options: _wooOptions);
+      if (response.statusCode == 200 && response.data is Map) return Map<String, dynamic>.from(response.data as Map);
       return null;
     } catch (e) {
       debugPrint('Error en getCustomerById: $e');
@@ -455,233 +394,248 @@ class ApiService {
     }
   }
 
-  // ================================================================
+  // ═══════════════════════════════════════════════
   // PRODUCTOS
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
-  Future<List<Product>> getProductos({
-    int? categoryId,
-    int perPage = 100,
-    String? brand,
-    String? orderBy,
-  }) async {
+  Future<List<Product>> getProductos({int? categoryId, int perPage = 100, String? brand, String? orderBy}) async {
     await _ensureInitialized();
     try {
-      final Map<String, dynamic> queryParams = {
-        'per_page': perPage,
-        'status': 'publish',
-      };
-      if (categoryId != null && categoryId > 0) {
-        queryParams['category'] = categoryId;
-      }
-
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products',
-        queryParameters: queryParams,
-        options: _wooOptions,
-      );
-
+      final Map<String, dynamic> queryParams = {'per_page': perPage, 'status': 'publish'};
+      if (categoryId != null && categoryId > 0) queryParams['category'] = categoryId;
+      final response = await _dio.get('/wp-json/wc/v3/products', queryParameters: queryParams, options: _wooOptions);
       final List data = response.data is List ? response.data as List : [];
       List<Product> productos = await _mapProductsWithBrand(data);
-
-      if (brand != null && brand.isNotEmpty) {
-        productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
-      }
-
+      if (brand != null && brand.isNotEmpty) productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
       if (orderBy != null) {
-        if (orderBy == 'price_asc') {
-          productos.sort(
-                (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
-          );
-        } else if (orderBy == 'price_desc') {
-          productos.sort(
-                (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
-          );
-        } else if (orderBy == 'date') {
-          productos.sort((a, b) => b.id.compareTo(a.id));
-        }
+        if (orderBy == 'price_asc') productos.sort((a, b) => _parseDoubleValue(a.price).compareTo(_parseDoubleValue(b.price)));
+        else if (orderBy == 'price_desc') productos.sort((a, b) => _parseDoubleValue(b.price).compareTo(_parseDoubleValue(a.price)));
+        else if (orderBy == 'date') productos.sort((a, b) => b.id.compareTo(a.id));
       }
-
-      debugPrint("📊 Productos finales mostrados: ${productos.length}");
+      debugPrint('📊 Productos finales mostrados: ${productos.length}');
       return productos;
     } on DioException catch (e) {
-      throw Exception("Error: ${e.message}");
+      throw Exception(_mapDioError(e));
     }
   }
 
-  // ================================================================
+  Future<List<Product>> getProductosPaginado({int? categoryId, int page = 1, int perPage = 30, String? brand, String? orderBy}) async {
+    await _ensureInitialized();
+    try {
+      final Map<String, dynamic> queryParams = {'per_page': perPage, 'page': page, 'status': 'publish'};
+      if (categoryId != null && categoryId > 0) queryParams['category'] = categoryId;
+      final response = await _dio.get('/wp-json/wc/v3/products', queryParameters: queryParams, options: _wooOptions);
+      final List data = response.data is List ? response.data as List : [];
+      List<Product> productos = await _mapProductsWithBrand(data);
+      if (brand != null && brand.isNotEmpty) productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
+      if (orderBy != null) {
+        if (orderBy == 'price_asc') productos.sort((a, b) => _parseDoubleValue(a.price).compareTo(_parseDoubleValue(b.price)));
+        else if (orderBy == 'price_desc') productos.sort((a, b) => _parseDoubleValue(b.price).compareTo(_parseDoubleValue(a.price)));
+      }
+      return productos;
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    }
+  }
+
+  Future<List<Product>> buscarProductos(String query) async {
+    await _ensureInitialized();
+    try {
+      final response = await _dio.get('/wp-json/wc/v3/products', queryParameters: {'search': query, 'status': 'publish', 'per_page': 50}, options: _wooOptions);
+      final List data = response.data is List ? response.data as List : [];
+      final lista = await _mapProductsWithBrand(data);
+      lista.sort((a, b) {
+        if (a.isInstock && !b.isInstock) return -1;
+        if (!a.isInstock && b.isInstock) return 1;
+        return 0;
+      });
+      return lista;
+    } catch (e) {
+      debugPrint('Error en buscarProductos: $e');
+      return [];
+    }
+  }
+
+  Future<Product?> getProductoById(int id) async {
+    await _ensureInitialized();
+    if (id <= 0) return null;
+    try {
+      final response = await _dio.get('/wp-json/wc/v3/products/$id', options: _wooOptions);
+      if (response.statusCode == 200) return _mapSingleProductWithBrand(response.data);
+      return null;
+    } catch (e) {
+      debugPrint('Error al obtener producto $id: $e');
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════
   // PEDIDOS
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
   Future<List<OrderMundicam>> getOrders(String customerEmail) async {
     await _ensureInitialized();
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/orders',
-        queryParameters: {'search': customerEmail, 'per_page': 20},
-        options: _wooOptions,
-      );
-      if (response.statusCode == 200) {
-        return (response.data as List)
-            .map((order) => OrderMundicam.fromJson(order))
-            .toList();
+      final email = customerEmail.trim().toLowerCase();
+      int? customerId;
+      final customer = await getCustomerByEmail(email);
+      if (customer != null) customerId = _parseIntValue(customer['id']);
+      final queryParams = <String, dynamic>{'per_page': 50, 'orderby': 'date', 'order': 'desc'};
+      if (customerId != null && customerId > 0) queryParams['customer'] = customerId;
+      else queryParams['search'] = email;
+      final response = await _dio.get('/wp-json/wc/v3/orders', queryParameters: queryParams, options: _wooOptions);
+      if (response.statusCode == 200 && response.data is List) {
+        final orders = (response.data as List).whereType<Map>().map((order) => OrderMundicam.fromJson(Map<String, dynamic>.from(order))).toList();
+        debugPrint('📦 Pedidos cargados: ${orders.length}');
+        return orders;
       }
       return [];
     } catch (e) {
-      debugPrint("Error obteniendo pedidos: $e");
+      debugPrint('Error obteniendo pedidos: $e');
       return [];
     }
   }
 
-  // ================================================================
-  // CREAR PEDIDO CON RESULTADO COMPLETO
-  // ================================================================
+  Future<Map<String, dynamic>?> getOrdenCompleta(String orderId) async {
+    await _ensureInitialized();
+    final cleanOrderId = orderId.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanOrderId.isEmpty) return null;
+    try {
+      final response = await _dio.get('/wp-json/wc/v3/orders/$cleanOrderId', options: _wooOptions);
+      if (response.statusCode == 200 && response.data is Map) {
+        final orderData = Map<String, dynamic>.from(response.data as Map);
+        final rawLineItems = orderData['line_items'];
+        final lineItems = rawLineItems is List ? rawLineItems : <dynamic>[];
+        debugPrint('📦 Orden #$cleanOrderId cargada con ${lineItems.length} producto(s)');
+        return orderData;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error al obtener orden $cleanOrderId: $e');
+      return null;
+    }
+  }
 
-  Future<OrderCreateResult> crearPedidoConResultado(
-      Map<String, dynamic> orderData, {
-        bool forceProcessingIfPending = true,
-      }) async {
+  Future<OrderCreateResult> crearPedidoConResultado(Map<String, dynamic> orderData, {bool forceProcessingIfPending = true}) async {
     await _ensureInitialized();
     try {
       debugPrint('📦 Creando pedido con resultado...');
       final data = Map<String, dynamic>.from(orderData);
-      if (forceProcessingIfPending &&
-          (!data.containsKey('status') || data['status'] == 'pending')) {
-        data['status'] = 'processing';
-      }
-
-      debugPrint('📦 Status enviado: ${data['status']}');
-      debugPrint('📦 Payment method: ${data['payment_method']}');
-
-      final response = await _dio.post(
-        '/wp-json/wc/v3/orders',
-        data: data,
-        options: _wooOptions,
-      );
-
+      final sanitizedLineItems = _sanitizeNewOrderLineItems(data['line_items']);
+      if (sanitizedLineItems.isEmpty) return OrderCreateResult.failure('No hay productos válidos para crear el pedido.');
+      data['line_items'] = sanitizedLineItems;
+      if (forceProcessingIfPending && (!data.containsKey('status') || data['status'] == 'pending')) data['status'] = 'processing';
+      _debugLineItems('LINE ITEMS PEDIDO ENVIADOS', sanitizedLineItems);
+      final response = await _dio.post('/wp-json/wc/v3/orders', data: data, options: _wooOptions);
       debugPrint('📦 Status HTTP: ${response.statusCode}');
-
       if (response.statusCode == 201 || response.statusCode == 200) {
-        if (response.data is! Map) {
-          debugPrint(
-            '❌ Respuesta inesperada al crear pedido: ${response.data}',
-          );
-          return OrderCreateResult.failure(
-            'WooCommerce devolvió una respuesta no válida.',
-          );
-        }
-
+        if (response.data is! Map) return OrderCreateResult.failure('WooCommerce devolvió una respuesta no válida.');
         final responseData = Map<String, dynamic>.from(response.data as Map);
-        final orderId = responseData['id'];
-        final orderKey = responseData['order_key'];
-        final status = responseData['status'];
-
-        debugPrint('✅ Pedido #$orderId creado correctamente');
-        debugPrint('🔑 Order key: $orderKey');
-        debugPrint('📌 Estado WooCommerce: $status');
-
+        debugPrint('✅ Pedido #${responseData['id']} creado correctamente');
+        debugPrint('📌 Estado WooCommerce: ${responseData['status']}');
+        if (responseData['line_items'] is List) debugPrint('📦 WooCommerce devolvió ${(responseData['line_items'] as List).length} línea(s)');
         return OrderCreateResult.success(responseData);
       }
-
-      debugPrint('❌ Error al crear pedido: ${response.statusCode}');
-      debugPrint(' Respuesta: ${response.data}');
-      return OrderCreateResult.failure(
-        'WooCommerce respondió con código ${response.statusCode}.',
-      );
+      return OrderCreateResult.failure('WooCommerce respondió con código ${response.statusCode}.');
     } on DioException catch (e) {
-      debugPrint('❌ DioException al crear pedido:');
-      debugPrint(' Status Code: ${e.response?.statusCode}');
-      debugPrint(' Response: ${e.response?.data}');
-      debugPrint(' Message: ${e.message}');
-
       final responseData = e.response?.data;
-      if (responseData is Map && responseData['message'] != null) {
-        return OrderCreateResult.failure(responseData['message'].toString());
-      }
+      if (responseData is Map && responseData['message'] != null) return OrderCreateResult.failure(responseData['message'].toString());
       return OrderCreateResult.failure(_mapDioError(e));
     } catch (e) {
-      debugPrint('❌ Error al crear pedido: $e');
       return OrderCreateResult.failure(e.toString());
     }
   }
 
   Future<bool> crearPedido(Map<String, dynamic> orderData) async {
-    final result = await crearPedidoConResultado(
-      orderData,
-      forceProcessingIfPending: true,
-    );
+    final result = await crearPedidoConResultado(orderData, forceProcessingIfPending: true);
     return result.success;
   }
 
-  // ================================================================
-  // CREAR PRESUPUESTO
-  // ================================================================
+  // ═══════════════════════════════════════════════
+  // PRESUPUESTOS
+  // ═══════════════════════════════════════════════
 
-  Future<bool> crearPresupuesto({
-    required String email,
-    required int productId,
-    required String productName,
-    required double price,
-    required int quantity,
-    String? customerNote,
-  }) async {
+  Future<Map<String, dynamic>?> _buscarPresupuestoAbiertoPorEmail(String email) async {
     await _ensureInitialized();
+    final cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.isEmpty) return null;
     try {
-      final orderData = {
-        'status': 'checkout-draft',
-        'billing': {'email': email},
-        'line_items': [
-          {'product_id': productId, 'quantity': quantity},
-        ],
-        'customer_note': customerNote ?? 'Presupuesto solicitado desde la app Mundicam',
-      };
-
-      debugPrint('📝 Creando presupuesto...');
-      debugPrint('📝 Email: $email');
-      debugPrint('📝 Producto ID: $productId');
-      debugPrint('📝 Cantidad: $quantity');
-
-      final response = await _dio.post(
-        '/wp-json/wc/v3/orders',
-        data: orderData,
-        options: _wooOptions,
-      );
-
-      debugPrint('✅ Presupuesto creado - Status: ${response.statusCode}');
-      return response.statusCode == 201 || response.statusCode == 200;
-    } on DioException catch (e) {
-      debugPrint('❌ Error al crear presupuesto:');
-      debugPrint('❌ Status Code: ${e.response?.statusCode}');
-      debugPrint('❌ Response: ${e.response?.data}');
-      throw Exception(_mapDioError(e));
+      final response = await _dio.get('/wp-json/wc/v3/orders', queryParameters: {
+        'search': cleanEmail, 'status': 'checkout-draft', 'per_page': 20, 'orderby': 'date', 'order': 'desc',
+      }, options: _wooOptions);
+      final data = response.data;
+      if (response.statusCode != 200 || data is! List || data.isEmpty) return null;
+      for (final rawOrder in data) {
+        if (rawOrder is! Map) continue;
+        final order = Map<String, dynamic>.from(rawOrder);
+        final status = order['status']?.toString() ?? '';
+        final billing = order['billing'];
+        final billingEmail = billing is Map ? billing['email']?.toString().trim().toLowerCase() : null;
+        if (status == 'checkout-draft' && (billingEmail == null || billingEmail.isEmpty || billingEmail == cleanEmail)) return order;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('⚠️ No se pudo buscar presupuesto abierto: $e');
+      return null;
     }
   }
 
-  Future<bool> actualizarPresupuesto({
-    required String orderId,
-    required int productId,
-    required int quantity,
+  Future<bool> crearPresupuesto({
+    required String email, required int productId, required String productName,
+    required double price, required int quantity, String? customerNote,
   }) async {
     await _ensureInitialized();
     try {
-      final orden = await getOrdenCompleta(orderId);
-      if (orden == null) return false;
-
-      final lineItems = List<Map<String, dynamic>>.from(orden['line_items'] ?? []);
-      final idx = lineItems.indexWhere((item) => item['product_id'] == productId);
-
-      if (idx >= 0) {
-        lineItems[idx]['quantity'] = (lineItems[idx]['quantity'] ?? 0) + quantity;
-      } else {
-        lineItems.add({'product_id': productId, 'quantity': quantity});
+      final safeQuantity = quantity <= 0 ? 1 : quantity;
+      final cleanEmail = email.trim().toLowerCase();
+      if (cleanEmail.isEmpty || productId <= 0) return false;
+      debugPrint('📝 Solicitando presupuesto para $cleanEmail - Producto: $productId x$safeQuantity');
+      final presupuestoAbierto = await _buscarPresupuestoAbiertoPorEmail(cleanEmail);
+      if (presupuestoAbierto != null) {
+        final orderId = presupuestoAbierto['id']?.toString();
+        if (orderId != null && orderId.isNotEmpty) {
+          debugPrint('📝 Presupuesto abierto #$orderId encontrado. Actualizando...');
+          return actualizarPresupuesto(orderId: orderId, productId: productId, quantity: safeQuantity);
+        }
       }
+      final orderData = {
+        'status': 'checkout-draft',
+        'billing': {'email': cleanEmail},
+        'line_items': [{'product_id': productId, 'quantity': safeQuantity}],
+        'customer_note': customerNote ?? 'Presupuesto solicitado desde la app Mundicam',
+      };
+      final sanitizedLineItems = _sanitizeNewOrderLineItems(orderData['line_items']);
+      if (sanitizedLineItems.isEmpty) return false;
+      orderData['line_items'] = sanitizedLineItems;
+      _debugLineItems('LINE ITEMS NUEVO PRESUPUESTO', sanitizedLineItems);
+      final response = await _dio.post('/wp-json/wc/v3/orders', data: orderData, options: _wooOptions);
+      return response.statusCode == 201 || response.statusCode == 200;
+    } on DioException catch (e) {
+      debugPrint('❌ Error al crear presupuesto: ${e.response?.statusCode}');
+      throw Exception(_mapDioError(e));
+    } catch (e) {
+      debugPrint('❌ Error inesperado creando presupuesto: $e');
+      return false;
+    }
+  }
 
-      final response = await _dio.put(
-        '/wp-json/wc/v3/orders/$orderId',
-        data: {'line_items': lineItems},
-        options: _wooOptions,
-      );
-
+  Future<bool> actualizarPresupuesto({required String orderId, required int productId, required int quantity}) async {
+    await _ensureInitialized();
+    try {
+      final cleanOrderId = orderId.replaceAll(RegExp(r'[^0-9]'), '');
+      final safeQuantity = quantity <= 0 ? 1 : quantity;
+      if (cleanOrderId.isEmpty || productId <= 0) return false;
+      final orden = await getOrdenCompleta(cleanOrderId);
+      if (orden == null) return false;
+      final lineItems = _buildMinimalWooLineItemsForUpdate(orden['line_items']);
+      final index = lineItems.indexWhere((item) => _parseIntValue(item['product_id']) == productId);
+      if (index >= 0) {
+        lineItems[index]['quantity'] = _parseIntValue(lineItems[index]['quantity']) + safeQuantity;
+      } else {
+        lineItems.add({'product_id': productId, 'quantity': safeQuantity});
+      }
+      _debugLineItems('LINE ITEMS PRESUPUESTO ACTUALIZADO', lineItems);
+      final response = await _dio.put('/wp-json/wc/v3/orders/$cleanOrderId', data: {'line_items': lineItems}, options: _wooOptions);
       return response.statusCode == 200;
     } catch (e) {
       debugPrint('Error actualizando presupuesto: $e');
@@ -689,106 +643,58 @@ class ApiService {
     }
   }
 
-  Future<bool> eliminarProductoPresupuesto({
-    required String orderId,
-    required int productId,
-  }) async {
+  Future<bool> eliminarProductoPresupuesto({required String orderId, required int productId}) async {
     await _ensureInitialized();
     try {
-      final orden = await getOrdenCompleta(orderId);
+      final cleanOrderId = orderId.replaceAll(RegExp(r'[^0-9]'), '');
+      if (cleanOrderId.isEmpty || productId <= 0) return false;
+      final orden = await getOrdenCompleta(cleanOrderId);
       if (orden == null) return false;
-
-      final lineItems = List<Map<String, dynamic>>.from(orden['line_items'] ?? []);
-      lineItems.removeWhere((item) => item['product_id'] == productId);
-
-      final response = await _dio.put(
-        '/wp-json/wc/v3/orders/$orderId',
-        data: {'line_items': lineItems},
-        options: _wooOptions,
-      );
-
+      final filteredLineItems = _buildMinimalWooLineItemsForUpdate(orden['line_items'])
+          .where((item) => _parseIntValue(item['product_id']) != productId).toList();
+      _debugLineItems('LINE ITEMS TRAS ELIMINAR', filteredLineItems);
+      final response = await _dio.put('/wp-json/wc/v3/orders/$cleanOrderId', data: {'line_items': filteredLineItems}, options: _wooOptions);
       return response.statusCode == 200;
     } catch (e) {
-      debugPrint('Error eliminando: $e');
+      debugPrint('Error eliminando producto: $e');
       return false;
     }
   }
 
-  // ================================================================
-  // BÚSQUEDA DE PRODUCTOS
-  // ================================================================
-
-  Future<List<Product>> buscarProductos(String query) async {
+  Future<List<QuoteMundicam>> getPresupuestosPorEmail(String email) async {
     await _ensureInitialized();
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products',
-        queryParameters: {'search': query, 'status': 'publish', 'per_page': 50},
-        options: _wooOptions,
-      );
-
-      final List data = response.data is List ? response.data as List : [];
-      final lista = await _mapProductsWithBrand(data);
-
-      lista.sort((a, b) {
-        if (a.isInstock && !b.isInstock) return -1;
-        if (!a.isInstock && b.isInstock) return 1;
-        return 0;
-      });
-
-      return lista;
+      final response = await _dio.get('/wp-json/wc/v3/orders', queryParameters: {
+        'search': email.trim().toLowerCase(), 'status': 'checkout-draft', 'per_page': 50, 'orderby': 'date', 'order': 'desc',
+      }, options: _wooOptions);
+      final data = response.data;
+      debugPrint('📊 Presupuestos encontrados: ${data is List ? data.length : 0}');
+      if (data is! List) return [];
+      return data.whereType<Map>().map((item) => QuoteMundicam.fromJson(Map<String, dynamic>.from(item))).toList();
     } catch (e) {
-      debugPrint("Error en buscarProductos: $e");
+      debugPrint('❌ Error getPresupuestosPorEmail: $e');
       return [];
     }
   }
 
-  // ================================================================
+  // ═══════════════════════════════════════════════
   // CATEGORÍAS
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
-  Future<List<CategoryModel>> getCategorias({
-    bool soloConProductos = true,
-    bool soloCategoriasPadre = true,
-  }) async {
+  Future<List<CategoryModel>> getCategorias({bool soloConProductos = true, bool soloCategoriasPadre = true}) async {
     await _ensureInitialized();
     try {
-      int page = 1;
-      int totalPages = 1;
+      int page = 1, totalPages = 1;
       final List<CategoryModel> todas = [];
-
       do {
-        final response = await _dio.get(
-          '/wp-json/wc/v3/products/categories',
-          queryParameters: {
-            'per_page': 100,
-            'page': page,
-            'orderby': 'name',
-            'order': 'asc',
-          },
-          options: _wooOptions,
-        );
-
-        final data = response.data;
-        todas.addAll(
-          (data as List).map((item) => CategoryModel.fromJson(item)),
-        );
-
-        final totalPagesHeader = response.headers.value('x-wp-totalpages');
-        totalPages = int.tryParse(totalPagesHeader ?? '1') ?? 1;
+        final response = await _dio.get('/wp-json/wc/v3/products/categories', queryParameters: {'per_page': 100, 'page': page, 'orderby': 'name', 'order': 'asc'}, options: _wooOptions);
+        if (response.data is List) todas.addAll((response.data as List).whereType<Map>().map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item))).toList());
+        totalPages = int.tryParse(response.headers.value('x-wp-totalpages') ?? '1') ?? 1;
         page++;
       } while (page <= totalPages);
-
       List<CategoryModel> resultado = todas;
-
-      if (soloConProductos) {
-        resultado = _filtrarCategoriasVisibles(resultado);
-      }
-
-      if (soloCategoriasPadre) {
-        resultado = resultado.where((c) => c.parent == 0).toList();
-      }
-
+      if (soloConProductos) resultado = _filtrarCategoriasVisibles(resultado);
+      if (soloCategoriasPadre) resultado = resultado.where((c) => c.parent == 0).toList();
       return resultado;
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
@@ -799,94 +705,32 @@ class ApiService {
     await _ensureInitialized();
     if (parentId == null) return [];
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products/categories',
-        queryParameters: {
-          'parent': parentId,
-          'per_page': 100,
-          'hide_empty': false,
-        },
-        options: _wooOptions,
-      );
-      return (response.data as List)
-          .map((json) => CategoryModel.fromJson(json))
-          .toList();
+      final response = await _dio.get('/wp-json/wc/v3/products/categories', queryParameters: {'parent': parentId, 'per_page': 100, 'hide_empty': false}, options: _wooOptions);
+      if (response.data is! List) return [];
+      return (response.data as List).whereType<Map>().map((json) => CategoryModel.fromJson(Map<String, dynamic>.from(json))).toList();
     } catch (e) {
       return [];
     }
   }
 
-  Future<List<Product>> getProductosPaginado({
-    int? categoryId,
-    int page = 1,
-    int perPage = 30,
-    String? brand,
-    String? orderBy,
-  }) async {
-    await _ensureInitialized();
-    try {
-      final Map<String, dynamic> queryParams = {
-        'per_page': perPage,
-        'page': page,
-        'status': 'publish',
-      };
-      if (categoryId != null && categoryId > 0) {
-        queryParams['category'] = categoryId;
-      }
-
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products',
-        queryParameters: queryParams,
-        options: _wooOptions,
-      );
-
-      final List data = response.data is List ? response.data as List : [];
-      List<Product> productos = await _mapProductsWithBrand(data);
-
-      if (brand != null && brand.isNotEmpty) {
-        productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
-      }
-
-      if (orderBy != null) {
-        if (orderBy == 'price_asc') {
-          productos.sort(
-                (a, b) => double.parse(a.price).compareTo(double.parse(b.price)),
-          );
-        } else if (orderBy == 'price_desc') {
-          productos.sort(
-                (a, b) => double.parse(b.price).compareTo(double.parse(a.price)),
-          );
-        }
-      }
-
-      return productos;
-    } on DioException catch (e) {
-      throw Exception("Error: ${e.message}");
-    }
+  List<CategoryModel> _filtrarCategoriasVisibles(List<CategoryModel> categorias) {
+    final Map<int, List<CategoryModel>> hijosPorPadre = {};
+    for (final categoria in categorias) hijosPorPadre.putIfAbsent(categoria.parent, () => []).add(categoria);
+    bool tieneProductos(CategoryModel cat) => cat.count > 0 || (hijosPorPadre[cat.id] ?? []).any((h) => tieneProductos(h));
+    return categorias.where(tieneProductos).toList();
   }
 
-  // ================================================================
+  // ═══════════════════════════════════════════════
   // MARCAS
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
   Future<List<Map<String, dynamic>>> getMarcas() async {
     await _ensureInitialized();
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products/attributes/pa_marca/terms',
-        queryParameters: {'per_page': 100, 'hide_empty': true},
-        options: _wooOptions,
-      );
-      if (response.statusCode == 200) {
-        final marcas = (response.data as List).map((term) {
-          return {'id': term['id'], 'name': term['name']};
-        }).toList();
-
-        _cachedBrandNames = marcas
-            .map((brand) => brand['name']?.toString().trim() ?? '')
-            .where((brand) => brand.isNotEmpty)
-            .toList();
-
+      final response = await _dio.get('/wp-json/wc/v3/products/attributes/pa_marca/terms', queryParameters: {'per_page': 100, 'hide_empty': true}, options: _wooOptions);
+      if (response.statusCode == 200 && response.data is List) {
+        final marcas = (response.data as List).whereType<Map>().map((term) => {'id': term['id'], 'name': term['name']}).toList();
+        _cachedBrandNames = marcas.map((b) => b['name']?.toString().trim() ?? '').where((b) => b.isNotEmpty).toList();
         return marcas;
       }
       return [];
@@ -895,40 +739,15 @@ class ApiService {
     }
   }
 
-  // ================================================================
-  // FILTRAR CATEGORÍAS
-  // ================================================================
-
-  List<CategoryModel> _filtrarCategoriasVisibles(
-      List<CategoryModel> categorias,
-      ) {
-    final Map<int, List<CategoryModel>> hijosPorPadre = {};
-    for (final categoria in categorias) {
-      hijosPorPadre.putIfAbsent(categoria.parent, () => []).add(categoria);
-    }
-
-    bool tieneProductos(CategoryModel cat) {
-      if (cat.count > 0) return true;
-      final hijos = hijosPorPadre[cat.id] ?? [];
-      return hijos.any((h) => tieneProductos(h));
-    }
-
-    return categorias.where(tieneProductos).toList();
-  }
-
-  // ================================================================
+  // ═══════════════════════════════════════════════
   // ACADEMY / NOTICIAS / BANNERS
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
   Future<List<CourseModel>> getAcademyCourses() async {
     try {
-      final response = await _dio.get(
-        '/wp-json/wp/v2/posts',
-        queryParameters: {'per_page': 10},
-      );
-      return (response.data as List)
-          .map((post) => CourseModel.fromWordPress(post))
-          .toList();
+      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {'per_page': 10});
+      if (response.data is! List) return [];
+      return (response.data as List).whereType<Map>().map((post) => CourseModel.fromWordPress(Map<String, dynamic>.from(post))).toList();
     } catch (e) {
       return [];
     }
@@ -936,127 +755,34 @@ class ApiService {
 
   Future<List<Noticia>> getNoticias() async {
     try {
-      final response = await _dio.get(
-        '/wp-json/wp/v2/posts',
-        queryParameters: {'per_page': 4, '_embed': 'true'},
-      );
-      return (response.data as List)
-          .map((item) => Noticia.fromJson(item))
-          .toList();
+      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {'per_page': 4, '_embed': 'true'});
+      if (response.data is! List) return [];
+      return (response.data as List).whereType<Map>().map((item) => Noticia.fromJson(Map<String, dynamic>.from(item))).toList();
     } catch (e) {
-      throw Exception("Error en noticias");
+      throw Exception('Error en noticias');
     }
   }
 
   Future<List<BannerModel>> getBanners() async {
     try {
       final response = await _dio.get('/wp-json/mundicam/v1/banners');
-      return (response.data as List)
-          .map((item) => BannerModel.fromJson(item))
-          .toList();
+      if (response.data is! List) return [];
+      return (response.data as List).whereType<Map>().map((item) => BannerModel.fromJson(Map<String, dynamic>.from(item))).toList();
     } catch (e) {
       return [];
     }
   }
 
-  // ================================================================
-  // ÓRDENES
-  // ================================================================
-
-  Future<Map<String, dynamic>?> getOrdenCompleta(String orderId) async {
-    await _ensureInitialized();
-    try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/orders/$orderId',
-        options: _wooOptions,
-      );
-      if (response.statusCode == 200) {
-        return response.data as Map<String, dynamic>;
-      }
-      return null;
-    } catch (e) {
-      debugPrint('Error al obtener orden $orderId: $e');
-      return null;
-    }
-  }
-
-  Future<List<QuoteMundicam>> getPresupuestosPorEmail(String email) async {
-    await _ensureInitialized();
-    try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/orders',
-        queryParameters: {
-          'search': email,
-          'status': 'checkout-draft',
-          'per_page': 50,
-        },
-        options: _wooOptions,
-      );
-
-      debugPrint(
-        '📊 Presupuestos encontrados: ${(response.data as List).length}',
-      );
-
-      return (response.data as List)
-          .map((item) => QuoteMundicam.fromJson(item))
-          .toList();
-    } catch (e) {
-      debugPrint('❌ Error getPresupuestosPorEmail: $e');
-      return [];
-    }
-  }
-
-  // ================================================================
-  // PRODUCTO POR ID
-  // ================================================================
-
-  Future<Product?> getProductoById(int id) async {
-    await _ensureInitialized();
-    try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products/$id',
-        options: _wooOptions,
-      );
-      if (response.statusCode == 200) {
-        return _mapSingleProductWithBrand(response.data);
-      }
-      return null;
-    } catch (e) {
-      debugPrint("Error al obtener producto $id: $e");
-      return null;
-    }
-  }
-
-  // ================================================================
+  // ═══════════════════════════════════════════════
   // RMA
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
-  Future<bool> crearRma({
-    required String email,
-    required int orderId,
-    required int productId,
-    required String motivo,
-    required String descripcion,
-  }) async {
+  Future<bool> crearRma({required String email, required int orderId, required int productId, required String motivo, required String descripcion}) async {
     await _ensureInitialized();
     try {
-      final data = {
-        'email': email,
-        'order_id': orderId,
-        'product_id': productId,
-        'reason': motivo,
-        'description': descripcion,
-      };
-
+      final data = {'email': email, 'order_id': orderId, 'product_id': productId, 'reason': motivo, 'description': descripcion};
       debugPrint('📝 Creando RMA: ${jsonEncode(data)}');
-
-      final response = await _dio.post(
-        '/wp-json/mundicam/v1/rma',
-        data: data,
-        options: _wooOptions,
-      );
-
-      debugPrint('✅ RMA creada - Status: ${response.statusCode}');
+      final response = await _dio.post('/wp-json/mundicam/v1/rma', data: data, options: _wooOptions);
       return response.statusCode == 201 || response.statusCode == 200;
     } catch (e) {
       debugPrint('❌ Error al crear RMA: $e');
@@ -1064,63 +790,48 @@ class ApiService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getRmaRequests(
-      String customerEmail,
-      ) async {
+  Future<List<Map<String, dynamic>>> getRmaRequests(String customerEmail) async {
     await _ensureInitialized();
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/rma',
-        queryParameters: {'email': customerEmail},
-        options: _wooOptions,
-      );
-      return List<Map<String, dynamic>>.from(response.data);
+      final response = await _dio.get('/wp-json/wc/v3/rma', queryParameters: {'email': customerEmail}, options: _wooOptions);
+      if (response.data is! List) return [];
+      return (response.data as List).whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
     } catch (e) {
       return [];
     }
   }
 
-  // ================================================================
+  // ═══════════════════════════════════════════════
   // TICKETS
-  // ================================================================
+  // ═══════════════════════════════════════════════
 
   Future<List<Map<String, dynamic>>> getTickets(String customerEmail) async {
     try {
-      final response = await _dio.get(
-        '/wp-json/wp/v2/posts',
-        queryParameters: {
-          'search': customerEmail,
-          'categories': 'soporte-tecnico',
-        },
-      );
-      return List<Map<String, dynamic>>.from(response.data);
+      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {'search': customerEmail, 'categories': 'soporte-tecnico'});
+      if (response.data is! List) return [];
+      return (response.data as List).whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
     } catch (e) {
       return [];
     }
   }
 
-  // ================================================================
-  // MANEJO DE ERRORES
-  // ================================================================
+  // ═══════════════════════════════════════════════
+  // ERRORES
+  // ═══════════════════════════════════════════════
 
   String _mapDioError(DioException e) {
     switch (e.type) {
-      case DioExceptionType.connectionTimeout:
-        return 'Tiempo de conexión agotado';
+      case DioExceptionType.connectionTimeout: return 'Tiempo de conexión agotado';
+      case DioExceptionType.receiveTimeout: return 'Tiempo de respuesta agotado';
       case DioExceptionType.badResponse:
-        if (e.response?.statusCode == 401) {
-          return 'Error de autenticación (401). Verifica las credenciales API.';
-        }
+        if (e.response?.statusCode == 401) return 'Error de autenticación (401).';
         if (e.response?.statusCode == 400) {
           final data = e.response?.data;
-          if (data is Map && data['message'] != null) {
-            return data['message'].toString();
-          }
-          return 'Solicitud no válida. Revisa los datos del pedido.';
+          if (data is Map && data['message'] != null) return data['message'].toString();
+          return 'Solicitud no válida.';
         }
         return 'Error del servidor: ${e.response?.statusCode}';
-      default:
-        return 'Error de red: ${e.message}';
+      default: return 'Error de red: ${e.message}';
     }
   }
 }

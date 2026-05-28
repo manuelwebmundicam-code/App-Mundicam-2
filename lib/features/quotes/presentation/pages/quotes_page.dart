@@ -37,6 +37,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   bool _isLoadingAction = false;
   String? _processingQuoteId;
+  String? _deletingItemKey;
 
   final Set<String> _hiddenQuoteIds = <String>{};
   final Set<String> _expandedQuoteIds = <String>{};
@@ -136,6 +137,76 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       return items;
     } finally {
       _webItemsFutures.remove(quote.id);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ELIMINAR PRODUCTO INDIVIDUAL - WEB
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<void> _eliminarProductoWeb(QuoteMundicam quote, _QuoteLineItem item) async {
+    if (_isLoadingAction || _deletingItemKey != null) return;
+
+    final itemKey = '${quote.id}_${item.productId}';
+    setState(() { _deletingItemKey = itemKey; });
+
+    try {
+      final api = ApiService();
+      final orderId = _extractOrderId(quote);
+      final eliminado = await api.eliminarProductoPresupuesto(orderId: orderId, productId: item.productId);
+
+      if (!eliminado) throw Exception('No se pudo eliminar el producto.');
+
+      // Actualizar caché
+      final items = List<_QuoteLineItem>.from(_webItemsCache[quote.id] ?? []);
+      items.removeWhere((i) => i.productId == item.productId);
+
+      if (items.isEmpty) {
+        await _hideWebQuote(quote.id);
+      } else {
+        setState(() => _webItemsCache[quote.id] = items);
+      }
+
+      ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
+
+      _showSnackBar('${item.name} eliminado del presupuesto.', Colors.green.shade700);
+    } catch (e) {
+      _showSnackBar('Error: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _deletingItemKey = null);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ELIMINAR PRODUCTO INDIVIDUAL - LOCAL
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<void> _eliminarProductoLocal(LocalQuote quote, int productId, String productName) async {
+    if (_isLoadingAction || _deletingItemKey != null) return;
+
+    final itemKey = '${quote.orderId}_$productId';
+    setState(() { _deletingItemKey = itemKey; });
+
+    try {
+      final notifier = ref.read(localQuotesProvider.notifier);
+
+      await notifier.eliminarItem(orderId: quote.orderId, productId: productId);
+
+      // Verificar si el presupuesto quedó vacío
+      final updated = notifier.getPresupuesto(quote.orderId);
+      if (updated == null || updated.items.isEmpty) {
+        _expandedLocalQuoteIds.remove(quote.orderId);
+      }
+
+      ref.invalidate(quoteBadgeProvider);
+      ref.invalidate(cartBadgeProvider);
+
+      _showSnackBar('$productName eliminado del presupuesto.', Colors.green.shade700);
+    } catch (e) {
+      _showSnackBar('Error: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _deletingItemKey = null);
     }
   }
 
@@ -456,10 +527,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           }),
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(
-              color: Colors.orange.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(14),
-            ),
+            decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.folder_rounded, color: Colors.orange, size: 24),
           ),
           title: Row(
@@ -487,7 +555,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           children: [
             const Divider(height: 1),
             const SizedBox(height: 12),
-            ...quote.items.map((item) => _buildLocalItemTile(item)),
+            ...quote.items.map((item) => _buildLocalItemTile(quote, item)),
             const SizedBox(height: 14),
             if (!isProcessing) _buildCardButtons(
               onDelete: () => _eliminarLocalQuote(quote.orderId, quote.nombre),
@@ -527,10 +595,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           },
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(14),
-            ),
+            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.cloud_rounded, color: Colors.blue, size: 24),
           ),
           title: Row(
@@ -579,13 +644,16 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
         if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(14), child: Text('Error al cargar.', style: TextStyle(color: Colors.red)));
         final items = snapshot.data ?? [];
         if (items.isEmpty) return const Padding(padding: EdgeInsets.all(14), child: Text('Sin productos.', style: TextStyle(color: Colors.grey)));
-        return Column(children: items.map((item) => _buildWebItemTile(item)).toList());
+        return Column(children: items.map((item) => _buildWebItemTile(quote, item)).toList());
       },
     );
   }
 
   // ──── ITEMS ────
-  Widget _buildLocalItemTile(LocalQuoteItem item) {
+  Widget _buildLocalItemTile(LocalQuote quote, LocalQuoteItem item) {
+    final itemKey = '${quote.orderId}_${item.productId}';
+    final isDeleting = _deletingItemKey == itemKey;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -601,12 +669,25 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
               Text('${item.quantity} ud × ${_formatMoney(item.price)} = ${_formatMoney(item.subtotal)}', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
             ]),
           ),
+          if (isDeleting)
+            const SizedBox(width: 28, height: 28, child: Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red)))
+          else
+            IconButton(
+              onPressed: () => _eliminarProductoLocal(quote, item.productId, item.productName),
+              icon: const Icon(Icons.close_rounded, size: 16, color: Colors.red),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildWebItemTile(_QuoteLineItem item) {
+  Widget _buildWebItemTile(QuoteMundicam quote, _QuoteLineItem item) {
+    final itemKey = '${quote.id}_${item.productId}';
+    final isDeleting = _deletingItemKey == itemKey;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -622,6 +703,16 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
               Text('${item.quantity} ud × ${_formatMoney(item.unitPrice)} = ${_formatMoney(item.total)}', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
             ]),
           ),
+          if (isDeleting)
+            const SizedBox(width: 28, height: 28, child: Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red)))
+          else
+            IconButton(
+              onPressed: () => _eliminarProductoWeb(quote, item),
+              icon: const Icon(Icons.close_rounded, size: 16, color: Colors.red),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            ),
         ],
       ),
     );
@@ -635,8 +726,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           children: [
             Expanded(child: _buildOutlinedButton('Eliminar', Icons.delete_outline_rounded, Colors.red.shade600, onDelete)),
             const SizedBox(width: 10),
-            Expanded(child: _buildOutlinedButton('Guardar', Icons.save_outlined, const Color(
-                0xFF000000), onSave)),
+            Expanded(child: _buildOutlinedButton('Guardar', Icons.save_outlined, const Color(0xFF1565C0), onSave)),
           ],
         ),
         const SizedBox(height: 10),
@@ -664,8 +754,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       width: double.infinity,
       height: 46,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Color(0xFFA60909), Color(
-            0xFFD60808)], begin: Alignment.centerLeft, end: Alignment.centerRight),
+        gradient: const LinearGradient(colors: [Color(0xFFA60909), Color(0xFFD60808)], begin: Alignment.centerLeft, end: Alignment.centerRight),
         borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: const Color(0xFFA60909).withOpacity(0.35), blurRadius: 10, offset: const Offset(0, 4))],
       ),
