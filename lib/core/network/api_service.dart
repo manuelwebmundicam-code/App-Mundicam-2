@@ -977,15 +977,8 @@ class ApiService {
       }
     }
 
-    final products = productsById.values.toList()
-      ..sort((a, b) {
-        final scoreCompare = _accessoryProductScore(b, search)
-            .compareTo(_accessoryProductScore(a, search));
-        if (scoreCompare != 0) return scoreCompare;
-        if (a.isInstock && !b.isInstock) return -1;
-        if (!a.isInstock && b.isInstock) return 1;
-        return b.id.compareTo(a.id);
-      });
+    final products = productsById.values.toList();
+    _sortProductsByRequestedOrder(products, orderBy);
 
     if (kDebugMode) {
       debugPrint(
@@ -1116,17 +1109,7 @@ class ApiService {
       }
     }
 
-    if (orderBy == 'price_asc') {
-      products.sort((a, b) => _productPrice(a).compareTo(_productPrice(b)));
-    } else if (orderBy == 'price_desc') {
-      products.sort((a, b) => _productPrice(b).compareTo(_productPrice(a)));
-    } else {
-      products.sort((a, b) {
-        if (a.isInstock && !b.isInstock) return -1;
-        if (!a.isInstock && b.isInstock) return 1;
-        return b.id.compareTo(a.id);
-      });
-    }
+    _sortProductsByRequestedOrder(products, orderBy);
 
     final result = _paginateLocalProducts(
       products: products,
@@ -1168,6 +1151,76 @@ class ApiService {
 
   double _productPrice(Product product) {
     return double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
+  }
+
+  bool _isExplicitCatalogOrder(String? orderBy) {
+    final value = orderBy?.trim();
+    return value == 'price_asc' || value == 'price_desc' || value == 'date';
+  }
+
+  String? _orderByFromProductQueryParams(Map<String, dynamic> queryParams) {
+    final orderBy = queryParams['orderby']?.toString().trim();
+    final order = queryParams['order']?.toString().trim().toLowerCase();
+
+    if (orderBy == 'price' && order == 'asc') {
+      return 'price_asc';
+    }
+
+    if (orderBy == 'price' && order == 'desc') {
+      return 'price_desc';
+    }
+
+    if (orderBy == 'date') {
+      return 'date';
+    }
+
+    return null;
+  }
+
+  void _sortProductsByRequestedOrder(
+      List<Product> products,
+      String? orderBy,
+      ) {
+    final value = orderBy?.trim();
+
+    if (products.length < 2) return;
+
+    if (value == 'price_asc') {
+      products.sort((a, b) {
+        final comparePrice = _productPrice(a).compareTo(_productPrice(b));
+        if (comparePrice != 0) return comparePrice;
+        return b.id.compareTo(a.id);
+      });
+      return;
+    }
+
+    if (value == 'price_desc') {
+      products.sort((a, b) {
+        final comparePrice = _productPrice(b).compareTo(_productPrice(a));
+        if (comparePrice != 0) return comparePrice;
+        return b.id.compareTo(a.id);
+      });
+      return;
+    }
+
+    if (value == 'date' || value == null || value.isEmpty) {
+      products.sort((a, b) => b.id.compareTo(a.id));
+    }
+  }
+
+  CatalogProductsResult _sortCatalogResultPage(
+      CatalogProductsResult result,
+      String? orderBy,
+      ) {
+    final products = [...result.products];
+    _sortProductsByRequestedOrder(products, orderBy);
+
+    return CatalogProductsResult(
+      products: products,
+      currentPage: result.currentPage,
+      totalPages: result.totalPages,
+      totalItems: result.totalItems,
+    );
   }
 
   int _parseHeaderInt(Headers headers, String key, int fallback) {
@@ -1481,6 +1534,10 @@ class ApiService {
 
     final List data = response.data is List ? response.data as List : [];
     final productos = await _mapProductsWithBrand(data);
+    _sortProductsByRequestedOrder(
+      productos,
+      _orderByFromProductQueryParams(queryParams),
+    );
 
     final totalPages = _parseHeaderInt(
       response.headers,
@@ -1605,8 +1662,9 @@ class ApiService {
     }
 
     final cleanSearch = search?.trim();
-    if (cleanSearch != null && cleanSearch.isNotEmpty) {
-      baseQueryParams['search'] = cleanSearch;
+    final effectiveSearch = _effectiveCatalogSearchTerm(cleanSearch);
+    if (effectiveSearch != null && effectiveSearch.isNotEmpty) {
+      baseQueryParams['search'] = effectiveSearch;
     }
 
     _applyProductOrderParams(baseQueryParams, orderBy);
@@ -1629,6 +1687,8 @@ class ApiService {
       totalPages = result.totalPages;
       page++;
     } while (page <= totalPages);
+
+    _sortProductsByRequestedOrder(products, orderBy);
 
     _contextProductsCache[cacheKey] = _ContextProductsCacheEntry(
       products: products,
@@ -1702,6 +1762,8 @@ class ApiService {
         .where((product) => _productMatchesBrand(product, brandName))
         .toList();
 
+    _sortProductsByRequestedOrder(filtered, orderBy);
+
     if (kDebugMode) {
       debugPrint(
         '🧹 Filtro local por marca "$brandName": '
@@ -1718,8 +1780,9 @@ class ApiService {
 
   CatalogProductsResult _filterCatalogResultByBrand(
       CatalogProductsResult result,
-      String? brandName,
-      ) {
+      String? brandName, {
+        String? orderBy,
+      }) {
     final cleanBrand = brandName?.trim();
 
     if (cleanBrand == null || cleanBrand.isEmpty) {
@@ -1730,8 +1793,10 @@ class ApiService {
         .where((product) => _productMatchesBrand(product, cleanBrand))
         .toList();
 
+    _sortProductsByRequestedOrder(filteredProducts, orderBy);
+
     if (filteredProducts.length == result.products.length) {
-      return result;
+      return _sortCatalogResultPage(result, orderBy);
     }
 
     if (kDebugMode) {
@@ -1867,10 +1932,23 @@ class ApiService {
           );
         }
 
-        return result;
+        return _sortCatalogResultPage(result, orderBy);
       }
 
       final brandName = await getMarcaNombrePorId(brandId);
+
+      if (brandName != null &&
+          brandName.trim().isNotEmpty &&
+          _isExplicitCatalogOrder(orderBy)) {
+        return _getLocalBrandFilteredCatalogResult(
+          categoryId: categoryId,
+          brandName: brandName,
+          search: cleanSearch,
+          orderBy: orderBy,
+          page: page,
+          perPage: perPage,
+        );
+      }
 
       // 1) Primero intentamos como en la beta / Store API:
       // taxonomía de marcas tipo products/brands.
@@ -1888,6 +1966,7 @@ class ApiService {
         final verifiedBrandResult = _filterCatalogResultByBrand(
           brandResult,
           brandName,
+          orderBy: orderBy,
         );
 
         if (kDebugMode) {
@@ -1926,6 +2005,7 @@ class ApiService {
       final verifiedAttributeResult = _filterCatalogResultByBrand(
         attributeResult,
         brandName,
+        orderBy: orderBy,
       );
 
       if (verifiedAttributeResult.products.isNotEmpty ||
@@ -1944,7 +2024,7 @@ class ApiService {
         );
       }
 
-      return verifiedAttributeResult;
+      return _sortCatalogResultPage(verifiedAttributeResult, orderBy);
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
     } catch (e) {
@@ -1977,15 +2057,7 @@ class ApiService {
         productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
       }
 
-      if (brandId == null && orderBy != null) {
-        if (orderBy == 'price_asc') {
-          productos.sort((a, b) => _productPrice(a).compareTo(_productPrice(b)));
-        } else if (orderBy == 'price_desc') {
-          productos.sort((a, b) => _productPrice(b).compareTo(_productPrice(a)));
-        } else if (orderBy == 'date') {
-          productos.sort((a, b) => b.id.compareTo(a.id));
-        }
-      }
+      _sortProductsByRequestedOrder(productos, orderBy);
 
       debugPrint('📊 Productos finales mostrados: ${productos.length}');
       return productos;
@@ -2024,6 +2096,8 @@ class ApiService {
       if (brand != null && brand.isNotEmpty && effectiveBrandId == null) {
         productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
       }
+
+      _sortProductsByRequestedOrder(productos, orderBy);
 
       return productos;
     } on DioException catch (e) {

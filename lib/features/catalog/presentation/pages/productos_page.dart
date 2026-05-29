@@ -27,7 +27,9 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
       widget.onGoHome!();
       return;
     }
+
     final navigator = Navigator.of(context);
+
     if (navigator.canPop()) {
       navigator.pop();
     }
@@ -59,7 +61,9 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
             ..sort((a, b) {
               final pa = _categoryPriority(a.name.toString());
               final pb = _categoryPriority(b.name.toString());
+
               if (pa != pb) return pa.compareTo(pb);
+
               return a.name
                   .toString()
                   .toLowerCase()
@@ -85,6 +89,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
               ),
               itemBuilder: (context, index) {
                 final cat = categoriasOrdenadas[index];
+
                 return _CategoryTile(
                   cat: cat,
                   icon: _getIconForCategory(cat.name),
@@ -102,60 +107,144 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 
   int _categoryPriority(String name) {
     final n = name.toLowerCase();
+
     if (n.contains('video ip') || n.contains('ip hd')) return 0;
     if (n.contains('video') || n.contains('cctv')) return 1;
-    if (n.contains('intrusión') || n.contains('intrusion') || n.contains('alarma')) {
+
+    if (n.contains('intrusión') ||
+        n.contains('intrusion') ||
+        n.contains('alarma')) {
       return 2;
     }
+
     if (n.contains('incendio')) return 3;
     if (n.contains('acceso')) return 4;
     if (n.contains('net')) return 5;
     if (n.contains('antihurto')) return 6;
     if (n.contains('complementos')) return 7;
-    if (n.contains('energía') || n.contains('energia') || n.contains('solar')) {
+
+    if (n.contains('energía') ||
+        n.contains('energia') ||
+        n.contains('solar')) {
       return 8;
     }
+
     if (n.contains('drone')) return 9;
     if (n.contains('outlet')) return 10;
+
     return 99;
   }
 
   String _getSubtitleForCategory(String name) {
     final n = name.toLowerCase();
+
     if (n.contains('video ip') || n.contains('ip hd')) {
       return 'Cámaras IP y grabadores';
     }
+
     if (n.contains('video') || n.contains('cctv')) {
       return 'Videovigilancia profesional';
     }
-    if (n.contains('intrusión') || n.contains('intrusion') || n.contains('alarma')) {
+
+    if (n.contains('intrusión') ||
+        n.contains('intrusion') ||
+        n.contains('alarma')) {
       return 'Alarmas y sensores';
     }
+
     if (n.contains('incendio')) {
       return 'Detección y prevención';
     }
+
     if (n.contains('acceso')) {
       return 'Control de accesos';
     }
+
     if (n.contains('net')) {
       return 'Redes y conectividad';
     }
+
     if (n.contains('antihurto')) {
       return 'Protección EAS retail';
     }
+
     if (n.contains('complementos')) {
       return 'Material auxiliar';
     }
-    if (n.contains('energía') || n.contains('energia') || n.contains('solar')) {
+
+    if (n.contains('energía') ||
+        n.contains('energia') ||
+        n.contains('solar')) {
       return 'Alimentación y autonomía';
     }
+
     if (n.contains('drone')) {
       return 'Soluciones profesionales';
     }
+
     if (n.contains('outlet')) {
       return 'Condiciones especiales';
     }
+
     return 'Familia profesional';
+  }
+
+  IconData _getIconForCategory(String name) {
+    final n = name.toLowerCase();
+
+    if (n.contains('video ip') || n.contains('ip hd')) {
+      return Icons.camera_alt_rounded;
+    }
+
+    if (n.contains('video') || n.contains('cctv')) {
+      return Icons.video_camera_back_rounded;
+    }
+
+    if (n.contains('intrusión') ||
+        n.contains('intrusion') ||
+        n.contains('alarma')) {
+      return Icons.sensors_rounded;
+    }
+
+    if (n.contains('incendio')) {
+      return Icons.local_fire_department_rounded;
+    }
+
+    if (n.contains('acceso')) {
+      return Icons.vpn_key_rounded;
+    }
+
+    if (n.contains('net')) {
+      return Icons.hub_rounded;
+    }
+
+    if (n.contains('antihurto')) {
+      return Icons.lock_rounded;
+    }
+
+    if (n.contains('complementos')) {
+      return Icons.extension_rounded;
+    }
+
+    if (n.contains('energía') ||
+        n.contains('energia') ||
+        n.contains('solar')) {
+      return Icons.bolt_rounded;
+    }
+
+    if (n.contains('drone')) {
+      return Icons.flight_takeoff_rounded;
+    }
+
+    if (n.contains('outlet')) {
+      return Icons.local_offer_rounded;
+    }
+
+    if (n.contains('ip')) {
+      return Icons.camera_alt_rounded;
+    }
+
+    return Icons.category_rounded;
   }
 
   Widget _buildErrorState(Object err) {
@@ -271,48 +360,6 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
       ),
     );
   }
-
-  IconData _getIconForCategory(String name) {
-    final n = name.toLowerCase();
-
-    if (n.contains('video ip') || n.contains('ip hd')) {
-      return Icons.settings_remote_rounded;
-    }
-    if (n.contains('video') || n.contains('cctv')) {
-      return Icons.videocam_outlined;
-    }
-    if (n.contains('ip')) {
-      return Icons.settings_remote_rounded;
-    }
-    if (n.contains('antihurto')) {
-      return Icons.lock_outline_rounded;
-    }
-    if (n.contains('complementos')) {
-      return Icons.extension_rounded;
-    }
-    if (n.contains('intrusión') || n.contains('intrusion') || n.contains('alarma')) {
-      return Icons.notifications_active_rounded;
-    }
-    if (n.contains('acceso')) {
-      return Icons.badge_rounded;
-    }
-    if (n.contains('incendio')) {
-      return Icons.local_fire_department_rounded;
-    }
-    if (n.contains('net')) {
-      return Icons.hub_outlined;
-    }
-    if (n.contains('drone')) {
-      return Icons.flight_takeoff_rounded;
-    }
-    if (n.contains('energía') || n.contains('energia') || n.contains('solar')) {
-      return Icons.wb_sunny_rounded;
-    }
-    if (n.contains('outlet')) {
-      return Icons.loyalty_rounded;
-    }
-    return Icons.health_and_safety_rounded;
-  }
 }
 
 class _CategoryTile extends StatelessWidget {
@@ -333,7 +380,9 @@ class _CategoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String name = cat.name.toString().toUpperCase();
-    final int count = cat.count is int ? cat.count as int : int.tryParse(cat.count.toString()) ?? 0;
+    final int count = cat.count is int
+        ? cat.count as int
+        : int.tryParse(cat.count.toString()) ?? 0;
 
     return Material(
       color: Colors.transparent,

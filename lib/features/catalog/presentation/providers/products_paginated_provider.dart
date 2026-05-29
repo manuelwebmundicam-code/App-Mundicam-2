@@ -55,6 +55,40 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   Object? get lastError => _lastError;
 
+  double _productPrice(Product product) {
+    return double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
+  }
+
+  CatalogProductsResult _sortCatalogResultPage(
+      CatalogProductsResult result,
+      String orderBy,
+      ) {
+    final products = [...result.products];
+
+    if (orderBy == 'price_asc') {
+      products.sort((a, b) {
+        final comparePrice = _productPrice(a).compareTo(_productPrice(b));
+        if (comparePrice != 0) return comparePrice;
+        return b.id.compareTo(a.id);
+      });
+    } else if (orderBy == 'price_desc') {
+      products.sort((a, b) {
+        final comparePrice = _productPrice(b).compareTo(_productPrice(a));
+        if (comparePrice != 0) return comparePrice;
+        return b.id.compareTo(a.id);
+      });
+    } else if (orderBy == 'date') {
+      products.sort((a, b) => b.id.compareTo(a.id));
+    }
+
+    return CatalogProductsResult(
+      products: products,
+      currentPage: result.currentPage,
+      totalPages: result.totalPages,
+      totalItems: result.totalItems,
+    );
+  }
+
   static void clearGlobalCache() {
     ProductCacheService().clearCatalogMemory();
   }
@@ -194,11 +228,16 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
           orderBy: filters.orderBy,
         );
 
+        final orderedResult = _sortCatalogResultPage(
+          result,
+          filters.orderBy,
+        );
+
         if (kDebugMode) {
           debugPrint('🌐 Catálogo cargado: $cacheKey');
         }
 
-        return result;
+        return orderedResult;
       },
     );
   }
