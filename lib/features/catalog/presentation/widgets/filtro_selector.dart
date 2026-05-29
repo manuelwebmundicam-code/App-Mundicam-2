@@ -12,7 +12,7 @@ class FiltroSelector extends ConsumerStatefulWidget {
   final String categoryName;
 
   /// Se mantiene para no romper llamadas existentes desde ProductosPorCategoriaScreen.
-  /// Se usa como fuente rápida y fiable para calcular marcas visibles en subcategorías pequeñas.
+  /// En esta versión no se usa para recalcular filtros: la fuente de verdad sigue siendo WooCommerce.
   final List<Product> productosEnPantalla;
 
   const FiltroSelector({
@@ -116,7 +116,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                           ? _loadingBox('Cargando marcas...')
                           : _availableBrands.isEmpty
                           ? _emptyInfo(
-                        'No hay marcas compatibles en los productos cargados.',
+                        'No hay marcas compatibles en este contexto.',
                         Icons.info_outline,
                       )
                           : Column(
@@ -189,7 +189,9 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
     if (mounted && requestToken == _loadToken) {
       setState(() {
-        _loading = true;
+        // No vaciamos lo que ya hay: así el panel no se queda bloqueado visualmente
+        // cada vez que se cambia el orden.
+        _loading = _availableBrands.isEmpty && _availableSubcategories.isEmpty;
         _error = null;
       });
     }
@@ -197,33 +199,22 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     try {
       final search = filters.search.trim();
       final effectiveSearch = search.isEmpty ? null : search;
-      final effectiveBrandId = filters.brandId ??
-          await _apiService
-              .getMarcaIdPorNombre(
-            filters.brand.trim().isEmpty ? null : filters.brand.trim(),
-          )
-              .timeout(const Duration(seconds: 3));
 
-      final brands = await _loadBrandsFast(search: effectiveSearch);
-      final subcategories = await _loadSubcategoriesFast();
+      final brandIdFuture = _resolveBrandIdQuick(filters);
+      final brandsFuture = _loadBrandsFast(search: effectiveSearch);
+      final subcategoriesFuture = _loadSubcategoriesFast();
 
-      CatalogProductsResult? preview;
-      try {
-        preview = await _apiService
-            .getProductosCatalogoFiltrado(
-          categoryId: widget.parentCategoryId,
-          brandId: effectiveBrandId,
-          search: effectiveSearch,
-          page: 1,
-          perPage: 1,
-          orderBy: filters.orderBy,
-        )
-            .timeout(const Duration(seconds: 8));
-      } catch (_) {
-        preview = null;
-      }
+      final effectiveBrandId = await brandIdFuture;
 
-      final previewTotal = preview?.totalItems ?? 0;
+      final previewFuture = _loadPreviewTotalFast(
+        brandId: effectiveBrandId,
+        search: effectiveSearch,
+        orderBy: filters.orderBy,
+      );
+
+      final brands = await brandsFuture;
+      final subcategories = await subcategoriesFuture;
+      final previewTotal = await previewFuture;
 
       final cacheEntry = _FilterDataCacheEntry(
         availableBrands: brands,
@@ -251,6 +242,46 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     }
   }
 
+  Future<int?> _resolveBrandIdQuick(MundiFilters filters) async {
+    if (filters.brandId != null && filters.brandId! > 0) {
+      return filters.brandId;
+    }
+
+    final brandName = filters.brand.trim();
+    if (brandName.isEmpty) return null;
+
+    try {
+      return await _apiService
+          .getMarcaIdPorNombre(brandName)
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<int> _loadPreviewTotalFast({
+    required int? brandId,
+    required String? search,
+    required String orderBy,
+  }) async {
+    try {
+      final preview = await _apiService
+          .getProductosCatalogoFiltrado(
+        categoryId: widget.parentCategoryId,
+        brandId: brandId,
+        search: search,
+        page: 1,
+        perPage: 1,
+        orderBy: orderBy,
+      )
+          .timeout(const Duration(seconds: 3));
+
+      return preview.totalItems;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> _loadBrandsFast({
     String? search,
   }) async {
@@ -260,31 +291,12 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         categoryId: widget.parentCategoryId,
         search: search,
       )
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 3));
 
       final list = List<Map<String, dynamic>>.from(brands)
           .where((brand) => _brandNameFromMap(brand).isNotEmpty)
           .where((brand) => _brandIdFromMap(brand) != null)
           .where((brand) => _brandCountFromMap(brand) > 0)
-          .toList();
-
-      list.sort(
-            (a, b) => _brandNameFromMap(a).toLowerCase().compareTo(
-          _brandNameFromMap(b).toLowerCase(),
-        ),
-      );
-
-      if (list.isNotEmpty) return list;
-    } catch (_) {}
-
-    try {
-      final brands = await _apiService
-          .getMarcas(hideEmpty: true)
-          .timeout(const Duration(seconds: 8));
-
-      final list = List<Map<String, dynamic>>.from(brands)
-          .where((brand) => _brandNameFromMap(brand).isNotEmpty)
-          .where((brand) => _brandIdFromMap(brand) != null)
           .toList();
 
       list.sort(
@@ -303,7 +315,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     try {
       final subcategories = await _apiService
           .getSubcategoriasDe(widget.parentCategoryId)
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 3));
 
       final list = subcategories.where((category) => category.count > 0).toList()
         ..sort(
@@ -317,12 +329,14 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   }
 
   String _buildCacheKey(MundiFilters filters) {
+    // El orden no cambia marcas ni subcategorías ni el total de productos.
+    // Si lo metemos en la clave, cada pulsación en "precio bajo/alto" vuelve a
+    // pedir filtros a la API y ralentiza el panel sin necesidad.
     return [
       'cat:${widget.parentCategoryId}',
       'brandId:${filters.brandId ?? 0}',
       'brand:${filters.brand.trim().toLowerCase()}',
       'search:${filters.search.trim().toLowerCase()}',
-      'order:${filters.orderBy}',
     ].join('|');
   }
 
@@ -781,14 +795,10 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
               width: 31,
               height: 31,
               decoration: BoxDecoration(
-                color: isSelected
-                    ? AppColors.primary
-                    : Colors.white,
+                color: isSelected ? AppColors.primary : Colors.white,
                 borderRadius: BorderRadius.circular(11),
                 border: Border.all(
-                  color: isSelected
-                      ? AppColors.primary
-                      : const Color(0xFFE6EAF0),
+                  color: isSelected ? AppColors.primary : const Color(0xFFE6EAF0),
                 ),
               ),
               child: Icon(
@@ -870,9 +880,8 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     final selectedFilter = ref.watch(productFilterProvider);
     final brandId = _brandIdFromMap(brand);
     final marcaNombre = _brandNameFromMap(brand);
-    final count = _brandCountFromMap(brand);
 
-    if (marcaNombre.isEmpty || count <= 0) {
+    if (marcaNombre.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -887,7 +896,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.fromLTRB(10, 8, 9, 8),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         decoration: BoxDecoration(
           color: isSelected ? AppColors.primary : const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(14),
@@ -920,29 +929,6 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                 fontSize: 11.8,
                 fontWeight: FontWeight.w900,
                 color: isSelected ? Colors.white : AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? Colors.white.withValues(alpha: 0.18)
-                    : Colors.white,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: isSelected
-                      ? Colors.white.withValues(alpha: 0.12)
-                      : const Color(0xFFE6EAF0),
-                ),
-              ),
-              child: Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  color: isSelected ? Colors.white : const Color(0xFF6B7280),
-                ),
               ),
             ),
           ],

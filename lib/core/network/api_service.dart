@@ -102,6 +102,8 @@ class ApiService {
   bool _initialized = false;
   List<String>? _cachedBrandNames;
   List<Map<String, dynamic>>? _cachedBrandTerms;
+  final Map<String, int> _cachedBrandIdByKey = {};
+  final Map<int, String> _cachedBrandNameById = {};
   final Map<String, _ContextProductsCacheEntry> _contextProductsCache = {};
   final Map<String, _RequestProductsCacheEntry> _requestProductsCache = {};
   static const int _maxRequestProductsCacheEntries = 140;
@@ -1153,10 +1155,6 @@ class ApiService {
     return double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
   }
 
-  bool _isExplicitCatalogOrder(String? orderBy) {
-    final value = orderBy?.trim();
-    return value == 'price_asc' || value == 'price_desc' || value == 'date';
-  }
 
   String? _orderByFromProductQueryParams(Map<String, dynamic> queryParams) {
     final orderBy = queryParams['orderby']?.toString().trim();
@@ -1305,7 +1303,32 @@ class ApiService {
       ),
     );
 
+    _rememberBrandTerms(allTerms);
+
     return allTerms;
+  }
+
+  void _rememberBrandTerm(Map<String, dynamic> term) {
+    final id = _termIdFromDynamic(term['id']);
+    if (id == null || id <= 0) return;
+
+    final name = term['name']?.toString().trim() ?? '';
+    final slug = term['slug']?.toString().trim() ?? '';
+
+    if (name.isNotEmpty) {
+      _cachedBrandIdByKey[_normalizeBrandValue(name)] = id;
+      _cachedBrandNameById[id] = name;
+    }
+
+    if (slug.isNotEmpty) {
+      _cachedBrandIdByKey[_normalizeBrandValue(slug)] = id;
+    }
+  }
+
+  void _rememberBrandTerms(List<Map<String, dynamic>> terms) {
+    for (final term in terms) {
+      _rememberBrandTerm(term);
+    }
   }
 
   Future<int?> getMarcaIdPorNombre(String? brandName) async {
@@ -1314,8 +1337,21 @@ class ApiService {
       return null;
     }
 
-    final marcas = await _getAllBrandTermsForLookup(hideEmpty: false);
     final normalizedValue = _normalizeBrandValue(value);
+    final cachedId = _cachedBrandIdByKey[normalizedValue];
+    if (cachedId != null && cachedId > 0) {
+      return cachedId;
+    }
+
+    if (_cachedBrandTerms != null && _cachedBrandTerms!.isNotEmpty) {
+      _rememberBrandTerms(_cachedBrandTerms!);
+      final cachedFromTerms = _cachedBrandIdByKey[normalizedValue];
+      if (cachedFromTerms != null && cachedFromTerms > 0) {
+        return cachedFromTerms;
+      }
+    }
+
+    final marcas = await _getAllBrandTermsForLookup(hideEmpty: false);
 
     for (final marca in marcas) {
       final id = _termIdFromDynamic(marca['id']);
@@ -1326,6 +1362,7 @@ class ApiService {
 
       if (_normalizeBrandValue(name) == normalizedValue ||
           _normalizeBrandValue(slug) == normalizedValue) {
+        _rememberBrandTerm(marca);
         return id;
       }
     }
@@ -1336,11 +1373,25 @@ class ApiService {
   Future<String?> getMarcaNombrePorId(int? brandId) async {
     if (brandId == null || brandId <= 0) return null;
 
+    final cachedName = _cachedBrandNameById[brandId];
+    if (cachedName != null && cachedName.trim().isNotEmpty) {
+      return cachedName;
+    }
+
+    if (_cachedBrandTerms != null && _cachedBrandTerms!.isNotEmpty) {
+      _rememberBrandTerms(_cachedBrandTerms!);
+      final cachedFromTerms = _cachedBrandNameById[brandId];
+      if (cachedFromTerms != null && cachedFromTerms.trim().isNotEmpty) {
+        return cachedFromTerms;
+      }
+    }
+
     final marcas = await _getAllBrandTermsForLookup(hideEmpty: false);
 
     for (final marca in marcas) {
       final id = _termIdFromDynamic(marca['id']);
       if (id == brandId) {
+        _rememberBrandTerm(marca);
         final name = marca['name']?.toString().trim();
         return name == null || name.isEmpty ? null : name;
       }
@@ -1636,6 +1687,7 @@ class ApiService {
     int? categoryId,
     String? search,
     String? orderBy,
+    int maxPages = 3,
   }) async {
     final cacheKey = _contextProductsCacheKey(
       categoryId: categoryId,
@@ -1686,7 +1738,7 @@ class ApiService {
       products.addAll(result.products);
       totalPages = result.totalPages;
       page++;
-    } while (page <= totalPages);
+    } while (page <= totalPages && page <= maxPages);
 
     _sortProductsByRequestedOrder(products, orderBy);
 
@@ -1707,7 +1759,8 @@ class ApiService {
     if (kDebugMode) {
       debugPrint(
         '📦 Productos contexto cargados: category=$categoryId '
-            'search="$cleanSearch" total=${products.length}',
+            'search="$cleanSearch" pages=${page - 1}/$totalPages '
+            'maxPages=$maxPages totalLocal=${products.length}',
       );
     }
 
@@ -1936,19 +1989,6 @@ class ApiService {
       }
 
       final brandName = await getMarcaNombrePorId(brandId);
-
-      if (brandName != null &&
-          brandName.trim().isNotEmpty &&
-          _isExplicitCatalogOrder(orderBy)) {
-        return _getLocalBrandFilteredCatalogResult(
-          categoryId: categoryId,
-          brandName: brandName,
-          search: cleanSearch,
-          orderBy: orderBy,
-          page: page,
-          perPage: perPage,
-        );
-      }
 
       // 1) Primero intentamos como en la beta / Store API:
       // taxonomía de marcas tipo products/brands.
@@ -2678,6 +2718,8 @@ class ApiService {
         ),
       );
 
+      _rememberBrandTerms(marcas);
+
       if (hideEmpty && marcas.isNotEmpty) {
         _cachedBrandTerms = marcas;
       }
@@ -2981,7 +3023,8 @@ class ApiService {
         categoryId: categoryId,
         search: search,
         orderBy: '',
-      ).timeout(const Duration(seconds: 5));
+        maxPages: 2,
+      ).timeout(const Duration(seconds: 3));
 
       if (products.isEmpty) {
         return [];

@@ -33,6 +33,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   bool _isLoading = false;
   bool _hasMore = true;
+  bool _hasLoadedFirstPage = false;
 
   Object? _lastError;
 
@@ -48,6 +49,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   bool get isLoading => _isLoading;
   bool get hasMore => _hasMore;
+  bool get hasLoadedFirstPage => _hasLoadedFirstPage;
 
   int get currentPage => _currentPage;
   int get totalPages => _totalPages;
@@ -119,6 +121,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
       if (token != _requestToken) return;
 
+      _hasLoadedFirstPage = true;
       state = result.products;
       _totalPages = result.totalPages;
       _totalItems = result.totalItems;
@@ -126,6 +129,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     } catch (e) {
       if (token != _requestToken) return;
 
+      _hasLoadedFirstPage = true;
       _lastError = e;
       _hasMore = false;
 
@@ -172,6 +176,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     } catch (e) {
       if (token != _requestToken) return;
 
+      _hasLoadedFirstPage = true;
       _lastError = e;
 
       if (kDebugMode) {
@@ -200,8 +205,13 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     final search = filters.search.trim();
 
     final effectiveBrandId = filters.brandId ??
-        await apiService.getMarcaIdPorNombre(
+        await apiService
+            .getMarcaIdPorNombre(
           brandName.isEmpty ? null : brandName,
+        )
+            .timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => null,
         );
 
     final cacheKey = _buildCacheKey(
@@ -234,7 +244,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
         );
 
         if (kDebugMode) {
-          debugPrint('🌐 Catálogo cargado: $cacheKey');
+          debugPrint('🌐 Catálogo cargado: $cacheKey · total=${orderedResult.totalItems}');
         }
 
         return orderedResult;
