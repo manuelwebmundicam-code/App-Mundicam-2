@@ -37,17 +37,17 @@ class CategoryGrid extends ConsumerWidget {
         final indexedCategories = List.generate(
           categories.length,
               (index) => MapEntry(index, categories[index]),
-        )
-            .where((entry) {
+        ).where((entry) {
           final name = entry.value.name.trim();
+
           if (name.isEmpty) return false;
 
           final normalized = _normalizeCategoryName(name);
+
           if (normalized.contains('outlet')) return false;
 
           return true;
-        })
-            .toList();
+        }).toList();
 
         indexedCategories.sort((a, b) {
           final priorityA = _categoryPriority(a.value.name);

@@ -42,6 +42,8 @@ class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
 
 class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCategoriaScreen> {
   static const Duration _suggestionsCacheTtl = Duration(minutes: 3);
+  static int? _lastOpenedCategoryId;
+  static bool _preserveFiltersForNextCategoryOpen = false;
 
   final FirebaseService _firebase = FirebaseService();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -52,16 +54,36 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   Timer? _suggestionsDebounce;
   bool _isLoadingMore = false;
   bool _isLoadingSuggestions = false;
+  bool _showScrollTopButton = false;
   int _suggestionsToken = 0;
   List<_CatalogSearchSuggestion> _searchSuggestions = [];
 
   @override
   void initState() {
     super.initState();
-    _searchController.text = ref.read(productFilterProvider).search;
+
+    final previousCategoryId = _lastOpenedCategoryId;
+    final preserveFilters = _preserveFiltersForNextCategoryOpen;
+    _lastOpenedCategoryId = widget.categoryId;
+    _preserveFiltersForNextCategoryOpen = false;
+
+    final currentFilters = ref.read(productFilterProvider);
+    final shouldClearFiltersFromOtherCategory = !preserveFilters &&
+        previousCategoryId != null &&
+        previousCategoryId != widget.categoryId &&
+        currentFilters.hasActiveFilters;
+
+    _searchController.text = currentFilters.search;
+
     _scrollController.addListener(_onScrollThrottled);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+
+      if (shouldClearFiltersFromOtherCategory) {
+        _searchController.clear();
+        ref.read(productFilterProvider.notifier).reset();
+      }
+
       _prewarmCategorySearchCache();
     });
   }
@@ -80,7 +102,17 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     if (_scrollTimer?.isActive ?? false) return;
     _scrollTimer = Timer(const Duration(milliseconds: 100), () {
       if (!_scrollController.hasClients) return;
-      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 300) {
+
+      final currentOffset = _scrollController.position.pixels;
+      final shouldShowScrollTopButton = currentOffset > 650;
+
+      if (shouldShowScrollTopButton != _showScrollTopButton && mounted) {
+        setState(() {
+          _showScrollTopButton = shouldShowScrollTopButton;
+        });
+      }
+
+      if (currentOffset >= _scrollController.position.maxScrollExtent - 300) {
         final notifier = ref.read(
           productsPaginatedProvider(widget.categoryId).notifier,
         );
@@ -97,10 +129,17 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   Future<void> _scrollToTop() async {
     await Future<void>.delayed(const Duration(milliseconds: 60));
     if (!_scrollController.hasClients) return;
+
+    if (_showScrollTopButton && mounted) {
+      setState(() {
+        _showScrollTopButton = false;
+      });
+    }
+
     await _scrollController.animateTo(
       0,
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOut,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
     );
   }
 
@@ -769,6 +808,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         suggestion.targetCategoryId != widget.categoryId) {
       ref.read(productFilterProvider.notifier).reset();
       ref.read(productFilterProvider.notifier).setSearch(suggestion.value);
+      _preserveFiltersForNextCategoryOpen = true;
 
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -1426,6 +1466,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     ref.read(productFilterProvider.notifier).reset();
     ref.read(productFilterProvider.notifier).setSearch(cleanSearch);
+    _preserveFiltersForNextCategoryOpen = true;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => ProductosPorCategoriaScreen(
@@ -1528,6 +1569,29 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         title: widget.categoryName,
         onBack: () => Navigator.of(context).pop(),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          return ScaleTransition(
+            scale: animation,
+            child: FadeTransition(
+              opacity: animation,
+              child: child,
+            ),
+          );
+        },
+        child: _showScrollTopButton
+            ? _ScrollToTopButton(
+          key: const ValueKey('scroll_top_button'),
+          onTap: _scrollToTop,
+        )
+            : const SizedBox.shrink(
+          key: ValueKey('scroll_top_button_hidden'),
+        ),
+      ),
       body: RefreshIndicator(
         color: AppColors.primary,
         onRefresh: _refreshProducts,
@@ -1544,7 +1608,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                 filters: filters,
                 totalItems: totalItems,
                 loadedItems: loadedItems,
-                isLoading: notifier.isLoading,
+                isLoading: notifier.isLoading || !notifier.hasLoadedFirstPage,
                 suggestions: _searchSuggestions,
                 isLoadingSuggestions: _isLoadingSuggestions,
                 onChanged: _onSearchChanged,
@@ -1562,40 +1626,44 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                   onClearAll: _resetFilters,
                 ),
               ),
-            if (productosState.isEmpty && notifier.isLoading)
+            if (productosState.isEmpty &&
+                (!notifier.hasLoadedFirstPage || notifier.isLoading))
               const SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(
-                  child: CircularProgressIndicator(
-                    color: AppColors.primary,
-                  ),
+                child: _InitialProductsLoadingState(),
+              )
+            else if (productosState.isEmpty && notifier.lastError != null)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _ProductsErrorState(
+                  onRetry: _refreshProducts,
                 ),
               )
             else if (productosState.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: _EmptyProductsState(
-                  onReset: _resetFilters,
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyProductsState(
+                    onReset: _resetFilters,
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                  sliver: SliverList.separated(
+                    itemCount: productosState.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      return ProductTile(
+                        key: ValueKey(productosState[index].id),
+                        p: productosState[index],
+                        firebase: _firebase,
+                        categoryName: widget.categoryName,
+                        onGoCart: widget.onGoCart,
+                        onGoQuotes: widget.onGoQuotes,
+                      );
+                    },
+                  ),
                 ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-                sliver: SliverList.separated(
-                  itemCount: productosState.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    return ProductTile(
-                      key: ValueKey(productosState[index].id),
-                      p: productosState[index],
-                      firebase: _firebase,
-                      categoryName: widget.categoryName,
-                      onGoCart: widget.onGoCart,
-                      onGoQuotes: widget.onGoQuotes,
-                    );
-                  },
-                ),
-              ),
             if (productosState.isNotEmpty && notifier.hasMore)
               const SliverToBoxAdapter(
                 child: Padding(
@@ -1630,6 +1698,42 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ScrollToTopButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _ScrollToTopButton({
+    super.key,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 2, bottom: 12),
+      child: Material(
+        color: AppColors.primary,
+        shape: const CircleBorder(),
+        elevation: 7,
+        shadowColor: Colors.black.withValues(alpha: 0.28),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: const SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(
+              Icons.keyboard_arrow_up_rounded,
+              color: Colors.white,
+              size: 31,
+            ),
+          ),
         ),
       ),
     );
@@ -2360,6 +2464,92 @@ class _ActiveFiltersBar extends StatelessWidget {
       default:
         return '';
     }
+  }
+}
+
+class _InitialProductsLoadingState extends StatelessWidget {
+  const _InitialProductsLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: SizedBox(
+        width: 34,
+        height: 34,
+        child: CircularProgressIndicator(
+          strokeWidth: 3,
+          color: AppColors.primary,
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductsErrorState extends StatelessWidget {
+  final Future<void> Function() onRetry;
+
+  const _ProductsErrorState({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 96,
+              height: 96,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF1F1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.wifi_off_rounded,
+                size: 44,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'No se pudieron cargar los productos',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Oswald',
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Revisa la conexión o vuelve a intentarlo.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.4,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(height: 22),
+            ElevatedButton.icon(
+              onPressed: () => unawaited(onRetry()),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Reintentar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
