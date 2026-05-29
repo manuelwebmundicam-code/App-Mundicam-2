@@ -285,6 +285,22 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   Future<List<Map<String, dynamic>>> _loadBrandsFast({
     String? search,
   }) async {
+    List<Map<String, dynamic>> cleanBrandList(List<Map<String, dynamic>> brands) {
+      final list = brands
+          .where((brand) => _brandNameFromMap(brand).isNotEmpty)
+          .where((brand) => _brandIdFromMap(brand) != null)
+          .where((brand) => _brandCountFromMap(brand) > 0)
+          .toList();
+
+      list.sort(
+            (a, b) => _brandNameFromMap(a).toLowerCase().compareTo(
+          _brandNameFromMap(b).toLowerCase(),
+        ),
+      );
+
+      return list;
+    }
+
     try {
       final brands = await _apiService
           .getMarcasDisponiblesCatalogo(
@@ -293,10 +309,48 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       )
           .timeout(const Duration(seconds: 3));
 
+      final list = cleanBrandList(List<Map<String, dynamic>>.from(brands));
+      if (list.isNotEmpty) return list;
+    } catch (_) {
+      // No bloqueamos el panel de filtros si falla el cálculo contextual.
+    }
+
+    // Fallback importante: si una búsqueda genérica como “camara” no devuelve
+    // counts de marcas a tiempo, mostramos las marcas disponibles de la familia
+    // principal. Es preferible ofrecer marcas filtrables a dejar el panel vacío.
+    if (search != null && search.trim().isNotEmpty) {
+      try {
+        final brands = await _apiService
+            .getMarcasDisponiblesCatalogo(
+          categoryId: widget.parentCategoryId,
+          search: null,
+        )
+            .timeout(const Duration(seconds: 3));
+
+        final list = cleanBrandList(List<Map<String, dynamic>>.from(brands));
+        if (list.isNotEmpty) return list;
+      } catch (_) {
+        // Último fallback debajo.
+      }
+    }
+
+    try {
+      final brands = await _apiService
+          .getMarcas(hideEmpty: true)
+          .timeout(const Duration(seconds: 3));
+
       final list = List<Map<String, dynamic>>.from(brands)
           .where((brand) => _brandNameFromMap(brand).isNotEmpty)
           .where((brand) => _brandIdFromMap(brand) != null)
-          .where((brand) => _brandCountFromMap(brand) > 0)
+          .map((brand) {
+        final count = _brandCountFromMap(brand);
+        return <String, dynamic>{
+          ...brand,
+          // Evita que la UI oculte todas las marcas si WooCommerce no trae
+          // count en este endpoint de fallback.
+          if (count <= 0) 'available_count': 1,
+        };
+      })
           .toList();
 
       list.sort(
