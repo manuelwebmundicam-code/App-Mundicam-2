@@ -424,8 +424,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: ProfessionalPageAppBar(
         title: 'MIS PRESUPUESTOS',
-        subtitle: 'Gestiona y acepta tus presupuestos',
-        icon: Icons.description_outlined,
         onBack: _handleBack,
         onRefresh: _refreshQuotes,
       ),

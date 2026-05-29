@@ -37,8 +37,6 @@ class FormacionPage extends ConsumerWidget {
       backgroundColor: _pageBg,
       appBar: ProfessionalPageAppBar(
         title: 'MUNDICAM ACADEMY',
-        subtitle: 'Formación técnica para profesionales',
-        icon: Icons.school_outlined,
         onBack: () => Navigator.of(context).maybePop(),
         onRefresh: () => ref.invalidate(academyProvider),
       ),

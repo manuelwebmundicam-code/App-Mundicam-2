@@ -33,8 +33,6 @@ class EmpresaPage extends StatelessWidget {
       backgroundColor: _pageBg,
       appBar: ProfessionalPageAppBar(
         title: 'SOBRE MUNDICAM',
-        subtitle: 'Distribución profesional de seguridad electrónica',
-        icon: Icons.domain_rounded,
         onBack: () => Navigator.of(context).maybePop(),
       ),
       body: ListView(

@@ -5,7 +5,7 @@ class ProfessionalPageAppBar extends StatelessWidget
     implements PreferredSizeWidget {
   final String title;
   final String subtitle;
-  final IconData icon;
+  final IconData? icon;
   final VoidCallback onBack;
   final VoidCallback? onRefresh;
   final String backTooltip;
@@ -14,8 +14,8 @@ class ProfessionalPageAppBar extends StatelessWidget
   const ProfessionalPageAppBar({
     super.key,
     required this.title,
-    required this.subtitle,
-    required this.icon,
+    this.subtitle = '',
+    this.icon,
     required this.onBack,
     this.onRefresh,
     this.backTooltip = 'Volver',
@@ -23,7 +23,9 @@ class ProfessionalPageAppBar extends StatelessWidget
   });
 
   @override
-  Size get preferredSize => const Size.fromHeight(112);
+  Size get preferredSize => Size.fromHeight(
+    subtitle.trim().isEmpty ? 92 : 112,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -47,23 +49,23 @@ class ProfessionalPageAppBar extends StatelessWidget
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: EdgeInsets.only(
+            left: 4,
+            right: 4,
+            bottom: hasSubtitle ? 12 : 14,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Fila de acciones
               SizedBox(
                 height: 48,
                 child: Row(
                   children: [
-                    // Botón volver
                     _CircleButton(
                       icon: Icons.arrow_back_ios_new_rounded,
                       onPressed: onBack,
                       tooltip: backTooltip,
                     ),
-
-                    // Título centrado
                     Expanded(
                       child: Text(
                         title.toUpperCase(),
@@ -80,8 +82,6 @@ class ProfessionalPageAppBar extends StatelessWidget
                         ),
                       ),
                     ),
-
-                    // Botón refresh o espacio vacío para mantener simetría
                     _CircleButton(
                       icon: Icons.refresh_rounded,
                       onPressed: onRefresh,
@@ -91,42 +91,45 @@ class ProfessionalPageAppBar extends StatelessWidget
                   ],
                 ),
               ),
-
-              // Subtítulo
               if (hasSubtitle) ...[
                 const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.12),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        icon,
-                        size: 11,
-                        color: Colors.white.withOpacity(0.85),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white.withOpacity(0.8),
-                          letterSpacing: 0.3,
-                          height: 1.2,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (icon != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            icon,
+                            size: 11,
+                            color: Colors.white.withOpacity(0.85),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      Flexible(
+                        child: Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white.withOpacity(0.8),
+                            letterSpacing: 0.3,
+                            height: 1.2,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ],
