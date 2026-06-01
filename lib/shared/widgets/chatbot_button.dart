@@ -45,7 +45,7 @@ class ChatbotButton extends StatelessWidget {
                   width: 20,
                   height: 20,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const Icon(
+                  errorBuilder: (context, error, stackTrace) => const Icon(
                     Icons.support_agent_rounded,
                     color: Color(0xFFD71920),
                     size: 18,

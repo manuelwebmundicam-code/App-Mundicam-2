@@ -23,7 +23,6 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   final Ref ref;
 
   static const Duration _cacheTtl = Duration(minutes: 3);
-  static const int _maxCacheEntries = 80;
 
 
   int _currentPage = 1;
@@ -102,8 +101,8 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   Future<void> loadFirstPage({
     bool forceRefresh = false,
   }) async {
-    // Si llega una búsqueda nueva mientras otra sigue en curso, no la ignoramos.
-    // La petición anterior queda invalidada por el token y no puede pisar el listado.
+    // Si llega una bÃºsqueda nueva mientras otra sigue en curso, no la ignoramos.
+    // La peticiÃ³n anterior queda invalidada por el token y no puede pisar el listado.
     if (_isLoading && !forceRefresh) return;
 
     final token = ++_requestToken;
@@ -134,7 +133,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       _hasMore = false;
 
       if (kDebugMode) {
-        debugPrint('❌ Error cargando primera página catálogo: $e');
+        debugPrint('âŒ Error cargando primera pÃ¡gina catÃ¡logo: $e');
       }
     } finally {
       if (token == _requestToken) {
@@ -180,7 +179,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       _lastError = e;
 
       if (kDebugMode) {
-        debugPrint('❌ Error cargando más productos catálogo: $e');
+        debugPrint('âŒ Error cargando mÃ¡s productos catÃ¡logo: $e');
       }
     } finally {
       if (token == _requestToken) {
@@ -244,7 +243,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
         );
 
         if (kDebugMode) {
-          debugPrint('🌐 Catálogo cargado: $cacheKey · total=${orderedResult.totalItems}');
+          debugPrint('ðŸŒ CatÃ¡logo cargado: $cacheKey Â· total=${orderedResult.totalItems}');
         }
 
         return orderedResult;
@@ -272,3 +271,4 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     ].join('|');
   }
 }
+

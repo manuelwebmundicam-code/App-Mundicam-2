@@ -139,7 +139,7 @@ final visibleQuotesProductsCountProvider = Provider<int>((ref) {
     data: (quotes) {
       return quotes.fold<int>(
         0,
-            (sum, quote) => sum + 1,
+            (total, quote) => total + 1,
       );
     },
     orElse: () => 0,
@@ -155,7 +155,7 @@ final visibleQuotesTotalProvider = Provider<double>((ref) {
     data: (quotes) {
       return quotes.fold<double>(
         0,
-            (sum, quote) => sum + quote.total,
+            (total, quote) => total + quote.total,
       );
     },
     orElse: () => 0,

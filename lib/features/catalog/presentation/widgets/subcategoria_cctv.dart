@@ -85,7 +85,7 @@ class SubCategoriasCCTVPage extends StatelessWidget {
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
         itemCount: DataCCTV.categorias.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 20),
+        separatorBuilder: (context, index) => const SizedBox(height: 20),
         itemBuilder: (context, index) =>
             _buildCategoryCard(DataCCTV.categorias[index]),
       ),

@@ -25,7 +25,7 @@ class MenuBarWidget extends ConsumerWidget {
         return outlet.isNotEmpty ? outlet.first.id : null;
       },
       loading: () => null,
-      error: (_, __) => null,
+      error: (error, stackTrace) => null,
     );
   }
 

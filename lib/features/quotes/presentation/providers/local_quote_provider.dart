@@ -1,10 +1,14 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../data/models/local_quote_model.dart';
 
 // Provider para acceder al notifier
-final localQuotesProvider = StateNotifierProvider<LocalQuotesNotifier, List<LocalQuote>>((ref) {
+final localQuotesProvider =
+StateNotifierProvider<LocalQuotesNotifier, List<LocalQuote>>((ref) {
   return LocalQuotesNotifier();
 });
 
@@ -20,9 +24,12 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final jsonString = prefs.getString(_storageKey);
+
       if (jsonString != null && jsonString.isNotEmpty) {
         final List<dynamic> decoded = jsonDecode(jsonString);
-        final quotes = decoded.map((e) => LocalQuote.fromJson(e as Map<String, dynamic>)).toList();
+        final quotes = decoded
+            .map((e) => LocalQuote.fromJson(e as Map<String, dynamic>))
+            .toList();
 
         // Filtrar presupuestos expirados
         final noExpirados = quotes.where((q) => !q.isExpired).toList();
@@ -30,7 +37,9 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
         await _guardarPresupuestos();
       }
     } catch (e) {
-      print('Error cargando presupuestos locales: $e');
+      if (kDebugMode) {
+        debugPrint('Error cargando presupuestos locales: $e');
+      }
       state = [];
     }
   }
@@ -42,7 +51,9 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
       final jsonString = jsonEncode(state.map((e) => e.toJson()).toList());
       await prefs.setString(_storageKey, jsonString);
     } catch (e) {
-      print('Error guardando presupuestos locales: $e');
+      if (kDebugMode) {
+        debugPrint('Error guardando presupuestos locales: $e');
+      }
     }
   }
 
@@ -57,12 +68,13 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
       fechaCreacion: DateTime.now(),
       items: [],
     );
+
     state = [...state, nuevo];
     await _guardarPresupuestos();
     return nuevo;
   }
 
-  // Anadir item a un presupuesto existente
+  // Añadir item a un presupuesto existente
   Future<void> anadirItem({
     required String orderId,
     required LocalQuoteItem item,
@@ -74,7 +86,9 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     final itemsActualizados = List<LocalQuoteItem>.from(quote.items);
 
     // Buscar si el producto ya existe
-    final existingIndex = itemsActualizados.indexWhere((i) => i.productId == item.productId);
+    final existingIndex =
+    itemsActualizados.indexWhere((i) => i.productId == item.productId);
+
     if (existingIndex != -1) {
       // Actualizar cantidad
       final existing = itemsActualizados[existingIndex];
@@ -89,11 +103,13 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     }
 
     final quoteActualizado = quote.copyWith(items: itemsActualizados);
+
     state = [
       ...state.take(index),
       quoteActualizado,
       ...state.skip(index + 1),
     ];
+
     await _guardarPresupuestos();
   }
 
@@ -106,14 +122,17 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     if (index == -1) return;
 
     final quote = state[index];
-    final itemsActualizados = quote.items.where((i) => i.productId != productId).toList();
+    final itemsActualizados =
+    quote.items.where((i) => i.productId != productId).toList();
 
     final quoteActualizado = quote.copyWith(items: itemsActualizados);
+
     state = [
       ...state.take(index),
       quoteActualizado,
       ...state.skip(index + 1),
     ];
+
     await _guardarPresupuestos();
   }
 

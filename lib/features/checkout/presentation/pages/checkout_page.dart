@@ -11,7 +11,6 @@ import 'package:mundicam/features/orders/presentation/providers/order_provider.d
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
-import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 
 class _CheckoutPaymentMethod {
   final String id;
@@ -30,14 +29,7 @@ class _CheckoutPaymentMethod {
 }
 
 class CheckoutPage extends ConsumerStatefulWidget {
-  final VoidCallback? onGoHome;
-  final VoidCallback? onGoCart;
-
-  const CheckoutPage({
-    super.key,
-    this.onGoHome,
-    this.onGoCart,
-  });
+  const CheckoutPage({super.key});
 
   @override
   ConsumerState<CheckoutPage> createState() => _CheckoutPageState();
@@ -62,7 +54,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   bool _isLoading = false;
   bool _loadingProfile = true;
-  bool _profileLoaded = false;
   String? _errorMessage;
 
   int? _customerId;
@@ -107,6 +98,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   @override
   void dispose() {
     _scrollController.dispose();
+
     for (var c in [
       _nameController,
       _lastNameController,
@@ -123,20 +115,19 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     ]) {
       c.dispose();
     }
+
     super.dispose();
   }
 
-  // ──────────────────────────────────────────────
-  // Helpers
-  // ──────────────────────────────────────────────
-
   String _normalizePaymentMethod(String? value) {
     final text = value?.trim().toLowerCase() ?? '';
+
     if (text.contains('redsys') ||
         text.contains('tarjeta') ||
         text.contains('card')) {
       return 'redsys';
     }
+
     if (text.contains('giro') ||
         text.contains('cheque') ||
         text.contains('aplazado') ||
@@ -145,6 +136,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         text.contains('credit')) {
       return 'cheque';
     }
+
     return 'bacs';
   }
 
@@ -159,63 +151,26 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   bool _isPaymentMethodEnabled(_CheckoutPaymentMethod method) {
     if (!method.requiresCredit) return true;
+
     final disponible = _creditLimit - _creditUsed;
     return _creditLimit > 0 && disponible > 0;
   }
 
-  String _buildWooPaymentUrl(
-      {required int orderId, required String orderKey}) {
+  String _buildWooPaymentUrl({required int orderId, required String orderKey}) {
     return '$_baseUrl/checkout/order-pay/$orderId/?pay_for_order=true&key=${Uri.encodeComponent(orderKey)}';
   }
 
-  /// Vuelve al Home usando el callback si existe, si no, hace pop de la ruta.
-  void _irAlInicio({String? mensaje}) {
-    if (!mounted) return;
-
-    if (mensaje != null && mensaje.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(mensaje),
-          backgroundColor: Colors.green.shade700,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-
-    if (widget.onGoHome != null) {
-      widget.onGoHome!();
-    } else {
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    }
-  }
-
-  /// Maneja el botón de atrás del AppBar: mismo comportamiento que QuotesPage.
-  void _handleBack() {
-    if (_isLoading) return;
-    if (widget.onGoHome != null) {
-      widget.onGoHome!();
-    } else {
-      Navigator.of(context).pop();
-    }
-  }
-
-  void _mostrarError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: Colors.red.shade700,
-        duration: const Duration(seconds: 4),
-      ),
-    );
-  }
-
-  // ──────────────────────────────────────────────
-  // Carga de datos del cliente
-  // ──────────────────────────────────────────────
-
+  // ============================================================
+  // CARGAR DATOS DEL CLIENTE
+  // Ahora usa las mismas claves que el perfil:
+  // - CIF/NIF: billing_nif + fallback billing.nif / billing.cif
+  // - Gestor: wpuef_cid_c30 + fallback pedidos@mundicam.com
+  // - Forma de pago: payment_method
+  // - Crédito: credit_limit / credit_used
+  // ============================================================
   Future<void> _cargarDatosCliente() async {
     final user = FirebaseAuth.instance.currentUser;
+
     if (user == null) {
       setState(() {
         _loadingProfile = false;
@@ -224,15 +179,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       return;
     }
 
+    debugPrint('Checkout - Cargando datos del cliente...');
+
     try {
       String? email = user.email?.trim().toLowerCase();
+
       if (email == null || email.isEmpty) {
         final userDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
             .get();
+
         email = (userDoc.data()?['email'] as String?)?.trim().toLowerCase();
       }
+
       if (email == null || email.isEmpty) {
         setState(() {
           _loadingProfile = false;
@@ -241,41 +201,58 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         return;
       }
 
+      debugPrint('   Email: $email');
+
       final apiService = ApiService();
       final wooCustomer = await apiService.getCustomerByEmail(email);
+
       if (wooCustomer == null) {
+        debugPrint('⚠️ Cliente no encontrado en WooCommerce');
+
         setState(() {
           _loadingProfile = false;
-          _errorMessage =
-          'No se encontraron tus datos. Contacta con soporte.';
+          _errorMessage = 'No se encontraron tus datos. Contacta con soporte.';
         });
+
         return;
       }
 
-      final wooEmail =
-      wooCustomer['email']?.toString().trim().toLowerCase();
+      final wooEmail = wooCustomer['email']?.toString().trim().toLowerCase();
+
       if (wooEmail != email) {
+        debugPrint('🚨 Email no coincide');
+
         setState(() {
           _loadingProfile = false;
           _errorMessage = 'Error de seguridad al cargar los datos';
         });
+
         return;
       }
 
       _customerId = wooCustomer['id'];
+
       final billing = wooCustomer['billing'] as Map<String, dynamic>? ?? {};
       final metaData = wooCustomer['meta_data'];
 
-      _creditLimit = double.tryParse(
-          _getMetaValue(metaData, 'credit_limit') ?? '0') ??
-          0;
-      _creditUsed = double.tryParse(
-          _getMetaValue(metaData, 'credit_used') ?? '0') ??
-          0;
+      _creditLimit =
+          double.tryParse(_getMetaValue(metaData, 'credit_limit') ?? '0') ?? 0;
+
+      _creditUsed =
+          double.tryParse(_getMetaValue(metaData, 'credit_used') ?? '0') ?? 0;
 
       final wooPaymentMethod = _getMetaValue(metaData, 'payment_method');
-      _paymentMethod = _normalizePaymentMethod(wooPaymentMethod);
-      if (!_isPaymentMethodEnabled(_selectedPaymentMethod)) {
+
+      final normalizedPaymentMethod = _normalizePaymentMethod(wooPaymentMethod);
+
+      final selectedMethod = _paymentMethods.firstWhere(
+            (method) => method.id == normalizedPaymentMethod,
+        orElse: () => _paymentMethods.first,
+      );
+
+      if (_isPaymentMethodEnabled(selectedMethod)) {
+        _paymentMethod = normalizedPaymentMethod;
+      } else {
         _paymentMethod = 'bacs';
       }
 
@@ -284,9 +261,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       if (mounted) {
         setState(() {
           _nameController.text = wooCustomer['first_name']?.toString() ?? '';
-          _lastNameController.text =
-              wooCustomer['last_name']?.toString() ?? '';
-          _emailController.text = (wooCustomer['email']?.toString() ?? email)!;
+          _lastNameController.text = wooCustomer['last_name']?.toString() ?? '';
+          _emailController.text = wooCustomer['email']?.toString() ?? email!;
           _companyController.text = billing['company']?.toString() ?? '';
           _phoneController.text = billing['phone']?.toString() ?? '';
           _nifController.text = _getNifCif(metaData, billing);
@@ -295,12 +271,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           _postCodeController.text = billing['postcode']?.toString() ?? '';
           _stateController.text = billing['state']?.toString() ?? '';
           _countryController.text = billing['country']?.toString() ?? 'ES';
-          _profileLoaded = true;
+
           _loadingProfile = false;
         });
       }
+
+      debugPrint('✅ Datos cargados correctamente');
+      debugPrint('   Cliente: $_customerId');
+      debugPrint('   CIF/NIF: ${_nifController.text}');
+      debugPrint('   Crédito: $_creditUsed / $_creditLimit €');
+      debugPrint('   Pago: $_paymentMethod');
+      debugPrint('   Gestor: ${_assignedManager ?? "Sin gestor asignado"}');
     } catch (e) {
-      debugPrint('❌ Error cargando datos: $e');
+      debugPrint('❌ Error: $e');
+
       setState(() {
         _loadingProfile = false;
         _errorMessage = 'Error al cargar datos. Intenta de nuevo.';
@@ -308,19 +292,22 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
   }
 
-  // ──────────────────────────────────────────────
-  // Metadatos
-  // ──────────────────────────────────────────────
-
+  // ============================================================
+  // MISMA LÓGICA DE METADATOS QUE PERFIL
+  // ============================================================
   String? _getMetaValue(dynamic metaData, String key) {
     if (metaData == null || key.isEmpty) return null;
+
     try {
       final List<dynamic> metaList = metaData is List ? metaData : [];
+
       for (final meta in metaList) {
         if (meta is Map) {
           final metaKey = meta['key']?.toString().toLowerCase().trim();
+
           if (metaKey == key.toLowerCase().trim()) {
             final value = meta['value']?.toString().trim();
+
             if (value != null && value.isNotEmpty && value != 'null') {
               return value;
             }
@@ -330,16 +317,19 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     } catch (e) {
       debugPrint('⚠️ Error en _getMetaValue: $e');
     }
+
     return null;
   }
 
   String? _getFirstMetaValue(dynamic metaData, List<String> keys) {
     for (final key in keys) {
       final value = _getMetaValue(metaData, key);
+
       if (value != null && value.trim().isNotEmpty && value != '—') {
         return value.trim();
       }
     }
+
     return null;
   }
 
@@ -353,13 +343,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'billing_cif',
       'billing_nif_cif',
     ]);
-    if (metaValue != null && metaValue.isNotEmpty) return metaValue;
+
+    if (metaValue != null && metaValue.isNotEmpty) {
+      return metaValue;
+    }
 
     final billingNif = billing['nif']?.toString().trim() ?? '';
-    if (billingNif.isNotEmpty && billingNif != 'null') return billingNif;
+    if (billingNif.isNotEmpty && billingNif != 'null') {
+      return billingNif;
+    }
 
     final billingCif = billing['cif']?.toString().trim() ?? '';
-    if (billingCif.isNotEmpty && billingCif != 'null') return billingCif;
+    if (billingCif.isNotEmpty && billingCif != 'null') {
+      return billingCif;
+    }
 
     return '';
   }
@@ -373,61 +370,86 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'commercial_manager',
       'sales_manager',
     ]);
-    return gestor != null && gestor.isNotEmpty
-        ? gestor
-        : 'pedidos@mundicam.com';
+
+    if (gestor != null && gestor.isNotEmpty) {
+      return gestor;
+    }
+
+    return 'pedidos@mundicam.com';
   }
 
-  // ──────────────────────────────────────────────
-  // Validación de stock
-  // ──────────────────────────────────────────────
-
+  // ============================================================
+  // VALIDAR STOCK ACTUAL ANTES DE CREAR PEDIDO
+  // ============================================================
   Future<bool> _validarStockActualAntesDeComprar() async {
     final cartItems = ref.read(cartProvider);
+
     if (cartItems.isEmpty) {
       _mostrarError('El carrito está vacío.');
       return false;
     }
+
     try {
       for (final item in cartItems) {
-        final productoActualizado =
-        await ApiService().getProductoById(item.product.id);
+        final productoActualizado = await ApiService().getProductoById(
+          item.product.id,
+        );
+
         if (productoActualizado == null) {
           _mostrarError(
-              'No se pudo verificar el stock de "${item.product.name}".');
+            'No se pudo verificar el stock de "${item.product.name}". Intenta de nuevo.',
+          );
           return false;
         }
-        if (!productoActualizado.hasStock) {
+
+        final estaDisponible = productoActualizado.hasStock;
+        final stockActual = productoActualizado.stockQuantity;
+
+        if (!estaDisponible) {
           _mostrarError(
-              'El producto "${item.product.name}" ya no está disponible.');
+            'El producto "${item.product.name}" ya no está disponible.',
+          );
           return false;
         }
-        if (productoActualizado.stockQuantity > 0 &&
-            item.quantity > productoActualizado.stockQuantity) {
+
+        if (stockActual > 0 && item.quantity > stockActual) {
           _mostrarError(
-              'Stock insuficiente para "${item.product.name}".\nDisponible: ${productoActualizado.stockQuantity} uds.\nSolicitado: ${item.quantity} uds.');
+            'Stock insuficiente para "${item.product.name}".\n'
+                'Disponible: $stockActual uds.\n'
+                'Solicitado: ${item.quantity} uds.',
+          );
           return false;
         }
       }
+
       return true;
     } catch (e) {
-      _mostrarError('No se pudo verificar el stock. Intenta de nuevo.');
+      debugPrint('❌ Error validando stock antes del pedido: $e');
+
+      _mostrarError(
+        'No se pudo verificar el stock actualizado. Intenta de nuevo.',
+      );
+
       return false;
     }
   }
 
-  // ──────────────────────────────────────────────
-  // Finalizar pedido
-  // ──────────────────────────────────────────────
-
+  // ============================================================
+  // FINALIZAR PEDIDO
+  // ============================================================
   Future<void> _finalizarPedido() async {
     if (!_formKey.currentState!.validate()) return;
+
     setState(() => _isLoading = true);
     HapticFeedback.mediumImpact();
 
     final stockOk = await _validarStockActualAntesDeComprar();
+
     if (!stockOk) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+
       return;
     }
 
@@ -439,20 +461,23 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
     if (_selectedPaymentMethod.requiresCredit && total > disponible) {
       HapticFeedback.heavyImpact();
+
       if (mounted) {
         setState(() => _isLoading = false);
+
         _mostrarError(
-            'Crédito insuficiente.\nDisponible: ${disponible.toStringAsFixed(2)} €\nTotal pedido: ${total.toStringAsFixed(2)} €');
+          'Crédito insuficiente.\n'
+              'Disponible: ${disponible.toStringAsFixed(2)} €\n'
+              'Total pedido: ${total.toStringAsFixed(2)} €',
+        );
       }
+
       return;
     }
 
-    final lineItems = cartItems
-        .map((item) => {
-      'product_id': item.product.id,
-      'quantity': item.quantity,
-    })
-        .toList();
+    final lineItems = cartItems.map((item) {
+      return {'product_id': item.product.id, 'quantity': item.quantity};
+    }).toList();
 
     final orderData = {
       if (_customerId != null) 'customer_id': _customerId,
@@ -492,38 +517,58 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         {'key': '_billing_nif', 'value': _nifController.text.trim()},
         {'key': 'billing_nif', 'value': _nifController.text.trim()},
         {'key': '_mundicam_payment_method_app', 'value': _paymentMethod},
-        {
-          'key': '_mundicam_payment_method_title',
-          'value': _paymentMethodTitle
-        },
+        {'key': '_mundicam_payment_method_title', 'value': _paymentMethodTitle},
         if (_assignedManager != null && _assignedManager!.trim().isNotEmpty)
           {'key': '_assigned_manager', 'value': _assignedManager!.trim()},
+        if (_assignedManager != null && _assignedManager!.trim().isNotEmpty)
+          {
+            'key': '_mundicam_assigned_manager_app',
+            'value': _assignedManager!.trim(),
+          },
       ],
     };
+
+    debugPrint('📦 Creando pedido para cliente $_customerId');
+    debugPrint('   Método de pago: $_paymentMethod - $_paymentMethodTitle');
+    debugPrint('   Status: ${isCardPayment ? "pending" : "processing"}');
+    debugPrint('   CIF/NIF: ${_nifController.text.trim()}');
+    debugPrint('   Gestor asignado: ${_assignedManager ?? "Sin gestor"}');
 
     try {
       final result = await ApiService().crearPedidoConResultado(
         orderData,
         forceProcessingIfPending: false,
       );
+
       if (!mounted) return;
 
       if (!result.success || result.orderId == null) {
-        _mostrarError(result.errorMessage ??
-            'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.');
+        _mostrarError(
+          result.errorMessage ??
+              'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.',
+        );
+
         return;
       }
 
       if (isCardPayment) {
         final orderKey = result.orderKey;
+
         if (orderKey == null || orderKey.isEmpty) {
           _mostrarError(
-              'Pedido creado, pero no se obtuvo la clave de pago. Contacta con soporte.');
+            'Pedido creado, pero WooCommerce no devolvió la clave de pago. Contacta con soporte.',
+          );
+
           return;
         }
 
         final paymentUrl = _buildWooPaymentUrl(
-            orderId: result.orderId!, orderKey: orderKey);
+          orderId: result.orderId!,
+          orderKey: orderKey,
+        );
+
+        debugPrint('💳 URL Redsys/WooCommerce: $paymentUrl');
+
         setState(() => _isLoading = false);
 
         final paid = await Navigator.push<bool>(
@@ -536,29 +581,34 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             ),
           ),
         );
+
         if (!mounted) return;
 
         if (paid == true) {
           ref.read(cartProvider.notifier).clearCart();
           ref.invalidate(ordersProvider);
-          _irAlInicio(
-              mensaje:
-              '✅ Pago realizado con éxito. ¡Gracias por tu pedido!');
+
+          Navigator.of(context).popUntil((route) => route.isFirst);
         } else {
           _mostrarError(
-              'Pedido creado pendiente de pago. Puedes finalizarlo desde la web.');
+            'Pedido creado pendiente de pago. Puedes finalizarlo desde la web o contactar con MundiCam.',
+          );
         }
+
         return;
       }
 
-      // Transferencia / giro
       ref.read(cartProvider.notifier).clearCart();
       ref.invalidate(ordersProvider);
-      _irAlInicio(mensaje: '✅ Pedido confirmado. Te llevamos al inicio.');
+      _mostrarExito();
     } catch (e) {
       debugPrint('❌ Error creando pedido: $e');
-      _mostrarError(
-          'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.');
+
+      if (mounted) {
+        _mostrarError(
+          'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.',
+        );
+      }
     } finally {
       if (mounted && _isLoading) {
         setState(() => _isLoading = false);
@@ -566,9 +616,78 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
   }
 
-  // ──────────────────────────────────────────────
-  // UI
-  // ──────────────────────────────────────────────
+  void _mostrarExito() {
+    HapticFeedback.heavyImpact();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: Colors.white,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_rounded,
+                color: Color(0xFF059669),
+                size: 48,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              '¡Pedido confirmado!',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                fontFamily: 'Oswald',
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Tu pedido se ha procesado correctamente.\nRecibirás un email de confirmación.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () =>
+                    Navigator.of(ctx).popUntil((route) => route.isFirst),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: const Text('VOLVER A LA TIENDA'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _mostrarError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.red.shade700,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -576,12 +695,14 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: ProfessionalPageAppBar(
         title: 'FINALIZAR PEDIDO',
-        onBack: _handleBack,
-        onRefresh: _cargarDatosCliente,
+        subtitle: '',
+        icon: Icons.shopping_cart_checkout_rounded,
+        onBack: () => Navigator.pop(context),
       ),
       body: _loadingProfile
           ? const Center(
-          child: CircularProgressIndicator(color: AppColors.primary))
+        child: CircularProgressIndicator(color: AppColors.primary),
+      )
           : _errorMessage != null
           ? _buildErrorState()
           : Form(
@@ -622,26 +743,34 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               title: 'DIRECCIÓN DE ENVÍO',
               subtitle: 'Puedes modificar la dirección de entrega',
               children: [
-                _buildField('Dirección', _addressController,
-                    icon: Icons.home_outlined),
+                _buildField(
+                  'Dirección',
+                  _addressController,
+                  icon: Icons.home_outlined,
+                ),
                 Row(
                   children: [
                     Expanded(
-                        flex: 3,
-                        child:
-                        _buildField('Ciudad', _cityController)),
+                      flex: 3,
+                      child: _buildField('Ciudad', _cityController),
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       flex: 2,
-                      child: _buildField('C.P.', _postCodeController,
-                          keyboard: TextInputType.number),
+                      child: _buildField(
+                        'C.P.',
+                        _postCodeController,
+                        keyboard: TextInputType.number,
+                      ),
                     ),
                   ],
                 ),
-                _buildField('Provincia', _stateController,
-                    required: false),
-                _buildField('País', _countryController,
-                    required: false),
+                _buildField(
+                  'Provincia',
+                  _stateController,
+                  required: false,
+                ),
+                _buildField('País', _countryController, required: false),
               ],
             ),
             const SizedBox(height: 16),
@@ -658,8 +787,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               subtitle: 'Opcional',
               children: [
                 _buildField(
-                    'Instrucciones adicionales', _notesController,
-                    maxLines: 3, required: false),
+                  'Instrucciones adicionales',
+                  _notesController,
+                  maxLines: 3,
+                  required: false,
+                ),
               ],
             ),
             const SizedBox(height: 24),
@@ -692,6 +824,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   _loadingProfile = true;
                   _errorMessage = null;
                 });
+
                 _cargarDatosCliente();
               },
               icon: const Icon(Icons.refresh),
@@ -721,7 +854,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           _stepLine(),
           _stepDot(true, 'Datos'),
           _stepLine(),
-          _stepDot(false, _paymentMethod == 'redsys' ? 'Pago' : 'Confirmar'),
+          _stepDot(false, 'Confirmar'),
         ],
       ),
     );
@@ -739,8 +872,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           ),
           child: Center(
             child: active
-                ? const Icon(Icons.check_rounded,
-                color: Colors.white, size: 16)
+                ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
                 : Text(
               '3',
               style: TextStyle(
@@ -793,7 +925,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                   color: locked
-                      ? Colors.red.shade50
+                      ? Colors.orange.withValues(alpha: 0.1)
                       : AppColors.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -820,25 +952,30 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                       Text(
                         subtitle,
                         style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade500),
+                          fontSize: 11,
+                          color: Colors.grey.shade500,
+                        ),
                       ),
                   ],
                 ),
               ),
               if (locked)
                 Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade50,
+                    color: Colors.red.shade700.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
-                    'BLOQUEADO',
+                    '',
                     style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold),
+                      fontSize: 10,
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
             ],
@@ -876,16 +1013,14 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           labelText: required ? label : '$label (opcional)',
           filled: true,
           fillColor: const Color(0xFFF8FAFC),
-          border:
-          OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(color: Colors.grey.shade300),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide:
-            const BorderSide(color: AppColors.primary, width: 1.5),
+            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
           ),
         ),
         validator: required
@@ -914,10 +1049,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           labelText: label,
           filled: true,
           fillColor: Colors.grey.shade100,
-          suffixIcon: const Icon(Icons.lock_outline,
-              size: 16, color: Colors.grey),
-          border:
-          OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          suffixIcon: const Icon(
+            Icons.lock_outline,
+            size: 16,
+            color: Colors.grey,
+          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           disabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(color: Colors.grey.shade200),
@@ -929,14 +1066,14 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   Widget _buildManagerInfo() {
     final manager = _assignedManager?.trim();
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColors.primary.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(12),
-        border:
-        Border.all(color: AppColors.primary.withValues(alpha: 0.14)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.14)),
       ),
       child: Row(
         children: [
@@ -946,8 +1083,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               color: AppColors.primary.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.support_agent_outlined,
-                size: 18, color: AppColors.primary),
+            child: const Icon(
+              Icons.support_agent_outlined,
+              size: 18,
+              color: AppColors.primary,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -957,9 +1097,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 Text(
                   'Gestor asignado',
                   style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey.shade600,
-                      fontWeight: FontWeight.w600),
+                    fontSize: 11,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -967,9 +1108,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                       ? manager
                       : 'pedidos@mundicam.com',
                   style: const TextStyle(
-                      fontSize: 14,
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w800),
+                    fontSize: 14,
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ],
             ),
@@ -982,37 +1124,41 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   Widget _buildCreditInfo() {
     final disponible = _creditLimit - _creditUsed;
     double porcentaje = 0.0;
+
     if (_creditLimit > 0) {
       porcentaje = _creditUsed / _creditLimit;
+
       if (porcentaje < 0.0) porcentaje = 0.0;
       if (porcentaje > 1.0) porcentaje = 1.0;
     }
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: disponible > 0 ? Colors.green.shade50 : Colors.red.shade50,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-            color: disponible > 0
-                ? Colors.green.shade100
-                : Colors.red.shade100),
+          color: disponible > 0 ? Colors.green.shade100 : Colors.red.shade100,
+        ),
       ),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Crédito disponible',
-                  style:
-                  TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              const Text(
+                'Crédito disponible',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
               Text(
                 '${disponible.toStringAsFixed(2)} €',
                 style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: disponible > 0
-                        ? Colors.green.shade700
-                        : Colors.red.shade700),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: disponible > 0
+                      ? Colors.green.shade700
+                      : Colors.red.shade700,
+                ),
               ),
             ],
           ),
@@ -1022,11 +1168,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             child: LinearProgressIndicator(
               value: porcentaje,
               backgroundColor: Colors.grey.shade200,
-              valueColor: AlwaysStoppedAnimation<Color>(porcentaje > 0.8
-                  ? Colors.red
-                  : porcentaje > 0.5
-                  ? Colors.orange
-                  : Colors.green),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                porcentaje > 0.8
+                    ? Colors.red
+                    : porcentaje > 0.5
+                    ? Colors.orange
+                    : Colors.green,
+              ),
               minHeight: 6,
             ),
           ),
@@ -1034,12 +1182,14 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Usado: ${_creditUsed.toStringAsFixed(2)} €',
-                  style: TextStyle(
-                      fontSize: 10, color: Colors.grey.shade600)),
-              Text('Límite: ${_creditLimit.toStringAsFixed(2)} €',
-                  style: TextStyle(
-                      fontSize: 10, color: Colors.grey.shade600)),
+              Text(
+                'Usado: ${_creditUsed.toStringAsFixed(2)} €',
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+              ),
+              Text(
+                'Límite: ${_creditLimit.toStringAsFixed(2)} €',
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+              ),
             ],
           ),
         ],
@@ -1049,6 +1199,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   Widget _buildPaymentInfo() {
     final disponible = _creditLimit - _creditUsed;
+
     return Column(
       children: [
         for (final method in _paymentMethods) ...[
@@ -1066,18 +1217,22 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.info_outline_rounded,
-                  size: 18, color: Colors.grey.shade600),
+              Icon(
+                Icons.info_outline_rounded,
+                size: 18,
+                color: Colors.grey.shade600,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'El pago con tarjeta se realizará mediante Redsys en entorno seguro de WooCommerce. '
                       'El giro está sujeto a crédito y condiciones comerciales aprobadas.',
                   style: TextStyle(
-                      fontSize: 11,
-                      height: 1.35,
-                      color: Colors.grey.shade700,
-                      fontWeight: FontWeight.w500),
+                    fontSize: 11,
+                    height: 1.35,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],
@@ -1087,15 +1242,18 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     );
   }
 
-  Widget _buildPaymentOption(
-      _CheckoutPaymentMethod method, double disponible) {
+  Widget _buildPaymentOption(_CheckoutPaymentMethod method, double disponible) {
     final selected = _paymentMethod == method.id;
     final enabled = _isPaymentMethodEnabled(method);
+
     return InkWell(
       onTap: enabled
           ? () {
         HapticFeedback.selectionClick();
-        setState(() => _paymentMethod = method.id);
+
+        setState(() {
+          _paymentMethod = method.id;
+        });
       }
           : null,
       borderRadius: BorderRadius.circular(14),
@@ -1135,8 +1293,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   width: 12,
                   height: 12,
                   decoration: const BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle),
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
                 )
                     : null,
               ),
@@ -1212,8 +1371,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             ),
             if (!enabled)
               Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade200,
                   borderRadius: BorderRadius.circular(8),
@@ -1221,9 +1379,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 child: const Text(
                   'No disponible',
                   style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.grey),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey,
+                  ),
                 ),
               ),
           ],
@@ -1266,9 +1425,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('TOTAL',
-                  style:
-                  TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              const Text(
+                'TOTAL',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
               Text(
                 '${total.toStringAsFixed(2)} €',
                 style: const TextStyle(
@@ -1283,16 +1443,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Icon(Icons.payments_outlined,
-                  size: 17, color: Colors.grey.shade600),
+              Icon(
+                Icons.payments_outlined,
+                size: 17,
+                color: Colors.grey.shade600,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Forma de pago: $_paymentMethodTitle',
+                  'Forma de pago seleccionada: $_paymentMethodTitle',
                   style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade700,
-                      fontWeight: FontWeight.w600),
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -1302,16 +1466,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             const SizedBox(height: 6),
             Row(
               children: [
-                Icon(Icons.support_agent_outlined,
-                    size: 17, color: Colors.grey.shade600),
+                Icon(
+                  Icons.support_agent_outlined,
+                  size: 17,
+                  color: Colors.grey.shade600,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Gestor: ${_assignedManager!.trim()}',
+                    'Gestor asignado: ${_assignedManager!.trim()}',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade700,
-                        fontWeight: FontWeight.w600),
+                      fontSize: 12,
+                      color: Colors.grey.shade700,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -1327,16 +1495,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.warning_amber_rounded,
-                      color: Colors.red, size: 20),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Crédito insuficiente. Disponible: ${disponible.toStringAsFixed(2)} €',
                       style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600),
+                        color: Colors.red,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1348,28 +1520,33 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed:
-              (_isLoading || creditBlocked) ? null : _finalizarPedido,
+              onPressed: (_isLoading || creditBlocked) ? null : _finalizarPedido,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 disabledBackgroundColor: Colors.grey.shade300,
               ),
               child: _isLoading
                   ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
                   : Text(
                 _paymentMethod == 'redsys'
                     ? 'PAGAR CON TARJETA'
                     : 'CONFIRMAR PEDIDO',
                 style: const TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w800),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),

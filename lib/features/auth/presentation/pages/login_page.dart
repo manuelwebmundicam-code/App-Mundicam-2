@@ -1,6 +1,7 @@
 // pages/login_page.dart
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -66,6 +67,7 @@ class _LoginPageState extends State<LoginPage> {
     // Si Firebase ya tiene sesión activa, entrar directo
     if (FirebaseAuth.instance.currentUser != null) {
       if (!mounted) return;
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const HomePage()),
@@ -88,7 +90,7 @@ class _LoginPageState extends State<LoginPage> {
     if (nuevoValor) {
       await prefs.setBool(_rememberMeKey, true);
       await prefs.setString(_rememberEmailKey, _emailController.text.trim());
-      // ❌ NO guardar contraseña
+      // NO guardar contraseña
     } else {
       await prefs.setBool(_rememberMeKey, false);
       await prefs.remove(_rememberEmailKey);
@@ -98,6 +100,7 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _abrirRegistro() async {
     final url = Uri.parse(_registroUrl);
     final abierto = await launchUrl(url, mode: LaunchMode.externalApplication);
+
     if (!abierto) {
       _showSnackBar('No se pudo abrir la página de registro.', isError: true);
     }
@@ -114,19 +117,27 @@ class _LoginPageState extends State<LoginPage> {
         body: jsonEncode({'email': email, 'password': password}),
       );
 
-      debugPrint('Status WordPress login: ${response.statusCode}');
+      if (kDebugMode) {
+        debugPrint('Status WordPress login: ${response.statusCode}');
+      }
 
-      Map<String, dynamic>? body;
+      late final Map<String, dynamic> body;
+
       try {
         body = jsonDecode(response.body) as Map<String, dynamic>;
       } catch (_) {
         throw Exception('Respuesta no válida del servidor.');
       }
 
-      if (response.statusCode == 200) return body;
-      throw Exception(body?['message'] ?? 'Usuario o contraseña incorrectos.');
+      if (response.statusCode == 200) {
+        return body;
+      }
+
+      throw Exception(body['message'] ?? 'Usuario o contraseña incorrectos.');
     } catch (e) {
-      debugPrint('Error WordPress: $e');
+      if (kDebugMode) {
+        debugPrint('Error WordPress: $e');
+      }
       rethrow;
     }
   }
@@ -147,7 +158,10 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       // 1. Autenticar contra WordPress
-      final wpResponse = await _authenticateWithWordPress(email: email, password: password);
+      final wpResponse = await _authenticateWithWordPress(
+        email: email,
+        password: password,
+      );
 
       if (wpResponse == null) {
         _showSnackBar('Error al conectar con el servidor.', isError: true);
@@ -155,7 +169,10 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (wpResponse['success'] == false) {
-        _showSnackBar(wpResponse['message'] ?? 'Credenciales incorrectas.', isError: true);
+        _showSnackBar(
+          wpResponse['message'] ?? 'Credenciales incorrectas.',
+          isError: true,
+        );
         return;
       }
 
@@ -163,12 +180,18 @@ class _LoginPageState extends State<LoginPage> {
       final bool vieneDeWordPress = wpResponse.containsKey('firebase_token');
 
       if (vieneDeWordPress) {
-        await FirebaseAuth.instance.signInWithCustomToken(wpResponse['firebase_token']);
+        await FirebaseAuth.instance.signInWithCustomToken(
+          wpResponse['firebase_token'],
+        );
       } else {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
       }
 
       final User? user = FirebaseAuth.instance.currentUser;
+
       if (user == null) {
         _showSnackBar('No se pudo iniciar sesión.', isError: true);
         return;
@@ -176,9 +199,19 @@ class _LoginPageState extends State<LoginPage> {
 
       // 3. Verificar email si no viene de WordPress
       if (!vieneDeWordPress && !user.emailVerified) {
-        _showSnackBar('Debes verificar tu email antes de entrar.', isError: true);
+        _showSnackBar(
+          'Debes verificar tu email antes de entrar.',
+          isError: true,
+        );
         await FirebaseAuth.instance.signOut();
-        if (mounted) setState(() { _isLoading = false; _isAutoLogin = false; });
+
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _isAutoLogin = false;
+          });
+        }
+
         return;
       }
 
@@ -205,19 +238,28 @@ class _LoginPageState extends State<LoginPage> {
 
       // 5. Verificar si está bloqueado
       final doc = await userRef.get();
+
       if (doc.data()?['isBlocked'] == true) {
         _showSnackBar('Cuenta pendiente de validación fiscal.', isError: true);
         await FirebaseAuth.instance.signOut();
-        if (mounted) setState(() { _isLoading = false; _isAutoLogin = false; });
+
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _isAutoLogin = false;
+          });
+        }
+
         return;
       }
 
       // 6. Guardar email si Recuérdame (SIN CONTRASEÑA)
       final prefs = await SharedPreferences.getInstance();
+
       if (_rememberMe) {
         await prefs.setBool(_rememberMeKey, true);
         await prefs.setString(_rememberEmailKey, email);
-        // ❌ NO guardar contraseña
+        // NO guardar contraseña
       } else {
         await prefs.setBool(_rememberMeKey, false);
         await prefs.remove(_rememberEmailKey);
@@ -225,27 +267,45 @@ class _LoginPageState extends State<LoginPage> {
 
       // 7. Entrar a la app
       if (!mounted) return;
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const HomePage()),
       );
     } on FirebaseAuthException catch (e) {
       String message = 'Error de acceso.';
-      if (e.code == 'user-not-found' || e.code == 'invalid-credential') message = 'Usuario o contraseña incorrectos.';
-      else if (e.code == 'wrong-password') message = 'Contraseña incorrecta.';
+
+      if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+        message = 'Usuario o contraseña incorrectos.';
+      } else if (e.code == 'wrong-password') {
+        message = 'Contraseña incorrecta.';
+      }
+
       _showSnackBar(message, isError: true);
     } catch (e) {
-      _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);
+      _showSnackBar(
+        e.toString().replaceFirst('Exception: ', ''),
+        isError: true,
+      );
     } finally {
-      if (mounted) setState(() { _isLoading = false; _isAutoLogin = false; });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isAutoLogin = false;
+        });
+      }
     }
   }
 
   void _showSnackBar(String msg, {bool isError = false}) {
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg, style: const TextStyle(fontFamily: 'Oswald')),
+        content: Text(
+          msg,
+          style: const TextStyle(fontFamily: 'Oswald'),
+        ),
         backgroundColor: isError ? Colors.red : AppColors.primary,
         behavior: SnackBarBehavior.floating,
       ),
@@ -264,15 +324,26 @@ class _LoginPageState extends State<LoginPage> {
     if (_isLoadingSavedCredentials || _isAutoLogin) {
       return const Scaffold(
         backgroundColor: AppColors.primary,
-        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
       );
     }
 
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: Image.asset('assets/gif/fondo2.gif', fit: BoxFit.cover)),
-          Positioned.fill(child: Container(color: Colors.black.withValues(alpha: 0.3))),
+          Positioned.fill(
+            child: Image.asset(
+              'assets/gif/fondo2.gif',
+              fit: BoxFit.cover,
+            ),
+          ),
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.3),
+            ),
+          ),
           Center(
             child: SingleChildScrollView(
               child: Form(
@@ -287,23 +358,51 @@ class _LoginPageState extends State<LoginPage> {
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(16),
-                          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 5))],
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 10,
+                              offset: Offset(0, 5),
+                            ),
+                          ],
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Image.asset('assets/logo.png', height: 60),
                             const SizedBox(height: 16),
-                            Text('INICIO DE SESIÓN', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.primary, fontFamily: 'Oswald')),
+                            Text(
+                              'INICIO DE SESIÓN',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
+                                color: AppColors.primary,
+                                fontFamily: 'Oswald',
+                              ),
+                            ),
                             const SizedBox(height: 20),
                             TextFormField(
                               controller: _emailController,
                               keyboardType: TextInputType.emailAddress,
                               textInputAction: TextInputAction.next,
-                              autofillHints: const [AutofillHints.username, AutofillHints.email],
-                              style: const TextStyle(color: AppColors.textPrimary, fontFamily: 'Oswald'),
-                              decoration: _buildInputDecoration('Usuario / Email', Icons.person_outline),
-                              validator: (val) => (val == null || val.trim().isEmpty) ? 'Campo requerido' : null,
+                              autofillHints: const [
+                                AutofillHints.username,
+                                AutofillHints.email,
+                              ],
+                              style: const TextStyle(
+                                color: AppColors.textPrimary,
+                                fontFamily: 'Oswald',
+                              ),
+                              decoration: _buildInputDecoration(
+                                'Usuario / Email',
+                                Icons.person_outline,
+                              ),
+                              validator: (val) =>
+                              (val == null || val.trim().isEmpty)
+                                  ? 'Campo requerido'
+                                  : null,
                             ),
                             const SizedBox(height: 16),
                             TextFormField(
@@ -311,36 +410,91 @@ class _LoginPageState extends State<LoginPage> {
                               obscureText: _obscurePassword,
                               textInputAction: TextInputAction.done,
                               autofillHints: const [AutofillHints.password],
-                              onFieldSubmitted: (_) { if (!_isLoading) _handleLogin(); },
-                              style: const TextStyle(color: AppColors.textPrimary, fontFamily: 'Oswald'),
-                              decoration: _buildInputDecoration('Contraseña', Icons.lock_outline).copyWith(
+                              onFieldSubmitted: (_) {
+                                if (!_isLoading) {
+                                  _handleLogin();
+                                }
+                              },
+                              style: const TextStyle(
+                                color: AppColors.textPrimary,
+                                fontFamily: 'Oswald',
+                              ),
+                              decoration: _buildInputDecoration(
+                                'Contraseña',
+                                Icons.lock_outline,
+                              ).copyWith(
                                 suffixIcon: IconButton(
-                                  icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: AppColors.primary),
-                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: AppColors.primary,
+                                  ),
+                                  onPressed: () => setState(
+                                        () => _obscurePassword = !_obscurePassword,
+                                  ),
                                 ),
                               ),
-                              validator: (val) => (val == null || val.isEmpty) ? 'Campo requerido' : null,
+                              validator: (val) =>
+                              (val == null || val.isEmpty)
+                                  ? 'Campo requerido'
+                                  : null,
                             ),
-                            Row(children: [
-                              Checkbox(value: _rememberMe, activeColor: AppColors.primary, onChanged: _onCheckboxChanged),
-                              GestureDetector(
-                                onTap: () => _onCheckboxChanged(!_rememberMe),
-                                child: const Text('Recuérdame', style: TextStyle(fontFamily: 'Oswald', color: AppColors.primary, fontWeight: FontWeight.bold)),
-                              ),
-                            ]),
+                            Row(
+                              children: [
+                                Checkbox(
+                                  value: _rememberMe,
+                                  activeColor: AppColors.primary,
+                                  onChanged: _onCheckboxChanged,
+                                ),
+                                GestureDetector(
+                                  onTap: () => _onCheckboxChanged(!_rememberMe),
+                                  child: const Text(
+                                    'Recuérdame',
+                                    style: TextStyle(
+                                      fontFamily: 'Oswald',
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                             const SizedBox(height: 8),
                             SizedBox(
                               height: 50,
                               child: ElevatedButton(
                                 onPressed: _isLoading ? null : _handleLogin,
-                                child: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('ENTRAR'),
+                                child: _isLoading
+                                    ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                                    : const Text('ENTRAR'),
                               ),
                             ),
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
-                                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordPage())),
-                                child: const Text('¿Olvidaste contraseña?', style: TextStyle(color: AppColors.primary, fontFamily: 'Oswald', fontSize: 13, decoration: TextDecoration.underline)),
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ForgotPasswordPage(),
+                                  ),
+                                ),
+                                child: const Text(
+                                  '¿Olvidaste contraseña?',
+                                  style: TextStyle(
+                                    color: AppColors.primary,
+                                    fontFamily: 'Oswald',
+                                    fontSize: 13,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -350,13 +504,38 @@ class _LoginPageState extends State<LoginPage> {
                       Container(
                         padding: const EdgeInsets.all(20),
                         margin: const EdgeInsets.symmetric(horizontal: 24),
-                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(16)),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text('¿AÚN NO ERES CLIENTE?', textAlign: TextAlign.center, style: TextStyle(fontFamily: 'Oswald', color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
+                            const Text(
+                              '¿AÚN NO ERES CLIENTE?',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: 'Oswald',
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                             const SizedBox(height: 12),
-                            SizedBox(height: 50, child: ElevatedButton.icon(onPressed: _abrirRegistro, icon: const Icon(Icons.person_add_alt_1), label: const Text('SOLICITAR REGISTRO'), style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))))),
+                            SizedBox(
+                              height: 50,
+                              child: ElevatedButton.icon(
+                                onPressed: _abrirRegistro,
+                                icon: const Icon(Icons.person_add_alt_1),
+                                label: const Text('SOLICITAR REGISTRO'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -375,11 +554,26 @@ class _LoginPageState extends State<LoginPage> {
   InputDecoration _buildInputDecoration(String label, IconData icon) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: AppColors.primary, fontFamily: 'Oswald'),
+      labelStyle: const TextStyle(
+        color: AppColors.primary,
+        fontFamily: 'Oswald',
+      ),
       prefixIcon: Icon(icon, color: AppColors.primary),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.primary)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
-      errorStyle: const TextStyle(fontFamily: 'Oswald', color: Colors.red),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: AppColors.primary),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(
+          color: AppColors.primary,
+          width: 2,
+        ),
+      ),
+      errorStyle: const TextStyle(
+        fontFamily: 'Oswald',
+        color: Colors.red,
+      ),
     );
   }
 }

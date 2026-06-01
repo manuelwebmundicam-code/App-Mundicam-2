@@ -92,7 +92,7 @@ class _QuoteSelectionDialogState extends ConsumerState<QuoteSelectionDialog> {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
+            color: AppColors.primary.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(14),
           ),
           child: const Icon(
@@ -120,9 +120,9 @@ class _QuoteSelectionDialogState extends ConsumerState<QuoteSelectionDialog> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.05),
+        color: AppColors.primary.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -211,7 +211,7 @@ class _QuoteSelectionDialogState extends ConsumerState<QuoteSelectionDialog> {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.1),
+                    color: AppColors.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(
@@ -248,7 +248,7 @@ class _QuoteSelectionDialogState extends ConsumerState<QuoteSelectionDialog> {
                 const SizedBox(width: 8),
                 Icon(
                   Icons.add_circle_outline_rounded,
-                  color: AppColors.primary.withOpacity(0.7),
+                  color: AppColors.primary.withValues(alpha: 0.7),
                   size: 22,
                 ),
               ],
@@ -273,7 +273,7 @@ class _QuoteSelectionDialogState extends ConsumerState<QuoteSelectionDialog> {
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         decoration: BoxDecoration(
           border: Border.all(
-            color: AppColors.primary.withOpacity(0.4),
+            color: AppColors.primary.withValues(alpha: 0.4),
             style: BorderStyle.solid,
           ),
           borderRadius: BorderRadius.circular(12),
@@ -368,7 +368,7 @@ class _QuoteSelectionDialogState extends ConsumerState<QuoteSelectionDialog> {
             const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             prefixIcon: Icon(
               Icons.edit_note_rounded,
-              color: AppColors.primary.withOpacity(0.7),
+              color: AppColors.primary.withValues(alpha: 0.7),
             ),
             suffixIcon: _nombreController.text.isNotEmpty
                 ? IconButton(

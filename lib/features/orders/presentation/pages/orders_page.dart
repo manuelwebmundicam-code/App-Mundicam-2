@@ -131,7 +131,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
         border: Border.all(color: _border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.035),
+            color: Colors.black.withValues(alpha: 0.035),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),
@@ -140,8 +140,8 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
       child: Theme(
         data: Theme.of(context).copyWith(
           dividerColor: Colors.transparent,
-          splashColor: AppColors.primary.withOpacity(0.05),
-          highlightColor: AppColors.primary.withOpacity(0.04),
+          splashColor: AppColors.primary.withValues(alpha: 0.05),
+          highlightColor: AppColors.primary.withValues(alpha: 0.04),
         ),
         child: ExpansionTile(
           initiallyExpanded: isExpanded,
@@ -286,7 +286,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.primary,
                         side: BorderSide(
-                          color: AppColors.primary.withOpacity(0.6),
+                          color: AppColors.primary.withValues(alpha: 0.6),
                         ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -336,7 +336,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.primary,
                           side: BorderSide(
-                            color: AppColors.primary.withOpacity(0.70),
+                            color: AppColors.primary.withValues(alpha: 0.70),
                           ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
@@ -424,10 +424,10 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.08),
+                        color: AppColors.primary.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: AppColors.primary.withOpacity(0.08),
+                          color: AppColors.primary.withValues(alpha: 0.08),
                         ),
                       ),
                       child: Text(
@@ -492,7 +492,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.primary,
                             side: BorderSide(
-                              color: AppColors.primary.withOpacity(0.55),
+                              color: AppColors.primary.withValues(alpha: 0.55),
                               width: 1.1,
                             ),
                             shape: RoundedRectangleBorder(
@@ -771,7 +771,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: textColor.withOpacity(0.08)),
+        border: Border.all(color: textColor.withValues(alpha: 0.08)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -828,7 +828,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
             border: Border.all(color: _border),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.035),
+                color: Colors.black.withValues(alpha: 0.035),
                 blurRadius: 14,
               ),
             ],
@@ -840,7 +840,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                 width: 78,
                 height: 78,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.08),
+                  color: AppColors.primary.withValues(alpha: 0.08),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -891,7 +891,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
             border: Border.all(color: _border),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.035),
+                color: Colors.black.withValues(alpha: 0.035),
                 blurRadius: 14,
               ),
             ],
@@ -903,7 +903,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.08),
+                  color: Colors.red.withValues(alpha: 0.08),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -1069,7 +1069,7 @@ class _OrdersSummaryHeader extends StatelessWidget {
           border: Border.all(color: _border),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.025),
+              color: Colors.black.withValues(alpha: 0.025),
               blurRadius: 10,
             ),
           ],
@@ -1080,7 +1080,7 @@ class _OrdersSummaryHeader extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.08),
+                color: AppColors.primary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(15),
               ),
               child: const Icon(
