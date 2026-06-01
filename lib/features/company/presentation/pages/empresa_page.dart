@@ -141,7 +141,7 @@ class _CompanyHero extends StatelessWidget {
             Image.asset(
               'assets/banners/banner5.png',
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(color: _dark),
+              errorBuilder: (context, error, stackTrace) => Container(color: _dark),
             ),
             Container(
               decoration: BoxDecoration(
@@ -311,7 +311,7 @@ class _CompanyStoryCard extends StatelessWidget {
                 Image.asset(
                   'assets/banners/banner2.png',
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+                  errorBuilder: (context, error, stackTrace) => Container(
                     color: const Color(0xFFE5E7EB),
                   ),
                 ),
@@ -695,7 +695,7 @@ class _CompanyFooter extends StatelessWidget {
             'assets/logo.png',
             height: 21,
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
           ),
           const SizedBox(height: 11),
           const Text(

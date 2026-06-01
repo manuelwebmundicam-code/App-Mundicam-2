@@ -139,7 +139,7 @@ class SupportTicketsPage extends ConsumerWidget {
                 loading: () => const Center(
                   child: CircularProgressIndicator(color: AppColors.primary),
                 ),
-                error: (_, __) => _buildEmptyTickets(),
+                error: (error, stackTrace) => _buildEmptyTickets(),
                 data: (tickets) {
                   if (tickets.isEmpty) return _buildEmptyTickets();
 

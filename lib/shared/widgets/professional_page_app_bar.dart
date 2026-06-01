@@ -40,7 +40,7 @@ class ProfessionalPageAppBar extends StatelessWidget
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -102,13 +102,13 @@ class ProfessionalPageAppBar extends StatelessWidget
                         Container(
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.12),
+                            color: Colors.white.withValues(alpha: 0.12),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
                             icon,
                             size: 11,
-                            color: Colors.white.withOpacity(0.85),
+                            color: Colors.white.withValues(alpha: 0.85),
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -122,7 +122,7 @@ class ProfessionalPageAppBar extends StatelessWidget
                           style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w500,
-                            color: Colors.white.withOpacity(0.8),
+                            color: Colors.white.withValues(alpha: 0.8),
                             letterSpacing: 0.3,
                             height: 1.2,
                           ),
@@ -170,8 +170,8 @@ class _CircleButton extends StatelessWidget {
           child: InkWell(
             onTap: onPressed,
             borderRadius: BorderRadius.circular(14),
-            splashColor: Colors.white.withOpacity(0.1),
-            highlightColor: Colors.white.withOpacity(0.05),
+            splashColor: Colors.white.withValues(alpha: 0.1),
+            highlightColor: Colors.white.withValues(alpha: 0.05),
             child: Icon(
               icon,
               size: 19,

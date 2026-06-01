@@ -54,7 +54,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   bool _isLoading = false;
   bool _loadingProfile = true;
-  bool _profileLoaded = false;
   String? _errorMessage;
 
   int? _customerId;
@@ -273,7 +272,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           _stateController.text = billing['state']?.toString() ?? '';
           _countryController.text = billing['country']?.toString() ?? 'ES';
 
-          _profileLoaded = true;
           _loadingProfile = false;
         });
       }
@@ -645,7 +643,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             ),
             const SizedBox(height: 20),
             const Text(
-              "¡Pedido confirmado!",
+              '¡Pedido confirmado!',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
@@ -654,7 +652,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             ),
             const SizedBox(height: 8),
             const Text(
-              "Tu pedido se ha procesado correctamente.\nRecibirás un email de confirmación.",
+              'Tu pedido se ha procesado correctamente.\nRecibirás un email de confirmación.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -672,7 +670,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
-                child: const Text("VOLVER A LA TIENDA"),
+                child: const Text('VOLVER A LA TIENDA'),
               ),
             ),
           ],
@@ -696,7 +694,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: ProfessionalPageAppBar(
-        title: "FINALIZAR PEDIDO",
+        title: 'FINALIZAR PEDIDO',
         subtitle: '',
         icon: Icons.shopping_cart_checkout_rounded,
         onBack: () => Navigator.pop(context),
@@ -718,23 +716,23 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             const SizedBox(height: 20),
             _buildSectionCard(
               icon: Icons.person_outline_rounded,
-              title: "DATOS PERSONALES",
+              title: 'DATOS PERSONALES',
               locked: true,
               children: [
-                _buildLockedField("Nombre", _nameController),
-                _buildLockedField("Apellidos", _lastNameController),
-                _buildLockedField("Email", _emailController),
-                _buildLockedField("Teléfono", _phoneController),
+                _buildLockedField('Nombre', _nameController),
+                _buildLockedField('Apellidos', _lastNameController),
+                _buildLockedField('Email', _emailController),
+                _buildLockedField('Teléfono', _phoneController),
               ],
             ),
             const SizedBox(height: 16),
             _buildSectionCard(
               icon: Icons.business_outlined,
-              title: "DATOS DE EMPRESA",
+              title: 'DATOS DE EMPRESA',
               locked: true,
               children: [
-                _buildLockedField("Empresa", _companyController),
-                _buildLockedField("NIF/CIF", _nifController),
+                _buildLockedField('Empresa', _companyController),
+                _buildLockedField('NIF/CIF', _nifController),
                 _buildManagerInfo(),
                 _buildCreditInfo(),
               ],
@@ -742,11 +740,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             const SizedBox(height: 16),
             _buildSectionCard(
               icon: Icons.local_shipping_outlined,
-              title: "DIRECCIÓN DE ENVÍO",
-              subtitle: "Puedes modificar la dirección de entrega",
+              title: 'DIRECCIÓN DE ENVÍO',
+              subtitle: 'Puedes modificar la dirección de entrega',
               children: [
                 _buildField(
-                  "Dirección",
+                  'Dirección',
                   _addressController,
                   icon: Icons.home_outlined,
                 ),
@@ -754,13 +752,13 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   children: [
                     Expanded(
                       flex: 3,
-                      child: _buildField("Ciudad", _cityController),
+                      child: _buildField('Ciudad', _cityController),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       flex: 2,
                       child: _buildField(
-                        "C.P.",
+                        'C.P.',
                         _postCodeController,
                         keyboard: TextInputType.number,
                       ),
@@ -768,28 +766,28 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   ],
                 ),
                 _buildField(
-                  "Provincia",
+                  'Provincia',
                   _stateController,
                   required: false,
                 ),
-                _buildField("País", _countryController, required: false),
+                _buildField('País', _countryController, required: false),
               ],
             ),
             const SizedBox(height: 16),
             _buildSectionCard(
               icon: Icons.payment_outlined,
-              title: "MÉTODO DE PAGO",
-              subtitle: "Selecciona la forma de pago del pedido",
+              title: 'MÉTODO DE PAGO',
+              subtitle: 'Selecciona la forma de pago del pedido',
               children: [_buildPaymentInfo()],
             ),
             const SizedBox(height: 16),
             _buildSectionCard(
               icon: Icons.note_outlined,
-              title: "NOTAS DEL PEDIDO",
-              subtitle: "Opcional",
+              title: 'NOTAS DEL PEDIDO',
+              subtitle: 'Opcional',
               children: [
                 _buildField(
-                  "Instrucciones adicionales",
+                  'Instrucciones adicionales',
                   _notesController,
                   maxLines: 3,
                   required: false,
@@ -830,7 +828,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 _cargarDatosCliente();
               },
               icon: const Icon(Icons.refresh),
-              label: const Text("Reintentar"),
+              label: const Text('Reintentar'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -852,11 +850,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _stepDot(true, "Cesta"),
+          _stepDot(true, 'Cesta'),
           _stepLine(),
-          _stepDot(true, "Datos"),
+          _stepDot(true, 'Datos'),
           _stepLine(),
-          _stepDot(false, "Confirmar"),
+          _stepDot(false, 'Confirmar'),
         ],
       ),
     );
@@ -876,7 +874,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             child: active
                 ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
                 : Text(
-              "3",
+              '3',
               style: TextStyle(
                 color: AppColors.textSecondary,
                 fontSize: 12,
@@ -972,7 +970,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
-                    "",
+                    '',
                     style: TextStyle(
                       fontSize: 10,
                       color: Colors.red,
@@ -1012,7 +1010,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           prefixIcon: icon != null
               ? Icon(icon, size: 18, color: AppColors.textSecondary)
               : null,
-          labelText: required ? label : "$label (opcional)",
+          labelText: required ? label : '$label (opcional)',
           filled: true,
           fillColor: const Color(0xFFF8FAFC),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -1027,7 +1025,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         ),
         validator: required
             ? (v) {
-          if (v == null || v.trim().isEmpty) return "Campo requerido";
+          if (v == null || v.trim().isEmpty) return 'Campo requerido';
           return null;
         }
             : null,
@@ -1097,7 +1095,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Gestor asignado",
+                  'Gestor asignado',
                   style: TextStyle(
                     fontSize: 11,
                     color: Colors.grey.shade600,
@@ -1108,7 +1106,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 Text(
                   manager != null && manager.isNotEmpty
                       ? manager
-                      : "pedidos@mundicam.com",
+                      : 'pedidos@mundicam.com',
                   style: const TextStyle(
                     fontSize: 14,
                     color: AppColors.textPrimary,
@@ -1149,11 +1147,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                "Crédito disponible",
+                'Crédito disponible',
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               ),
               Text(
-                "${disponible.toStringAsFixed(2)} €",
+                '${disponible.toStringAsFixed(2)} €',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
@@ -1185,11 +1183,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                "Usado: ${_creditUsed.toStringAsFixed(2)} €",
+                'Usado: ${_creditUsed.toStringAsFixed(2)} €',
                 style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
               ),
               Text(
-                "Límite: ${_creditLimit.toStringAsFixed(2)} €",
+                'Límite: ${_creditLimit.toStringAsFixed(2)} €',
                 style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
               ),
             ],
@@ -1411,16 +1409,16 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Base Imponible"),
-              Text("${notifier.subtotal.toStringAsFixed(2)} €"),
+              const Text('Base Imponible'),
+              Text('${notifier.subtotal.toStringAsFixed(2)} €'),
             ],
           ),
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("IVA (21%) incluido"),
-              Text("${notifier.iva.toStringAsFixed(2)} €"),
+              const Text('IVA (21%) incluido'),
+              Text('${notifier.iva.toStringAsFixed(2)} €'),
             ],
           ),
           const Divider(height: 24),
@@ -1428,11 +1426,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                "TOTAL",
+                'TOTAL',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
               ),
               Text(
-                "${total.toStringAsFixed(2)} €",
+                '${total.toStringAsFixed(2)} €',
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
@@ -1505,7 +1503,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      "Crédito insuficiente. Disponible: ${disponible.toStringAsFixed(2)} €",
+                      'Crédito insuficiente. Disponible: ${disponible.toStringAsFixed(2)} €',
                       style: const TextStyle(
                         color: Colors.red,
                         fontSize: 13,
@@ -1522,9 +1520,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: (_isLoading || creditBlocked)
-                  ? null
-                  : _finalizarPedido,
+              onPressed: (_isLoading || creditBlocked) ? null : _finalizarPedido,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,

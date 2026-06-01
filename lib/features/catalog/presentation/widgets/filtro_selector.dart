@@ -456,7 +456,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
   void _irAProductos(CategoryModel cat) {
     final categoryId = cat.id;
-    if (categoryId == null || categoryId <= 0) {
+    if (categoryId <= 0) {
       return;
     }
 

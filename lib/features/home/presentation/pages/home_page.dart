@@ -258,7 +258,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             'assets/logo.png',
             height: 21,
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
           ),
           const SizedBox(height: 10),
           const Text(

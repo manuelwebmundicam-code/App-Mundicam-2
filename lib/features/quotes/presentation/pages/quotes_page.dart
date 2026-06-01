@@ -472,7 +472,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: Row(
         children: [
@@ -481,7 +481,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             decoration: BoxDecoration(
               gradient: const LinearGradient(colors: [AppColors.primary, Color(0xFFE53935)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               borderRadius: BorderRadius.circular(14),
-              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))],
+              boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3))],
             ),
             child: const Icon(Icons.request_quote_rounded, color: Colors.white, size: 22),
           ),
@@ -509,7 +509,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
         border: Border.all(color: const Color(0xFFF0F0F0)),
       ),
       child: ClipRRect(
@@ -525,7 +525,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           }),
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.folder_rounded, color: Colors.orange, size: 24),
           ),
           title: Row(
@@ -576,7 +576,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
         border: Border.all(color: const Color(0xFFF0F0F0)),
       ),
       child: ClipRRect(
@@ -593,7 +593,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           },
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.cloud_rounded, color: Colors.blue, size: 24),
           ),
           title: Row(
@@ -739,10 +739,10 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       icon: Icon(icon, size: 15, color: color),
       label: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: color.withOpacity(0.4)),
+        side: BorderSide(color: color.withValues(alpha: 0.4)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         padding: const EdgeInsets.symmetric(vertical: 11),
-        backgroundColor: color.withOpacity(0.03),
+        backgroundColor: color.withValues(alpha: 0.03),
       ),
     );
   }
@@ -754,7 +754,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         gradient: const LinearGradient(colors: [Color(0xFFA60909), Color(0xFFD60808)], begin: Alignment.centerLeft, end: Alignment.centerRight),
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: const Color(0xFFA60909).withOpacity(0.35), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: const Color(0xFFA60909).withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: ElevatedButton.icon(
         onPressed: onPressed,
@@ -769,7 +769,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Widget _buildBadge(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
       child: Text(text, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5)),
     );
   }
@@ -807,7 +807,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           children: [
             Container(
               width: 56, height: 56,
-              decoration: BoxDecoration(color: iconColor.withOpacity(0.1), shape: BoxShape.circle),
+              decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.1), shape: BoxShape.circle),
               child: Icon(icon, color: iconColor, size: 28),
             ),
             const SizedBox(height: 16),

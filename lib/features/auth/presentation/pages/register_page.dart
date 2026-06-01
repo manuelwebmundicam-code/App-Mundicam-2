@@ -33,9 +33,9 @@ class _RegisterPageState extends State<RegisterPage> {
       // 1. Crear usuario en Auth
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
-            email: _emailController.text.trim(),
-            password: _passwordController.text.trim(),
-          );
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
 
       // 2. ENVIAR EMAIL DE VERIFICACIÓN
       await userCredential.user!.sendEmailVerification();
@@ -45,23 +45,28 @@ class _RegisterPageState extends State<RegisterPage> {
           .collection('users')
           .doc(userCredential.user!.uid)
           .set({
-            'uid': userCredential.user!.uid,
-            'nombre_contacto': _nameController.text.trim(),
-            'razon_social': _companyController.text.trim(),
-            'cif_nif': _taxIdController.text.trim().toUpperCase(),
-            'telefono': _phoneController.text.trim(),
-            'email': _emailController.text.trim(),
-            'isBlocked':
-                false, // CAMBIADO A FALSE: Para que no de error fiscal al entrar tras verificar email
-            'role': 'client',
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+        'uid': userCredential.user!.uid,
+        'nombre_contacto': _nameController.text.trim(),
+        'razon_social': _companyController.text.trim(),
+        'cif_nif': _taxIdController.text.trim().toUpperCase(),
+        'telefono': _phoneController.text.trim(),
+        'email': _emailController.text.trim(),
+        'isBlocked':
+        false, // CAMBIADO A FALSE: Para que no de error fiscal al entrar tras verificar email
+        'role': 'client',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
-      if (mounted) {
-        _showSnackBar("Registro casi listo. Verifica tu email para continuar.");
-        await FirebaseAuth.instance.signOut();
-        Navigator.pop(context);
-      }
+      if (!mounted) return;
+
+      final navigator = Navigator.of(context);
+
+      _showSnackBar("Registro casi listo. Verifica tu email para continuar.");
+      await FirebaseAuth.instance.signOut();
+
+      if (!mounted) return;
+
+      navigator.pop();
     } on FirebaseAuthException catch (e) {
       String msg = "Error al registrar";
       if (e.code == 'email-already-in-use') msg = "El correo ya está en uso.";
@@ -186,13 +191,13 @@ class _RegisterPageState extends State<RegisterPage> {
                           onPressed: _isLoading ? null : _handleRegister,
                           child: _isLoading
                               ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
                               : const Text('SOLICITAR ALTA'),
                         ),
                       ),
@@ -219,11 +224,11 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Widget _buildInput(
-    TextEditingController ctrl,
-    String label,
-    IconData icon, {
-    TextInputType type = TextInputType.text,
-  }) {
+      TextEditingController ctrl,
+      String label,
+      IconData icon, {
+        TextInputType type = TextInputType.text,
+      }) {
     return TextFormField(
       controller: ctrl,
       keyboardType: type,
@@ -247,15 +252,15 @@ class _RegisterPageState extends State<RegisterPage> {
         ),
       ),
       validator: (v) =>
-          (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null,
+      (v == null || v.trim().isEmpty) ? 'Campo obligatorio' : null,
     );
   }
 
   Widget _buildPasswordInput(
-    TextEditingController ctrl,
-    String label, {
-    bool isConfirm = false,
-  }) {
+      TextEditingController ctrl,
+      String label, {
+        bool isConfirm = false,
+      }) {
     return TextFormField(
       controller: ctrl,
       obscureText: _obscurePassword,

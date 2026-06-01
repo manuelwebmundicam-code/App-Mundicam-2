@@ -1279,7 +1279,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
                   width: 18,
                   height: 18,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const Icon(
+                  errorBuilder: (context, error, stackTrace) => const Icon(
                     Icons.support_agent_rounded,
                     color: _brandRedLight,
                     size: 17,
@@ -1352,7 +1352,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
                 width: 28,
                 height: 28,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Icon(
+                errorBuilder: (context, error, stackTrace) => const Icon(
                   Icons.support_agent_rounded,
                   color: Colors.white,
                   size: 24,

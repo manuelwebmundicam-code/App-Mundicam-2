@@ -1,5 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
@@ -7,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
-import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
@@ -209,33 +206,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     return rows.length >= 2 ? rows : <MapEntry<String, String>>[];
   }
 
-  Future<String?> _getCurrentUserEmail() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return null;
-    try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (userDoc.exists && userDoc.data() != null) {
-        final email = userDoc.data()?['email']?.toString();
-        if (email != null && email.trim().isNotEmpty) return email.trim();
-      }
-    } catch (e) {
-      debugPrint('Error al leer email de Firestore: $e');
-    }
-    if (user.email != null && user.email!.trim().isNotEmpty) {
-      return user.email!.trim();
-    }
-    if (user.providerData.isNotEmpty) {
-      final providerEmail = user.providerData.first.email;
-      if (providerEmail != null && providerEmail.trim().isNotEmpty) {
-        return providerEmail.trim();
-      }
-    }
-    return null;
-  }
-
   void _closeProductStackAndGo(VoidCallback callback) {
     final navigator = Navigator.of(context);
     if (navigator.canPop()) {
@@ -371,13 +341,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         child: CachedNetworkImage(
           imageUrl: p.imageUrl,
           fit: BoxFit.contain,
-          placeholder: (_, __) => const Center(
+          placeholder: (context, url) => const Center(
             child: CircularProgressIndicator(
               strokeWidth: 2,
               color: AppColors.primary,
             ),
           ),
-          errorWidget: (_, __, ___) => const Icon(
+          errorWidget: (context, url, error) => const Icon(
             Icons.broken_image,
             size: 60,
             color: _border,
@@ -1121,8 +1091,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
             itemCount: _recomendados.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (_, i) {
+            separatorBuilder: (context, index) => const SizedBox(width: 10),
+            itemBuilder: (context, i) {
               final rp = _recomendados[i];
               final precioRp = _precioDouble(rp);
               return SizedBox(
@@ -1163,7 +1133,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                               child: CachedNetworkImage(
                                 imageUrl: rp.imageUrl,
                                 fit: BoxFit.contain,
-                                placeholder: (_, __) => Center(
+                                placeholder: (context, url) => Center(
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                     color: AppColors.primary.withValues(
@@ -1171,7 +1141,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                     ),
                                   ),
                                 ),
-                                errorWidget: (_, __, ___) => const Icon(
+                                errorWidget: (context, url, error) => const Icon(
                                   Icons.broken_image,
                                   size: 40,
                                   color: _border,

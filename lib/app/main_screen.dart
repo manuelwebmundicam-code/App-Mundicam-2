@@ -235,7 +235,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
         final shouldPop = await _onWillPop();
 
-        if (shouldPop && mounted) {
+        if (!context.mounted) return;
+
+        if (shouldPop) {
           Navigator.of(context).pop();
         }
       },

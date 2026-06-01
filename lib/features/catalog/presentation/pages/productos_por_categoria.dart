@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/core/cache/image_cache_service.dart';
@@ -15,7 +13,6 @@ import 'package:mundicam/features/catalog/presentation/providers/category_provid
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
 import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.dart';
-import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
@@ -740,10 +737,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       ordered.sort((a, b) => scoreCategory(b).compareTo(scoreCategory(a)));
       if (scoreCategory(ordered.first) <= 0) return null;
 
-      final idRaw = ordered.first.id;
-      final id = idRaw is int ? idRaw : int.tryParse(idRaw.toString());
+      final id = ordered.first.id;
       final name = ordered.first.name.toString();
-      if (id == null || id <= 0 || name.trim().isEmpty) return null;
+      if (id <= 0 || name.trim().isEmpty) return null;
 
       return _SearchRedirectTarget(id: id, name: name);
     } catch (_) {
@@ -1651,7 +1647,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
                   sliver: SliverList.separated(
                     itemCount: productosState.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       return ProductTile(
                         key: ValueKey(productosState[index].id),
@@ -2305,10 +2301,10 @@ class _SuggestionTile extends StatelessWidget {
                   height: 42,
                   fit: BoxFit.contain,
                   cacheManager: ImageCacheService.cacheManager,
-                  placeholder: (_, __) => Container(
+                  placeholder: (_, _) => Container(
                     color: const Color(0xFFF0F2F5),
                   ),
-                  errorWidget: (_, __, ___) => const Icon(
+                  errorWidget: (_, _, _) => const Icon(
                     Icons.broken_image_outlined,
                     color: Color(0xFF9CA3AF),
                     size: 22,
@@ -3118,8 +3114,8 @@ class ProductImage extends StatelessWidget {
           memCacheWidth: 192,
           memCacheHeight: 192,
           cacheKey: p.imageUrl,
-          placeholder: (_, __) => Container(color: Colors.grey[100]),
-          errorWidget: (_, __, ___) => const Icon(
+          placeholder: (_, _) => Container(color: Colors.grey[100]),
+          errorWidget: (_, _, _) => const Icon(
             Icons.broken_image,
             color: Colors.grey,
             size: 30,

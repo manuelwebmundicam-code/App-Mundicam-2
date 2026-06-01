@@ -391,7 +391,7 @@ class _CourseCard extends StatelessWidget {
                     if (progress == null) return child;
                     return const _ImageFallback(loading: true);
                   },
-                  errorBuilder: (_, __, ___) => const _ImageFallback(),
+                  errorBuilder: (context, error, stackTrace) => const _ImageFallback(),
                 ),
               ),
               Padding(
@@ -664,7 +664,7 @@ class _AcademyFooter extends StatelessWidget {
             'assets/logo.png',
             height: 21,
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
           ),
           const SizedBox(height: 11),
           const Text(
