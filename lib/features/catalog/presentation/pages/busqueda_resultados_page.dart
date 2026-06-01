@@ -1,23 +1,19 @@
-// busqueda_resultados_page.dart - COMPLETO ARREGLADO
-import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
+// busqueda_resultados_page.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:mundicam/core/network/api_service.dart';
-import 'package:mundicam/features/catalog/data/models/producto.dart';
-import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
-import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
-import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
-import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
-import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
-import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
+
 import 'package:mundicam/core/firebase/firebase_service.dart';
+import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
+import 'package:mundicam/features/catalog/data/models/producto.dart';
+import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
+import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
+import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
-
-import '../../../quotes/presentation/widgets/quote_selection_dialog.dart';
 
 class BusquedaResultadosPage extends ConsumerWidget {
   final String query;
@@ -70,7 +66,8 @@ class BusquedaResultadosPage extends ConsumerWidget {
             return _buildEmptyState(context, cleanedQuery);
           }
 
-          final detectedTerms = _SearchEngine.detectedReadableTerms(cleanedQuery);
+          final detectedTerms =
+          _SearchEngine.detectedReadableTerms(cleanedQuery);
 
           return Column(
             children: [
@@ -128,7 +125,8 @@ class BusquedaResultadosPage extends ConsumerWidget {
                               color: AppColors.primary.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: AppColors.primary.withValues(alpha: 0.18),
+                                color:
+                                AppColors.primary.withValues(alpha: 0.18),
                               ),
                             ),
                             child: Text(
@@ -504,6 +502,7 @@ class _SearchEngine {
     if (name.contains('wifi') && normalizedQuery.contains('wifi')) score += 35;
     if (name.contains('4g') && normalizedQuery.contains('4g')) score += 35;
     if (name.contains('en54') && normalizedQuery.contains('en54')) score += 45;
+
     if (name.contains('grado') && normalizedQuery.contains('grado')) {
       score += 30;
     }
@@ -721,7 +720,8 @@ class ProductTileBusqueda extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductTileBusqueda> createState() => _ProductTileBusquedaState();
+  ConsumerState<ProductTileBusqueda> createState() =>
+      _ProductTileBusquedaState();
 }
 
 class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
@@ -733,17 +733,21 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   }
 
   String _formatearPrecio(double value) {
-    return value <= 0 ? 'Bajo consulta' : '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
+    return value <= 0
+        ? 'Bajo consulta'
+        : '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
   }
 
   void _goToQuotesKeepingTabs() {
     final goQuotes = widget.onGoQuotes;
+
     if (goQuotes != null) {
       final navigator = Navigator.of(context);
       if (navigator.canPop()) navigator.popUntil((route) => route.isFirst);
       WidgetsBinding.instance.addPostFrameCallback((_) => goQuotes());
       return;
     }
+
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -869,6 +873,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                         ref
                             .read(cartProvider.notifier)
                             .addProduct(p, cantidad);
+
                         ScaffoldMessenger.of(context).clearSnackBars();
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -883,7 +888,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       }
                           : null,
                       icon: Icon(
-                        p.isInstock ? Icons.shopping_cart_outlined : Icons.block_rounded,
+                        p.isInstock
+                            ? Icons.shopping_cart_outlined
+                            : Icons.block_rounded,
                         size: 17,
                         color: Colors.white,
                       ),
@@ -900,7 +907,8 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: p.isInstock ? AppColors.primary : Colors.grey.shade400,
+                        backgroundColor:
+                        p.isInstock ? AppColors.primary : Colors.grey.shade400,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
@@ -1010,6 +1018,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     final hasStock = p.isInstock;
     final bgColor = hasStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
     final textColor = hasStock ? const Color(0xFF218047) : const Color(0xFFC62828);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -1066,7 +1075,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // NUEVO: AÑADIR AL PRESUPUESTO CON QuoteSelectionDialog
+  // AÑADIR AL PRESUPUESTO CON QuoteSelectionDialog
   // ═══════════════════════════════════════════════════════════════
 
   Future<void> _addToQuote(Product product) async {
@@ -1097,7 +1106,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       String mensaje = '';
 
       if (action == 'crear_y_anadir') {
-        // ──── CREAR NUEVO PRESUPUESTO ────
+        // CREAR NUEVO PRESUPUESTO
         final nombre = result['nombre'] as String;
         final orderId = DateTime.now().millisecondsSinceEpoch.toString();
         final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
@@ -1119,7 +1128,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
         mensaje = '$cantidad x ${product.name} añadido a "$nombreFinal"';
       } else if (action == 'anadir_existente') {
-        // ──── AÑADIR A PRESUPUESTO EXISTENTE ────
+        // AÑADIR A PRESUPUESTO EXISTENTE
         final orderId = result['orderId'] as String;
         final nombre = result['nombre'] as String;
 
@@ -1153,7 +1162,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         );
       }
     } catch (e) {
-      debugPrint('❌ Error en _addToQuote búsqueda: $e');
+      if (kDebugMode) {
+        debugPrint('Error en _addToQuote búsqueda: $e');
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
