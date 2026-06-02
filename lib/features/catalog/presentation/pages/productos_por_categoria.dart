@@ -1118,7 +1118,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
   bool _isConnectivityAccessoryQuery(String value) {
     final compact = _compactForSearch(value);
-    return RegExp(r'(cable|cables|rj45|rj45|latiguillo|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|conector)').hasMatch(compact);
+    return RegExp(r'(cable|cables|rj45|latiguillo|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|conector)').hasMatch(compact);
   }
 
   bool _isPowerAccessoryQuery(String value) {
