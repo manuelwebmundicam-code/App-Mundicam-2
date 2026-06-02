@@ -1131,7 +1131,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     return RegExp(r'(cable|latiguillo|conector|rj45|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|pila|pilas|bateria|baterias|fuente|alimentador|alimentacion|transformador|adaptador|cargador)').hasMatch(compact);
   }
 
-  bool _BDcrZJCSXXE2ty8fqiSAgmqsBxhm1pYmVBXzJCgie5DY(String productName) {
+  bool _isMainDeviceProductForAccessorySearch(String productName) {
     final compactName = _compactForSearch(productName);
 
     final hasMainDeviceWord = RegExp(
@@ -1168,7 +1168,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       product.brandName ?? '',
     ].join(' '));
 
-    if (_BDcrZJCSXXE2ty8fqiSAgmqsBxhm1pYmVBXzJCgie5DY(product.name)) {
+    if (_isMainDeviceProductForAccessorySearch(product.name)) {
       return false;
     }
 
