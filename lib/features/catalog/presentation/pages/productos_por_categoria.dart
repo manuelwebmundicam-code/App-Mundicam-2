@@ -16,7 +16,6 @@ import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.d
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
-
 import '../../../quotes/presentation/widgets/quote_selection_dialog.dart';
 
 class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
@@ -1132,7 +1131,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     return RegExp(r'(cable|latiguillo|conector|rj45|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|pila|pilas|bateria|baterias|fuente|alimentador|alimentacion|transformador|adaptador|cargador)').hasMatch(compact);
   }
 
-  bool _isMainDeviceNoiseForAccessorySearch(String productName) {
+  bool _BDcrZJCSXXE2ty8fqiSAgmqsBxhm1pYmVBXzJCgie5DY(String productName) {
     final compactName = _compactForSearch(productName);
 
     final hasMainDeviceWord = RegExp(
@@ -1169,7 +1168,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       product.brandName ?? '',
     ].join(' '));
 
-    if (_isMainDeviceNoiseForAccessorySearch(product.name)) {
+    if (_BDcrZJCSXXE2ty8fqiSAgmqsBxhm1pYmVBXzJCgie5DY(product.name)) {
       return false;
     }
 
@@ -2661,6 +2660,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
   bool get _tieneStock => widget.p.isInstock;
   bool get _puedeComprar => _tieneStock && cantidad > 0;
+  bool get _puedeAnadirPresupuesto => _tieneStock && !_isAddingToQuote;
 
   void _goToQuotesKeepingTabs() {
     if (widget.onGoQuotes != null) {
@@ -2843,7 +2843,9 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                 width: double.infinity,
                 height: 42,
                 child: OutlinedButton.icon(
-                  onPressed: _isAddingToQuote ? null : () => _addToQuote(widget.p),
+                  onPressed: _puedeAnadirPresupuesto
+                      ? () => _addToQuote(widget.p)
+                      : null,
                   icon: _isAddingToQuote
                       ? const SizedBox(
                     width: 15,
@@ -2853,9 +2855,18 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                       color: AppColors.primary,
                     ),
                   )
-                      : const Icon(Icons.description_outlined, size: 17),
+                      : Icon(
+                    _tieneStock
+                        ? Icons.description_outlined
+                        : Icons.block_rounded,
+                    size: 17,
+                  ),
                   label: Text(
-                    _isAddingToQuote ? 'AÑADIENDO...' : 'AÑADIR AL PRESUPUESTO',
+                    !_tieneStock
+                        ? 'SIN STOCK'
+                        : _isAddingToQuote
+                        ? 'AÑADIENDO...'
+                        : 'AÑADIR AL PRESUPUESTO',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -2866,11 +2877,14 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     ),
                   ),
                   style: OutlinedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor:
+                    _tieneStock ? Colors.white : Colors.grey.shade100,
                     foregroundColor: AppColors.textPrimary,
                     disabledForegroundColor: Colors.grey.shade500,
-                    side: const BorderSide(
-                      color: Color(0xFFD9DEE7),
+                    side: BorderSide(
+                      color: _tieneStock
+                          ? const Color(0xFFD9DEE7)
+                          : Colors.grey.shade300,
                       width: 1.2,
                     ),
                     shape: RoundedRectangleBorder(
@@ -2993,6 +3007,21 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
     if (product.id == 0) return;
+
+    if (!product.isInstock) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
+          ),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
 
     final precio = _precioDouble(product);
 

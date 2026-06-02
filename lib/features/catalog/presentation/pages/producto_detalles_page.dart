@@ -711,24 +711,30 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               child: SizedBox(
                 height: 48,
                 child: OutlinedButton.icon(
-                  onPressed: _isAddingToQuote ? null : _addToQuote,
+                  // Solo habilitado si hay stock y no se está añadiendo ya
+                  onPressed: enStock && !_isAddingToQuote ? _addToQuote : null,
                   icon: _isAddingToQuote
                       ? const SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                      : const Icon(Icons.description_outlined, size: 18),
+                      : Icon(
+                    enStock ? Icons.description_outlined : Icons.block,
+                    size: 18,
+                  ),
                   label: Text(
-                    _isAddingToQuote ? 'Añadiendo...' : 'Presupuesto',
+                    _isAddingToQuote
+                        ? 'Añadiendo...'
+                        : (enStock ? 'Presupuesto' : 'Sin stock'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(
-                      color: Color(0xFFD9DEE7),
+                    foregroundColor: enStock ? AppColors.textPrimary : Colors.grey,
+                    side: BorderSide(
+                      color: enStock ? const Color(0xFFD9DEE7) : Colors.grey.shade300,
                       width: 1.2,
                     ),
                     shape: RoundedRectangleBorder(
@@ -1286,7 +1292,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       ),
     );
 
-    if (result == null || !mounted) return; // Canceló
+    if (result == null || !mounted) return;
 
     setState(() => _isAddingToQuote = true);
 
@@ -1296,9 +1302,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       String mensaje = '';
 
       if (action == 'crear_y_anadir') {
-        // ──── NUEVO PRESUPUESTO ────
         final nombre = result['nombre'] as String;
-        // Si no puso nombre, usamos el timestamp como ID y nombre
         final orderId = DateTime.now().millisecondsSinceEpoch.toString();
         final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
 
@@ -1319,7 +1323,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
         mensaje = '✅ Añadido a "$nombreFinal"';
       } else if (action == 'anadir_existente') {
-        // ──── PRESUPUESTO EXISTENTE ────
         final orderId = result['orderId'] as String;
         final nombre = result['nombre'] as String;
 

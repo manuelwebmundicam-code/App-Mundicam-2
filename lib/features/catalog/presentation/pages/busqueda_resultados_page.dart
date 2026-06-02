@@ -926,7 +926,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
               width: double.infinity,
               height: 42,
               child: OutlinedButton.icon(
-                onPressed: _isAddingToQuote ? null : () => _addToQuote(p),
+                onPressed: (p.isInstock && !_isAddingToQuote)
+                    ? () => _addToQuote(p)
+                    : null,
                 icon: _isAddingToQuote
                     ? const SizedBox(
                   width: 15,
@@ -936,9 +938,18 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                     color: AppColors.primary,
                   ),
                 )
-                    : const Icon(Icons.description_outlined, size: 17),
+                    : Icon(
+                  p.isInstock
+                      ? Icons.description_outlined
+                      : Icons.block_rounded,
+                  size: 17,
+                ),
                 label: Text(
-                  _isAddingToQuote ? 'AÑADIENDO...' : 'AÑADIR AL PRESUPUESTO',
+                  !p.isInstock
+                      ? 'SIN STOCK'
+                      : _isAddingToQuote
+                      ? 'AÑADIENDO...'
+                      : 'AÑADIR AL PRESUPUESTO',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -949,11 +960,15 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   ),
                 ),
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: Colors.white,
+                  backgroundColor: p.isInstock
+                      ? Colors.white
+                      : Colors.grey.shade100,
                   foregroundColor: AppColors.textPrimary,
                   disabledForegroundColor: Colors.grey.shade500,
-                  side: const BorderSide(
-                    color: Color(0xFFD9DEE7),
+                  side: BorderSide(
+                    color: p.isInstock
+                        ? const Color(0xFFD9DEE7)
+                        : Colors.grey.shade300,
                     width: 1.2,
                   ),
                   shape: RoundedRectangleBorder(
@@ -1081,6 +1096,21 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
     if (product.id == 0) return;
+
+    if (!product.isInstock) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
+          ),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
 
     final precio = _precioDouble(product);
 
