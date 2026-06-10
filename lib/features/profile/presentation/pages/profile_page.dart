@@ -254,6 +254,71 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     return '$credit€';
   }
 
+  // ================= MÉTODOS MEJORADOS =================
+  String _getAssignedManager() {
+    final manager = _getMeta('assigned_manager').trim();
+    if (manager.isEmpty || manager == '—') {
+      return 'Mundicam';
+    }
+    return manager;
+  }
+
+  String _getCifNif() {
+    // Lista ampliada de claves donde puede estar el CIF/NIF
+    final possibleKeys = [
+      'shipping_nif',      // ← clave identificada en el HTML
+      'cif_nif',
+      'cif',
+      'nif',
+      'vat_number',
+      'billing_vat',
+      'company_vat',
+      'tax_id',
+      'billing_cif',
+      'billing_nif',
+      '_billing_cif',
+      '_cif_nif',
+      'customer_vat',
+    ];
+
+    // 1. Buscar en meta_data
+    for (final key in possibleKeys) {
+      final value = _getMeta(key).trim();
+      if (value.isNotEmpty && value != '—') {
+        return value;
+      }
+    }
+
+    // 2. Buscar en billing
+    if (_wooCustomer != null) {
+      final billing = _wooCustomer!['billing'] as Map<String, dynamic>?;
+      if (billing != null) {
+        for (final key in possibleKeys) {
+          final value = billing[key]?.toString().trim();
+          if (value != null && value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
+            return value;
+          }
+        }
+      }
+    }
+
+    // 3. Buscar en shipping (por si el CIF se guardó en la dirección de envío)
+    if (_wooCustomer != null) {
+      final shipping = _wooCustomer!['shipping'] as Map<String, dynamic>?;
+      if (shipping != null) {
+        for (final key in possibleKeys) {
+          final value = shipping[key]?.toString().trim();
+          if (value != null && value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
+            return value;
+          }
+        }
+      }
+    }
+
+    return '—';
+  }
+  // =================================================
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -605,12 +670,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               _infoRow(
                 Icons.badge_outlined,
                 "CIF / NIF",
-                _getMeta('cif_nif'),
+                _getCifNif(),
               ),
               _infoRow(
                 Icons.support_agent_outlined,
                 "Gestor asignado",
-                _getMeta('assigned_manager'),
+                _getAssignedManager(),
               ),
             ],
           ),

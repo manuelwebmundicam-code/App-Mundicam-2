@@ -166,7 +166,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('NOTICIAS'),
+          _buildSectionTitle('NOVEDADES'),
           const SizedBox(height: 12),
           const NewsBanner(),
         ],
