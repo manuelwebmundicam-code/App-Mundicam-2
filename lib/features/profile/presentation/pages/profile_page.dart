@@ -254,6 +254,75 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     return '$credit€';
   }
 
+
+  // ================= MÉTODOS MEJORADOS =================
+  String _getAssignedManager() {
+    final manager = _getMeta('assigned_manager').trim();
+    if (manager.isEmpty ||
+        manager == '—' ||
+        manager.toLowerCase() == 'null') {
+      return 'Mundicam';
+    }
+    return manager;
+  }
+
+  String _getCifNif() {
+    final possibleKeys = [
+      'shipping_nif',
+      'cif_nif',
+      'cif',
+      'nif',
+      'vat_number',
+      'billing_vat',
+      'company_vat',
+      'tax_id',
+      'billing_cif',
+      'billing_nif',
+      '_billing_cif',
+      '_billing_nif',
+      '_cif_nif',
+      'customer_vat',
+      'dni',
+      'document_number',
+    ];
+
+    for (final key in possibleKeys) {
+      final value = _getMeta(key).trim();
+      if (value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
+        return value;
+      }
+    }
+
+    final billing = _wooCustomer?['billing'];
+    if (billing is Map) {
+      for (final key in possibleKeys) {
+        final value = billing[key]?.toString().trim();
+        if (value != null &&
+            value.isNotEmpty &&
+            value != '—' &&
+            value.toLowerCase() != 'null') {
+          return value;
+        }
+      }
+    }
+
+    final shipping = _wooCustomer?['shipping'];
+    if (shipping is Map) {
+      for (final key in possibleKeys) {
+        final value = shipping[key]?.toString().trim();
+        if (value != null &&
+            value.isNotEmpty &&
+            value != '—' &&
+            value.toLowerCase() != 'null') {
+          return value;
+        }
+      }
+    }
+
+    return '—';
+  }
+  // =================================================
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -605,12 +674,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               _infoRow(
                 Icons.badge_outlined,
                 "CIF / NIF",
-                _getMeta('cif_nif'),
+                _getCifNif(),
               ),
               _infoRow(
                 Icons.support_agent_outlined,
                 "Gestor asignado",
-                _getMeta('assigned_manager'),
+                _getAssignedManager(),
               ),
             ],
           ),

@@ -2047,17 +2047,30 @@ class ApiService {
 
   Future<Map<String, dynamic>?> getCustomerByEmail(String email) async {
     await _ensureInitialized();
+
+    final cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.isEmpty) return null;
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/customers',
-        queryParameters: {'email': email, 'role': 'all'},
+        queryParameters: {
+          'email': cleanEmail,
+          'role': 'all',
+        },
         options: _wooOptions,
       );
+
       if (response.statusCode == 200 &&
           response.data is List &&
-          response.data.isNotEmpty) {
-        return (response.data as List).first as Map<String, dynamic>;
+          (response.data as List).isNotEmpty) {
+        final firstCustomer = (response.data as List).first;
+
+        if (firstCustomer is Map) {
+          return Map<String, dynamic>.from(firstCustomer);
+        }
       }
+
       return null;
     } catch (e) {
       if (kDebugMode) {
@@ -2069,14 +2082,19 @@ class ApiService {
 
   Future<Map<String, dynamic>?> getCustomerById(int id) async {
     await _ensureInitialized();
+
+    if (id <= 0) return null;
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/customers/$id',
         options: _wooOptions,
       );
-      if (response.statusCode == 200) {
-        return response.data as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && response.data is Map) {
+        return Map<String, dynamic>.from(response.data as Map);
       }
+
       return null;
     } catch (e) {
       if (kDebugMode) {
@@ -2084,6 +2102,164 @@ class ApiService {
       }
       return null;
     }
+  }
+
+  // ================================================================
+  // PERMISOS USUARIO / STOCK INTERNO
+  // ================================================================
+
+  String _normalizeCustomerRoleValue(String value) {
+    return value
+        .toLowerCase()
+        .trim()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  bool _roleCanViewStockDetails(dynamic value) {
+    if (value == null) return false;
+
+    if (value is Iterable) {
+      return value.any(_roleCanViewStockDetails);
+    }
+
+    if (value is Map) {
+      return value.entries.any(
+            (entry) =>
+        _roleCanViewStockDetails(entry.key) ||
+            _roleCanViewStockDetails(entry.value),
+      );
+    }
+
+    final normalized = _normalizeCustomerRoleValue(value.toString());
+
+    return normalized == 'admin' ||
+        normalized == 'administrator' ||
+        normalized == 'administrador' ||
+        normalized == 'shopmanager' ||
+        normalized == 'gestordelatienda' ||
+        normalized.startsWith('comercial');
+  }
+
+  dynamic _extractCustomerRoleValue(Map<String, dynamic>? customerData) {
+    if (customerData == null || customerData.isEmpty) return null;
+
+    final directRole = customerData['role'] ??
+        customerData['roles'] ??
+        customerData['rol'] ??
+        customerData['user_role'] ??
+        customerData['userRole'];
+
+    if (directRole != null) return directRole;
+
+    final metaData = customerData['meta_data'];
+    if (metaData is List) {
+      for (final rawMeta in metaData) {
+        if (rawMeta is! Map) continue;
+
+        final meta = Map<dynamic, dynamic>.from(rawMeta);
+        final key = _normalizeCustomerRoleValue(meta['key']?.toString() ?? '');
+
+        if (key == 'role' ||
+            key == 'roles' ||
+            key == 'rol' ||
+            key == 'userrole' ||
+            key == 'wpuserrole' ||
+            key == 'capabilities' ||
+            key == 'wpcapabilities') {
+          return meta['value'];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  String? _roleTextFromDynamic(dynamic value) {
+    if (value == null) return null;
+
+    if (value is Iterable) {
+      for (final item in value) {
+        final role = _roleTextFromDynamic(item);
+        if (role != null && role.trim().isNotEmpty) return role;
+      }
+      return null;
+    }
+
+    if (value is Map) {
+      for (final item in value.values) {
+        final role = _roleTextFromDynamic(item);
+        if (role != null && role.trim().isNotEmpty) return role;
+      }
+      return null;
+    }
+
+    final role = value.toString().trim();
+    return role.isEmpty ? null : role;
+  }
+
+  Future<String?> getCustomerRoleById(int wordpressId) async {
+    if (wordpressId <= 0) return null;
+
+    final customer = await getCustomerById(wordpressId);
+    final roleValue = _extractCustomerRoleValue(customer);
+
+    return _roleTextFromDynamic(roleValue);
+  }
+
+  Future<bool> canCustomerViewStockDetails(int wordpressId) async {
+    if (wordpressId <= 0) return false;
+
+    try {
+      final customer = await getCustomerById(wordpressId);
+      final roleValue = _extractCustomerRoleValue(customer);
+      final canView = _roleCanViewStockDetails(roleValue);
+
+      if (kDebugMode) {
+        debugPrint(
+          '👤 Permiso stock usuario WP $wordpressId | '
+              'role=${_roleTextFromDynamic(roleValue) ?? '-'} | '
+              'canView=$canView',
+        );
+      }
+
+      return canView;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          'Error comprobando permiso de stock para WP $wordpressId: $e',
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<bool> canUserViewStockDetails(int wordpressId) {
+    return canCustomerViewStockDetails(wordpressId);
+  }
+
+  Future<bool> canWordPressUserViewStockDetails(int wordpressId) {
+    return canCustomerViewStockDetails(wordpressId);
   }
 
   // ================================================================

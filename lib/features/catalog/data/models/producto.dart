@@ -30,6 +30,11 @@ class Product {
   final List<String> categoryNames;
   final List<String> categorySlugs;
 
+  /// Stock por almacén/sede cuando el backend lo devuelve.
+  /// Se usa para que perfiles internos (admin/comercial) puedan ver
+  /// desglose de stock sin afectar a clientes normales.
+  final List<StockLocation>? stockLocations;
+
   Product({
     required this.id,
     required this.name,
@@ -49,10 +54,66 @@ class Product {
     this.categoryIds = const <int>[],
     this.categoryNames = const <String>[],
     this.categorySlugs = const <String>[],
+    this.stockLocations,
   });
+
+  List<StockLocation> get effectiveStockLocations =>
+      stockLocations ?? const <StockLocation>[];
+
+  bool get hasStockLocationDetails => effectiveStockLocations.isNotEmpty;
+
+  int get stockTotalByLocations {
+    if (effectiveStockLocations.isEmpty) return 0;
+    return effectiveStockLocations.fold<int>(
+      0,
+          (total, location) => total + location.quantity,
+    );
+  }
+
+  int get murciaStockQuantity {
+    if (effectiveStockLocations.isEmpty) return 0;
+
+    for (final location in effectiveStockLocations) {
+      final normalized = _normalizeAttributeName(location.name);
+      if (normalized.contains('murcia') ||
+          normalized.contains('lorqui') ||
+          normalized.contains('lorqui') ||
+          normalized.contains('central')) {
+        return location.quantity;
+      }
+    }
+
+    return 0;
+  }
+
+  String? get stockDetailsText {
+    final locations = effectiveStockLocations
+        .where((location) => location.quantity > 0)
+        .toList();
+
+    if (locations.isNotEmpty) {
+      final parts = locations
+          .map((location) => '${location.displayName}: ${location.quantity}')
+          .toList();
+
+      final total = stockTotalByLocations;
+      if (total > 0 && locations.length > 1) {
+        parts.add('Total: $total');
+      }
+
+      return parts.join(' · ');
+    }
+
+    if (stockQuantity > 0) {
+      return 'General: $stockQuantity';
+    }
+
+    return null;
+  }
 
   bool get hasStock {
     if (stockQuantity > 0) return true;
+    if (stockTotalByLocations > 0) return true;
     if (isInstock) return true;
     return false;
   }
@@ -60,6 +121,7 @@ class Product {
   int get maxPurchaseQty {
     if (!canAddToCart) return 0;
     if (stockQuantity > 0) return stockQuantity;
+    if (stockTotalByLocations > 0) return stockTotalByLocations;
     if (isInstock) return 999;
     return 0;
   }
@@ -151,6 +213,7 @@ class Product {
 
     final categories = _parseCategories(json['categories']);
     final stockStatus = (json['stock_status'] ?? '').toString().trim();
+    final parsedStockLocations = StockLocation.parseList(json);
 
     return Product(
       id: _parseInt(json['id']),
@@ -176,6 +239,8 @@ class Product {
       categoryIds: categories.ids,
       categoryNames: categories.names,
       categorySlugs: categories.slugs,
+      stockLocations:
+      parsedStockLocations.isEmpty ? null : parsedStockLocations,
     );
   }
 
@@ -413,7 +478,188 @@ class Product {
         'slug': index < categorySlugs.length ? categorySlugs[index] : '',
       };
     }),
+    if (stockLocations != null && stockLocations!.isNotEmpty)
+      'stock_locations': stockLocations!.map((item) => item.toJson()).toList(),
   };
+}
+
+
+class StockLocation {
+  final int id;
+  final String name;
+  final int quantity;
+  final bool isInstock;
+
+  const StockLocation({
+    required this.id,
+    required this.name,
+    required this.quantity,
+    required this.isInstock,
+  });
+
+  String get displayName {
+    final cleanName = name.trim();
+    return cleanName.isEmpty ? 'Almacén' : cleanName;
+  }
+
+  factory StockLocation.fromJson(Map<String, dynamic> json) {
+    final quantity = _parseIntValue(
+      json['quantity'] ??
+          json['qty'] ??
+          json['stock'] ??
+          json['stock_quantity'] ??
+          json['available_stock'] ??
+          json['available'] ??
+          json['value'],
+    );
+
+    final rawStatus = (json['stock_status'] ?? json['status'] ?? '')
+        .toString()
+        .toLowerCase()
+        .trim();
+
+    final explicitInstock = json['is_in_stock'] == true ||
+        json['in_stock'] == true ||
+        json['instock'] == true;
+
+    return StockLocation(
+      id: _parseIntValue(
+        json['id'] ??
+            json['location_id'] ??
+            json['warehouse_id'] ??
+            json['term_id'],
+      ),
+      name: (json['name'] ??
+          json['location_name'] ??
+          json['warehouse_name'] ??
+          json['label'] ??
+          json['store'] ??
+          json['almacen'] ??
+          json['almacén'] ??
+          '')
+          .toString()
+          .trim(),
+      quantity: quantity,
+      isInstock: quantity > 0 || explicitInstock || rawStatus == 'instock',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'quantity': quantity,
+    'stock_status': isInstock ? 'instock' : 'outofstock',
+  };
+
+  static List<StockLocation> parseList(Map<String, dynamic> json) {
+    final possibleValues = <dynamic>[
+      json['stock_locations'],
+      json['stockLocations'],
+      json['stock_by_location'],
+      json['stockByLocation'],
+      json['stock_by_locations'],
+      json['locations_stock'],
+      json['locations'],
+      json['warehouses'],
+      json['almacenes'],
+    ];
+
+    for (final value in possibleValues) {
+      final parsed = _parseRawList(value);
+      if (parsed.isNotEmpty) return parsed;
+    }
+
+    final metaData = json['meta_data'];
+    if (metaData is List) {
+      for (final rawMeta in metaData) {
+        if (rawMeta is! Map) continue;
+
+        final meta = Map<dynamic, dynamic>.from(rawMeta);
+        final key = meta['key']?.toString().toLowerCase().trim() ?? '';
+
+        if (key.contains('stock_location') ||
+            key.contains('stock_locations') ||
+            key.contains('stock_by_location') ||
+            key.contains('almacen') ||
+            key.contains('almacén') ||
+            key.contains('warehouse')) {
+          final parsed = _parseRawList(meta['value']);
+          if (parsed.isNotEmpty) return parsed;
+        }
+      }
+    }
+
+    return const <StockLocation>[];
+  }
+
+  static List<StockLocation> _parseRawList(dynamic value) {
+    if (value == null) return const <StockLocation>[];
+
+    if (value is List) {
+      return value
+          .whereType<Map>()
+          .map((item) => StockLocation.fromJson(
+        Map<String, dynamic>.from(item),
+      ))
+          .where((item) => item.name.isNotEmpty || item.quantity > 0)
+          .toList();
+    }
+
+    if (value is Map) {
+      final map = Map<dynamic, dynamic>.from(value);
+
+      final nestedList = map['locations'] ??
+          map['stock_locations'] ??
+          map['warehouses'] ??
+          map['items'] ??
+          map['data'];
+
+      final nestedParsed = _parseRawList(nestedList);
+      if (nestedParsed.isNotEmpty) return nestedParsed;
+
+      final result = <StockLocation>[];
+
+      for (final entry in map.entries) {
+        final entryValue = entry.value;
+
+        if (entryValue is Map) {
+          final locationJson = Map<String, dynamic>.from(entryValue);
+          locationJson.putIfAbsent('name', () => entry.key.toString());
+          result.add(StockLocation.fromJson(locationJson));
+          continue;
+        }
+
+        final quantity = _parseIntValue(entryValue);
+        if (quantity > 0) {
+          result.add(
+            StockLocation(
+              id: 0,
+              name: entry.key.toString(),
+              quantity: quantity,
+              isInstock: true,
+            ),
+          );
+        }
+      }
+
+      return result
+          .where((item) => item.name.isNotEmpty || item.quantity > 0)
+          .toList();
+    }
+
+    return const <StockLocation>[];
+  }
+
+  static int _parseIntValue(dynamic value, {int fallback = 0}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+
+    final raw = value.toString().trim().replaceAll(',', '.');
+    if (raw.isEmpty) return fallback;
+
+    return int.tryParse(raw) ?? double.tryParse(raw)?.toInt() ?? fallback;
+  }
 }
 
 class ProductAttribute {

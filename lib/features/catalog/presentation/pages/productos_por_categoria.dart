@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/core/cache/image_cache_service.dart';
@@ -18,6 +21,107 @@ import 'package:mundicam/features/quotes/presentation/providers/local_quote_prov
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import '../../../quotes/presentation/widgets/quote_selection_dialog.dart';
+
+
+final _canViewStockDetailsProvider = FutureProvider<bool>((ref) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return false;
+
+  try {
+    final userData = await _loadCurrentFirestoreUserData(user);
+    final wordpressId = _extractWordpressId(userData, user.uid);
+
+    if (wordpressId == null || wordpressId <= 0) {
+      if (kDebugMode) {
+        debugPrint(
+          '👤 Permiso stock: no se encontró wordpress_id para ${user.email ?? user.uid}',
+        );
+      }
+      return false;
+    }
+
+    return ApiService().canCustomerViewStockDetails(wordpressId);
+  } catch (e) {
+    if (kDebugMode) {
+      debugPrint('❌ Error comprobando permiso de stock interno: $e');
+    }
+    return false;
+  }
+});
+
+Future<Map<String, dynamic>?> _loadCurrentFirestoreUserData(User user) async {
+  final firestore = FirebaseFirestore.instance;
+
+  final doc = await firestore.collection('users').doc(user.uid).get();
+
+  if (doc.exists && doc.data() != null) {
+    return doc.data();
+  }
+
+  final email = user.email?.trim().toLowerCase();
+
+  if (email != null && email.isNotEmpty) {
+    final query = await firestore
+        .collection('users')
+        .where('email', isEqualTo: email)
+        .limit(1)
+        .get();
+
+    if (query.docs.isNotEmpty) {
+      return query.docs.first.data();
+    }
+  }
+
+  return null;
+}
+
+int? _extractWordpressId(
+    Map<String, dynamic>? data,
+    String firebaseUid,
+    ) {
+  if (data != null && data.isNotEmpty) {
+    final wordpressId = _parsePositiveInt(data['wordpress_id']);
+    if (wordpressId != null) return wordpressId;
+
+    final woocommerceId = _parsePositiveInt(data['woocommerce_id']);
+    if (woocommerceId != null) return woocommerceId;
+
+    final uidFromData = data['uid']?.toString();
+    final idFromDataUid = _extractWpIdFromUid(uidFromData);
+    if (idFromDataUid != null) return idFromDataUid;
+  }
+
+  return _extractWpIdFromUid(firebaseUid);
+}
+
+int? _parsePositiveInt(dynamic value) {
+  if (value == null) return null;
+
+  if (value is int && value > 0) return value;
+  if (value is num && value > 0) return value.toInt();
+
+  final parsed = int.tryParse(value.toString().trim());
+  if (parsed != null && parsed > 0) return parsed;
+
+  return null;
+}
+
+int? _extractWpIdFromUid(String? uid) {
+  if (uid == null || uid.trim().isEmpty) return null;
+
+  final cleanUid = uid.trim().toLowerCase();
+
+  if (cleanUid.startsWith('wp_')) {
+    return int.tryParse(cleanUid.replaceFirst('wp_', ''));
+  }
+
+  final match = RegExp(r'wp[_-]?(\d+)', caseSensitive: false).firstMatch(cleanUid);
+  if (match != null) {
+    return int.tryParse(match.group(1) ?? '');
+  }
+
+  return null;
+}
 
 class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
   final int categoryId;
@@ -2618,8 +2722,15 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
   bool get _bajoConsulta => widget.p.isUnderConsultation;
   bool get _tieneStock => widget.p.hasStock;
-  bool get _puedeComprar => widget.p.canAddToCart && cantidad > 0;
-  bool get _puedeAnadirPresupuesto => widget.p.canRequestQuote && !_isAddingToQuote;
+  int get _maxCantidadCompra => widget.p.maxPurchaseQty;
+  int get _cantidadSegura {
+    if (!_tieneStock) return 0;
+    if (_maxCantidadCompra <= 0) return cantidad;
+    return cantidad.clamp(1, _maxCantidadCompra).toInt();
+  }
+  bool get _puedeComprar => widget.p.canAddToCart && _cantidadSegura > 0;
+  bool get _puedeAnadirPresupuesto =>
+      widget.p.canRequestQuote && _cantidadSegura > 0 && !_isAddingToQuote;
   bool get _puedeCambiarCantidad => widget.p.canAddToCart;
 
   void _goToQuotesKeepingTabs() {
@@ -2640,6 +2751,10 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   @override
   Widget build(BuildContext context) {
     final precio = _precioDouble(widget.p);
+    final canViewStockDetails = ref.watch(_canViewStockDetailsProvider).maybeWhen(
+      data: (value) => value,
+      orElse: () => false,
+    );
 
     return RepaintBoundary(
       child: Container(
@@ -2710,6 +2825,13 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                               _stockChip(),
                             ],
                           ),
+                          if (canViewStockDetails) ...[
+                            const SizedBox(height: 6),
+                            _StockDetailsText(
+                              product: widget.p,
+                              hasStock: _tieneStock,
+                            ),
+                          ],
                           if (widget.p.shortDescription.trim().isNotEmpty) ...[
                             const SizedBox(height: 8),
                             Text(
@@ -2751,14 +2873,16 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                       child: ElevatedButton.icon(
                         onPressed: _puedeComprar
                             ? () {
+                          final qty = _cantidadSegura;
+                          if (qty <= 0) return;
                           ref
                               .read(cartProvider.notifier)
-                              .addProduct(widget.p, cantidad);
+                              .addProduct(widget.p, qty);
                           ScaffoldMessenger.of(context).clearSnackBars();
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
-                                '$cantidad x ${widget.p.name} añadido al carrito',
+                                '$qty x ${widget.p.name} añadido al carrito',
                               ),
                               backgroundColor: AppColors.primary,
                               duration: const Duration(seconds: 1),
@@ -2875,7 +2999,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _qtyBtn(Icons.remove, _puedeCambiarCantidad, () {
+            _qtyBtn(Icons.remove, _puedeCambiarCantidad && cantidad > 1, () {
               if (cantidad > 1) {
                 setState(() => cantidad--);
               }
@@ -2894,8 +3018,13 @@ class _ProductTileState extends ConsumerState<ProductTile> {
             ),
             _qtyBtn(
               Icons.add,
-              _puedeCambiarCantidad,
-                  () => setState(() => cantidad++),
+              _puedeCambiarCantidad &&
+                  (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra),
+                  () {
+                if (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra) {
+                  setState(() => cantidad++);
+                }
+              },
               isPrimary: _puedeCambiarCantidad,
             ),
           ],
@@ -2984,25 +3113,12 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     if (_isAddingToQuote) return;
     if (product.id == 0) return;
 
-    if (!product.canRequestQuote) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            product.isUnderConsultation
-                ? 'Producto bajo consulta. No se puede añadir al presupuesto desde la app.'
-                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
-          ),
-          backgroundColor: Colors.orange.shade700,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-
+    if (!product.canRequestQuote) return;
 
     final precio = _precioDouble(product);
+    final qty = _cantidadSegura;
+
+    if (qty <= 0) return;
 
     // Mostrar el diálogo de selección de presupuesto
     final result = await showDialog<Map<String, dynamic>>(
@@ -3011,7 +3127,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         productName: product.name,
         productId: product.id,
         price: precio,
-        quantity: cantidad,
+        quantity: qty,
       ),
     );
 
@@ -3037,11 +3153,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
           item: LocalQuoteItem(
             productId: product.id,
             productName: product.name,
-            quantity: cantidad,
+            quantity: qty,
             price: precio,
           ),
         );
-        mensaje = '$cantidad x ${product.name} añadido a "$nombreFinal"';
+        mensaje = '$qty x ${product.name} añadido a "$nombreFinal"';
       } else if (action == 'anadir_existente') {
         // Añadir a presupuesto existente
         final orderId = result['orderId'] as String;
@@ -3052,11 +3168,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
           item: LocalQuoteItem(
             productId: product.id,
             productName: product.name,
-            quantity: cantidad,
+            quantity: qty,
             price: precio,
           ),
         );
-        mensaje = '$cantidad x ${product.name} añadido a "$nombre"';
+        mensaje = '$qty x ${product.name} añadido a "$nombre"';
       }
 
       if (mounted && mensaje.isNotEmpty) {
@@ -3089,6 +3205,75 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     } finally {
       if (mounted) setState(() => _isAddingToQuote = false);
     }
+  }
+}
+
+
+class _StockDetailsText extends StatelessWidget {
+  final Product product;
+  final bool hasStock;
+
+  const _StockDetailsText({
+    required this.product,
+    required this.hasStock,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanDetails = _stockTextFor(product);
+    if (cleanDetails == null || cleanDetails.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final Color textColor =
+    hasStock ? const Color(0xFF218047) : const Color(0xFFC62828);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE1E4EA)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 13,
+            color: textColor,
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              'Stock: $cleanDetails',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10.8,
+                color: textColor,
+                fontWeight: FontWeight.w800,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String? _stockTextFor(Product product) {
+    final stockDetails = product.stockDetailsText?.trim();
+    if (stockDetails != null && stockDetails.isNotEmpty) {
+      return stockDetails;
+    }
+
+    if (product.stockQuantity > 0) {
+      return 'General: ${product.stockQuantity}';
+    }
+
+    return null;
   }
 }
 

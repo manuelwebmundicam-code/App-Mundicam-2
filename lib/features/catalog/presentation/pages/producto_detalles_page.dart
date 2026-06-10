@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/core/network/api_service.dart';
@@ -11,6 +13,106 @@ import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import '../../../quotes/data/models/local_quote_model.dart';
 import '../../../quotes/presentation/providers/local_quote_provider.dart';
 import '../../../quotes/presentation/widgets/quote_selection_dialog.dart';
+
+
+final _canViewStockDetailsProvider = FutureProvider<bool>((ref) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return false;
+
+  try {
+    final wordpressId = await _resolveWordPressIdForCurrentUser(user);
+    if (wordpressId == null || wordpressId <= 0) {
+      return false;
+    }
+
+    return ApiService().canCustomerViewStockDetails(wordpressId);
+  } catch (e) {
+    debugPrint('Error resolviendo permiso de stock en detalle: $e');
+    return false;
+  }
+});
+
+Future<int?> _resolveWordPressIdForCurrentUser(User user) async {
+  final firestore = FirebaseFirestore.instance;
+
+  try {
+    final doc = await firestore.collection('users').doc(user.uid).get();
+    final fromDoc = _wordPressIdFromUserData(doc.data());
+    if (fromDoc != null && fromDoc > 0) {
+      return fromDoc;
+    }
+  } catch (e) {
+    debugPrint('No se pudo leer users/${user.uid}: $e');
+  }
+
+  final email = user.email?.trim().toLowerCase();
+  if (email != null && email.isNotEmpty) {
+    try {
+      final query = await firestore
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        final fromEmailDoc = _wordPressIdFromUserData(query.docs.first.data());
+        if (fromEmailDoc != null && fromEmailDoc > 0) {
+          return fromEmailDoc;
+        }
+      }
+    } catch (e) {
+      debugPrint('No se pudo buscar usuario por email para stock: $e');
+    }
+  }
+
+  return _wordPressIdFromDynamic(user.uid);
+}
+
+int? _wordPressIdFromUserData(Map<String, dynamic>? data) {
+  if (data == null || data.isEmpty) return null;
+
+  const keys = <String>[
+    'wordpress_id',
+    'wordpressId',
+    'woocommerce_id',
+    'woocommerceId',
+    'customer_id',
+    'customerId',
+    'wp_user_id',
+    'wpUserId',
+    'woo_customer_id',
+    'wooCustomerId',
+    'uid',
+  ];
+
+  for (final key in keys) {
+    final id = _wordPressIdFromDynamic(data[key]);
+    if (id != null && id > 0) return id;
+  }
+
+  return null;
+}
+
+int? _wordPressIdFromDynamic(dynamic value) {
+  if (value == null) return null;
+
+  if (value is int && value > 0) return value;
+  if (value is num && value > 0) return value.toInt();
+
+  final raw = value.toString().trim();
+  if (raw.isEmpty) return null;
+
+  final direct = int.tryParse(raw);
+  if (direct != null && direct > 0) return direct;
+
+  final match = RegExp(r'wp[_-]?(\d+)', caseSensitive: false).firstMatch(raw);
+  if (match != null) {
+    final parsed = int.tryParse(match.group(1) ?? '');
+    if (parsed != null && parsed > 0) return parsed;
+  }
+
+  return null;
+}
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
   final Product product;
@@ -157,6 +259,33 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     return '${v.toStringAsFixed(2).replaceAll('.', ',')} €';
   }
 
+
+  int _safeQuantity(Product p) {
+    if (!p.canAddToCart && !p.canRequestQuote) return 0;
+    final maxPurchaseQty = p.maxPurchaseQty;
+    if (maxPurchaseQty <= 0) return _cantidad;
+    return _cantidad.clamp(1, maxPurchaseQty).toInt();
+  }
+
+  bool _canIncreaseQuantity(Product p) {
+    if (!p.canAddToCart && !p.canRequestQuote) return false;
+    final maxPurchaseQty = p.maxPurchaseQty;
+    return maxPurchaseQty <= 0 || _cantidad < maxPurchaseQty;
+  }
+
+  String? _stockTextFor(Product product) {
+    final stockDetails = product.stockDetailsText?.trim();
+    if (stockDetails != null && stockDetails.isNotEmpty) {
+      return stockDetails;
+    }
+
+    if (product.stockQuantity > 0) {
+      return 'General: ${product.stockQuantity}';
+    }
+
+    return null;
+  }
+
   String? _resolveVisualCategory(Product p) {
     final fromContext = widget.contextCategoryName?.trim();
     if (fromContext != null && fromContext.isNotEmpty) return fromContext;
@@ -243,6 +372,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     final ahorro = tieneDescuento ? precioRegular - precio : 0.0;
     final enStock = p.hasStock;
     final bajoConsulta = p.isUnderConsultation;
+    final canViewStockDetails = ref.watch(_canViewStockDetailsProvider).maybeWhen(
+      data: (value) => value,
+      orElse: () => false,
+    );
     final descCorta = _normalizeMultilineText(_limpiarHtml(p.shortDescription));
     final descLimpia = _normalizeMultilineText(_limpiarHtml(p.description));
     final descripcionCompletaRows = _parseKeyValueRows(descLimpia);
@@ -281,6 +414,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             ahorro: ahorro,
             enStock: enStock,
             bajoConsulta: bajoConsulta,
+            canViewStockDetails: canViewStockDetails,
           ),
           const SizedBox(height: 16),
           _trustBlock(),
@@ -365,6 +499,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     required double ahorro,
     required bool enStock,
     required bool bajoConsulta,
+    required bool canViewStockDetails,
   }) {
     final marcaText = marca?.trim();
     return Container(
@@ -391,6 +526,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               ] else const Spacer(),
             ],
           ),
+          if (canViewStockDetails) ...[
+            const SizedBox(height: 10),
+            _StockDetailsText(
+              text: _stockTextFor(p),
+              hasStock: enStock,
+            ),
+          ],
           if (p.sku.isNotEmpty) ...[
             const SizedBox(height: 10),
             Text(
@@ -604,8 +746,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               ),
             ),
           ),
-          _qtyBtn(Icons.add_rounded, _cantidad < p.maxPurchaseQty, () {
-            if (_cantidad < p.maxPurchaseQty) {
+          _qtyBtn(Icons.add_rounded, _canIncreaseQuantity(p), () {
+            if (_canIncreaseQuantity(p)) {
               HapticFeedback.selectionClick();
               setState(() => _cantidad++);
             }
@@ -747,13 +889,17 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   Future<void> _addToCart() async {
     if (!widget.product.canAddToCart || _isAddingToCart) return;
+
+    final qty = _safeQuantity(widget.product);
+    if (qty <= 0) return;
+
     setState(() => _isAddingToCart = true);
-    ref.read(cartProvider.notifier).addProduct(widget.product, _cantidad);
+    ref.read(cartProvider.notifier).addProduct(widget.product, qty);
     HapticFeedback.mediumImpact();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$_cantidad x ${widget.product.name} añadido al carrito'),
+        content: Text('$qty x ${widget.product.name} añadido al carrito'),
         backgroundColor: AppColors.primary,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 1),
@@ -1278,6 +1424,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     if (!prod.canRequestQuote) return;
 
     final precio = _precioDouble(prod);
+    final qty = _safeQuantity(prod);
+
+    if (qty <= 0) return;
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -1285,7 +1434,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         productName: prod.name,
         productId: prod.id,
         price: precio,
-        quantity: _cantidad,
+        quantity: qty,
       ),
     );
 
@@ -1313,7 +1462,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           item: LocalQuoteItem(
             productId: prod.id,
             productName: prod.name,
-            quantity: _cantidad,
+            quantity: qty,
             price: precio,
           ),
         );
@@ -1328,7 +1477,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           item: LocalQuoteItem(
             productId: prod.id,
             productName: prod.name,
-            quantity: _cantidad,
+            quantity: qty,
             price: precio,
           ),
         );
@@ -1365,5 +1514,61 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     } finally {
       if (mounted) setState(() => _isAddingToQuote = false);
     }
+  }
+}
+
+class _StockDetailsText extends StatelessWidget {
+  final String? text;
+  final bool hasStock;
+
+  const _StockDetailsText({
+    required this.text,
+    required this.hasStock,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanText = text?.trim();
+    if (cleanText == null || cleanText.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final textColor = hasStock
+        ? const Color(0xFF218047)
+        : const Color(0xFFC62828);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE1E4EA)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 15,
+            color: textColor,
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              'Stock: $cleanText',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: textColor,
+                fontWeight: FontWeight.w900,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
