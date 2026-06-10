@@ -63,6 +63,75 @@ class CatalogProductsResult {
 }
 
 
+
+class CatalogFilterDefinition {
+  final String key;
+  final String title;
+  final String taxonomy;
+  final int attributeId;
+
+  const CatalogFilterDefinition({
+    required this.key,
+    required this.title,
+    required this.taxonomy,
+    required this.attributeId,
+  });
+}
+
+class CatalogFilterOption {
+  final int id;
+  final String name;
+  final String slug;
+  final int count;
+
+  const CatalogFilterOption({
+    required this.id,
+    required this.name,
+    required this.slug,
+    required this.count,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'slug': slug,
+      'count': count,
+      'available_count': count,
+    };
+  }
+}
+
+class CatalogFilterGroup {
+  final String key;
+  final String title;
+  final String taxonomy;
+  final int attributeId;
+  final List<CatalogFilterOption> options;
+
+  const CatalogFilterGroup({
+    required this.key,
+    required this.title,
+    required this.taxonomy,
+    required this.attributeId,
+    required this.options,
+  });
+}
+
+class _CatalogFiltersCacheEntry {
+  final List<CatalogFilterGroup> groups;
+  final DateTime createdAt;
+
+  const _CatalogFiltersCacheEntry({
+    required this.groups,
+    required this.createdAt,
+  });
+
+  bool get isValid {
+    return DateTime.now().difference(createdAt) < const Duration(minutes: 5);
+  }
+}
+
 class _ContextProductsCacheEntry {
   final List<Product> products;
   final DateTime createdAt;
@@ -91,6 +160,16 @@ class _RequestProductsCacheEntry {
   }
 }
 
+// ✅ Caché para marcas disponibles
+class _MarcasDisponiblesCache {
+  final List<Map<String, dynamic>> marcas;
+  final DateTime timestamp;
+
+  _MarcasDisponiblesCache({required this.marcas, required this.timestamp});
+
+  bool get isValid => DateTime.now().difference(timestamp) < const Duration(minutes: 5);
+}
+
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -106,6 +185,10 @@ class ApiService {
   final Map<String, _RequestProductsCacheEntry> _requestProductsCache = {};
   static const int _maxRequestProductsCacheEntries = 140;
 
+  // ✅ Caché para marcas disponibles
+  final Map<String, _MarcasDisponiblesCache> _marcasDisponiblesCache = {};
+  final Map<String, _CatalogFiltersCacheEntry> _catalogFiltersCache = {};
+  final Map<int, List<Map<String, dynamic>>> _attributeTermsCache = {};
   static const List<String> _fallbackBrandNames = <String>[
     'Dahua',
     'Hikvision',
@@ -161,13 +244,17 @@ class ApiService {
       _consumerKey = _remoteConfig.getString('wc_consumer_key');
       _consumerSecret = _remoteConfig.getString('wc_consumer_secret');
       _initialized = true;
-      if (_consumerKey.isNotEmpty && _consumerSecret.isNotEmpty) {
-        debugPrint('🔑 Keys cargadas desde Firebase Remote Config');
-      } else {
-        debugPrint('⚠️ Keys no configuradas en Remote Config');
+      if (kDebugMode) {
+        if (_consumerKey.isNotEmpty && _consumerSecret.isNotEmpty) {
+          debugPrint('🔑 Keys cargadas desde Firebase Remote Config');
+        } else {
+          debugPrint('⚠️ Keys no configuradas en Remote Config');
+        }
       }
     } catch (e) {
-      debugPrint('⚠️ Error cargando keys desde Remote Config: $e');
+      if (kDebugMode) {
+        debugPrint('⚠️ Error cargando keys desde Remote Config: $e');
+      }
       _consumerKey = _remoteConfig.getString('wc_consumer_key');
       _consumerSecret = _remoteConfig.getString('wc_consumer_secret');
       _initialized = true;
@@ -186,7 +273,9 @@ class ApiService {
 
   String get _basicAuth {
     if (_consumerKey.isEmpty || _consumerSecret.isEmpty) {
-      debugPrint('❌ API Keys no configuradas');
+      if (kDebugMode) {
+        debugPrint('❌ API Keys no configuradas');
+      }
       return 'Basic ${base64Encode(utf8.encode('error:error'))}';
     }
     return 'Basic ${base64Encode(utf8.encode('$_consumerKey:$_consumerSecret'))}';
@@ -329,9 +418,13 @@ class ApiService {
 
   bool _isBrandAttributeName(String value) {
     final normalized = _normalizeBrandValue(value);
+
     return normalized.contains('marca') ||
         normalized.contains('brand') ||
+        normalized.contains('fabricante') ||
+        normalized.contains('manufacturer') ||
         normalized == 'pamarca' ||
+        normalized == 'pafabricante' ||
         normalized == 'productbrand';
   }
 
@@ -438,7 +531,9 @@ class ApiService {
         }
       }
     } catch (e) {
-      debugPrint('⚠️ No se pudieron cargar marcas para enriquecer productos: $e');
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudieron cargar marcas para enriquecer productos: $e');
+      }
     }
 
     _cachedBrandNames = brands
@@ -719,7 +814,6 @@ class ApiService {
     final cleanSearch = search?.trim();
     if (cleanSearch == null || cleanSearch.isEmpty) return null;
 
-    // Si parece una referencia/SKU, no tocamos nada.
     if (_looksLikeTechnicalSkuSearch(cleanSearch)) {
       return cleanSearch;
     }
@@ -743,9 +837,6 @@ class ApiService {
           RegExp(r'^\d+$').hasMatch(compact);
     });
 
-    // Evita búsquedas tipo “cámara bullet IP” → WooCommerce interpreta “IP”
-    // demasiado amplio y devuelve toda la categoría. En ese caso buscamos
-    // realmente “bullet”, “domo”, “grabador”, etc.
     if (removedGenericTokens && hasTechnicalToken) {
       return meaningfulTokens.join(' ');
     }
@@ -761,9 +852,6 @@ class ApiService {
     final groups = _technicalSearchVariantGroups(cleanSearch);
     if (groups.length < 2) return false;
 
-    // Solo expandimos cuando hay una búsqueda compuesta real, por ejemplo
-    // “bullet 4mp” o “domo 8mp”. Una búsqueda simple como “domo”, “bullet”
-    // o “grabador” debe ir directa a WooCommerce para ser rápida.
     final hasSynonyms = groups.any((group) => group.length > 1);
     return hasSynonyms;
   }
@@ -993,8 +1081,6 @@ class ApiService {
       }
     }
 
-    // Evitamos búsquedas demasiado genéricas que en WooCommerce pueden devolver
-    // toda la familia por palabras como “ip” o “cámara”.
     return terms
         .where((term) => term.trim().length >= 3)
         .where((term) => !_isGenericCatalogSearchToken(term))
@@ -1266,9 +1352,12 @@ class ApiService {
       }
     }
 
+    // En MundiCam el fabricante real de la web es el atributo pa_marcas.
+    // Lo cargamos primero para que getMarcaIdPorNombre devuelva IDs válidos
+    // para filtrar productos con attribute=pa_marcas&attribute_term=ID.
+    await addTerms(_getBrandTermsFromAttributeTerms(hideEmpty: hideEmpty));
     await addTerms(_getBrandTermsFromStoreApi(hideEmpty: hideEmpty));
     await addTerms(_getBrandTermsFromWooBrandsApi(hideEmpty: hideEmpty));
-    await addTerms(_getBrandTermsFromAttributeTerms(hideEmpty: hideEmpty));
 
     if (allTerms.isEmpty) {
       try {
@@ -1440,7 +1529,7 @@ class ApiService {
 
       do {
         final response = await _dio.get(
-          '/wp-json/wc/v3/products/attributes/pa_marca/terms',
+          '/wp-json/wc/v3/products/attributes/26/terms',
           queryParameters: {
             'per_page': 100,
             'page': page,
@@ -1452,7 +1541,7 @@ class ApiService {
         marcas.addAll(
           _normalizeBrandTerms(
             response.data,
-            source: 'pa_marca',
+            source: 'pa_marcas',
           ),
         );
 
@@ -1461,13 +1550,13 @@ class ApiService {
       } while (page <= totalPages);
 
       if (kDebugMode) {
-        debugPrint('🏷️ Marcas pa_marca: ${marcas.length}');
+        debugPrint('🏷️ Fabricantes pa_marcas: ${marcas.length}');
       }
 
       return marcas;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('⚠️ pa_marca terms no disponible: $e');
+        debugPrint('⚠️ pa_marcas terms no disponible: $e');
       }
       return [];
     }
@@ -1486,6 +1575,7 @@ class ApiService {
         .join('&');
     return 'page:$page|perPage:$perPage|$queryPart';
   }
+
   Future<CatalogProductsResult> _requestCatalogProducts(
       Map<String, dynamic> queryParams, {
         required int page,
@@ -1576,9 +1666,6 @@ class ApiService {
       return false;
     }
 
-    // Solo damos por válido el filtro remoto si todos los productos de la página
-    // pertenecen realmente a la marca seleccionada. Si WooCommerce ignora el
-    // parámetro brand/attribute y mezcla productos, se fuerza fallback local.
     return result.products.every(
           (product) => _productMatchesBrand(product, cleanBrand),
     );
@@ -1723,6 +1810,166 @@ class ApiService {
     );
   }
 
+
+  CatalogFilterDefinition? _catalogFilterDefinitionForTaxonomy(String taxonomy) {
+    final cleanTaxonomy = taxonomy.trim();
+    if (cleanTaxonomy.isEmpty) return null;
+
+    for (final definition in _catalogFilterDefinitions) {
+      if (definition.taxonomy == cleanTaxonomy) {
+        return definition;
+      }
+    }
+
+    return null;
+  }
+
+  Future<Map<String, String>> _resolveAttributeTermLabels({
+    required Map<String, int> attributeTermIds,
+    Map<String, String>? attributeLabels,
+  }) async {
+    final result = <String, String>{};
+
+    for (final entry in attributeTermIds.entries) {
+      final taxonomy = entry.key.trim();
+      final termId = entry.value;
+      if (taxonomy.isEmpty || termId <= 0) continue;
+
+      final explicitLabel = attributeLabels?[taxonomy]?.trim();
+      if (explicitLabel != null && explicitLabel.isNotEmpty) {
+        result[taxonomy] = explicitLabel;
+        continue;
+      }
+
+      final definition = _catalogFilterDefinitionForTaxonomy(taxonomy);
+      if (definition == null) continue;
+
+      try {
+        final terms = await _getAttributeTerms(definition).timeout(
+          const Duration(seconds: 3),
+        );
+
+        for (final term in terms) {
+          final id = _parseIntValue(term['id']);
+          if (id != termId) continue;
+
+          final name = term['name']?.toString().trim() ?? '';
+          if (name.isNotEmpty) {
+            result[taxonomy] = name;
+          }
+          break;
+        }
+      } catch (_) {
+        // Si no podemos resolver el nombre, ese atributo no se filtra localmente.
+      }
+    }
+
+    return result;
+  }
+
+  bool _productMatchesCatalogAttributeLabel({
+    required Product product,
+    required String taxonomy,
+    required String label,
+  }) {
+    final cleanLabel = label.trim();
+    if (cleanLabel.isEmpty) return true;
+
+    if (taxonomy == 'pa_marcas') {
+      return _productMatchesBrand(product, cleanLabel);
+    }
+
+    final definition = _catalogFilterDefinitionForTaxonomy(taxonomy);
+    final normalizedTaxonomy = _normalizeBrandValue(
+      taxonomy.replaceFirst('pa_', ''),
+    );
+    final normalizedTitle = _normalizeBrandValue(definition?.title ?? '');
+    final normalizedKey = _normalizeBrandValue(definition?.key ?? '');
+    final normalizedLabel = _normalizeBrandValue(cleanLabel);
+
+    if (normalizedLabel.isEmpty) return true;
+
+    for (final attr in product.attributes) {
+      final attrName = _normalizeBrandValue(attr.name);
+      final looksLikeAttribute = attrName == normalizedTaxonomy ||
+          attrName == normalizedTitle ||
+          attrName == normalizedKey ||
+          attrName.contains(normalizedTaxonomy) ||
+          (normalizedTitle.isNotEmpty && attrName.contains(normalizedTitle)) ||
+          (normalizedKey.isNotEmpty && attrName.contains(normalizedKey));
+
+      if (!looksLikeAttribute) continue;
+
+      for (final option in attr.options) {
+        final normalizedOption = _normalizeBrandValue(option);
+        if (normalizedOption == normalizedLabel) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  Future<CatalogProductsResult> _getAttributeFilteredCatalogResult({
+    int? categoryId,
+    String? brandName,
+    String? search,
+    String? orderBy,
+    required int page,
+    required int perPage,
+    required Map<String, int> attributeTermIds,
+    Map<String, String>? attributeLabels,
+  }) async {
+    final contextProducts = await _getProductsForFilterContext(
+      categoryId: categoryId,
+      search: search,
+      orderBy: orderBy,
+    );
+
+    final resolvedLabels = await _resolveAttributeTermLabels(
+      attributeTermIds: attributeTermIds,
+      attributeLabels: attributeLabels,
+    );
+
+    var filtered = contextProducts;
+
+    final cleanBrandName = brandName?.trim();
+    if (cleanBrandName != null && cleanBrandName.isNotEmpty) {
+      filtered = filtered
+          .where((product) => _productMatchesBrand(product, cleanBrandName))
+          .toList();
+    }
+
+    for (final entry in resolvedLabels.entries) {
+      filtered = filtered
+          .where(
+            (product) => _productMatchesCatalogAttributeLabel(
+          product: product,
+          taxonomy: entry.key,
+          label: entry.value,
+        ),
+      )
+          .toList();
+    }
+
+    _sortProductsByRequestedOrder(filtered, orderBy);
+
+    if (kDebugMode) {
+      debugPrint(
+        '🧩 Filtro local por atributos: category=$categoryId '
+            'brand="$cleanBrandName" attrs=$resolvedLabels '
+            '${contextProducts.length} contexto → ${filtered.length} válidos',
+      );
+    }
+
+    return _paginateLocalProducts(
+      products: filtered,
+      page: page,
+      perPage: perPage,
+    );
+  }
+
   Future<CatalogProductsResult> _getLocalBrandFilteredCatalogResult({
     int? categoryId,
     required String brandName,
@@ -1813,7 +2060,9 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      debugPrint('Error en getCustomerByEmail: $e');
+      if (kDebugMode) {
+        debugPrint('Error en getCustomerByEmail: $e');
+      }
       return null;
     }
   }
@@ -1830,7 +2079,9 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      debugPrint('Error en getCustomerById: $e');
+      if (kDebugMode) {
+        debugPrint('Error en getCustomerById: $e');
+      }
       return null;
     }
   }
@@ -1842,86 +2093,105 @@ class ApiService {
   Future<CatalogProductsResult> getProductosCatalogoFiltrado({
     int? categoryId,
     int? brandId,
+    String? brandName,
     String? search,
     int page = 1,
     int perPage = 30,
     String? orderBy,
+    Map<String, int>? attributeTermIds,
+    Map<String, String>? attributeLabels,
   }) async {
     await _ensureInitialized();
 
     try {
-      final Map<String, dynamic> baseQueryParams = {
+      final Map<String, dynamic> queryParams = {
         'per_page': perPage,
         'page': page,
         'status': 'publish',
       };
 
       if (categoryId != null && categoryId > 0) {
-        baseQueryParams['category'] = categoryId.toString();
+        queryParams['category'] = categoryId.toString();
       }
 
       final cleanSearch = search?.trim();
+      final cleanBrandName = brandName?.trim();
+      final selectedAttributeTermIds = Map<String, int>.from(
+        attributeTermIds ?? const <String, int>{},
+      )..removeWhere((taxonomy, termId) {
+        return taxonomy.trim().isEmpty || termId <= 0;
+      });
       final effectiveSearch = _effectiveCatalogSearchTerm(cleanSearch);
 
       if (effectiveSearch != null && effectiveSearch.isNotEmpty) {
-        baseQueryParams['search'] = effectiveSearch;
+        queryParams['search'] = effectiveSearch;
       }
 
-      _applyProductOrderParams(baseQueryParams, orderBy);
+      int? effectiveBrandId = brandId;
 
-      if (brandId == null || brandId <= 0) {
-        if (_isAccessorySearch(cleanSearch)) {
-          return _getAccessorySearchCatalogResult(
-            categoryId: categoryId,
-            search: cleanSearch!,
-            page: page,
-            perPage: perPage,
-            orderBy: orderBy,
-          );
-        }
-
-        final result = await _requestCatalogProducts(
-          baseQueryParams,
-          page: page,
-          perPage: perPage,
+      if ((effectiveBrandId == null || effectiveBrandId <= 0) &&
+          cleanBrandName != null &&
+          cleanBrandName.isNotEmpty) {
+        effectiveBrandId = await getMarcaIdPorNombre(cleanBrandName).timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => null,
         );
-
-        // Prioridad a WooCommerce: si devuelve resultados, respondemos rápido.
-        // Solo entramos en expansión acotada cuando la búsqueda compuesta no
-        // encuentra nada, evitando esperas de 30-60 segundos.
-        if (_shouldUseExpandedTechnicalSearch(cleanSearch) &&
-            result.totalItems <= 0 &&
-            cleanSearch != null &&
-            cleanSearch.isNotEmpty) {
-          return _getExpandedTechnicalSearchCatalogResult(
-            categoryId: categoryId,
-            brandId: brandId,
-            search: cleanSearch,
-            page: page,
-            perPage: perPage,
-            orderBy: orderBy,
-          );
-        }
-
-        if (kDebugMode) {
-          debugPrint(
-            '📦 Catálogo filtrado: category=$categoryId '
-                'search="$cleanSearch" page=$page/${result.totalPages} '
-                'total=${result.totalItems} items=${result.products.length}',
-          );
-        }
-
-        return _sortCatalogResultPage(result, orderBy);
       }
 
-      final brandName = await getMarcaNombrePorId(brandId);
+      // En MundiCam, el filtro Fabricante de la web es el atributo
+      // WooCommerce "Marcas" => pa_marcas. Si viene dentro del mapa
+      // de atributos, lo promovemos a fabricante para mantener compatibilidad
+      // con el resto de la app.
+      if ((effectiveBrandId == null || effectiveBrandId <= 0) &&
+          selectedAttributeTermIds.containsKey('pa_marcas')) {
+        effectiveBrandId = selectedAttributeTermIds['pa_marcas'];
+      }
 
-      if (brandName != null &&
-          brandName.trim().isNotEmpty &&
-          _isExplicitCatalogOrder(orderBy)) {
+      final extraAttributeTermIds = Map<String, int>.from(
+        selectedAttributeTermIds,
+      )..remove('pa_marcas');
+
+      if (effectiveBrandId != null && effectiveBrandId > 0) {
+        queryParams['attribute'] = 'pa_marcas';
+        queryParams['attribute_term'] = effectiveBrandId.toString();
+      }
+
+      // WooCommerce REST v3 filtra bien por un atributo. Para combinaciones
+      // tipo web, por ejemplo Fabricante + Resolución + Lente, cargamos el
+      // contexto y filtramos localmente para evitar resultados cruzados.
+      if (extraAttributeTermIds.isNotEmpty) {
+        if (extraAttributeTermIds.length == 1 &&
+            (effectiveBrandId == null || effectiveBrandId <= 0)) {
+          final attribute = extraAttributeTermIds.entries.first;
+          queryParams['attribute'] = attribute.key;
+          queryParams['attribute_term'] = attribute.value.toString();
+        } else {
+          final effectiveBrandName = (cleanBrandName != null &&
+              cleanBrandName.isNotEmpty)
+              ? cleanBrandName
+              : await getMarcaNombrePorId(effectiveBrandId);
+
+          return _getAttributeFilteredCatalogResult(
+            categoryId: categoryId,
+            brandName: effectiveBrandName,
+            search: cleanSearch,
+            orderBy: orderBy,
+            page: page,
+            perPage: perPage,
+            attributeTermIds: extraAttributeTermIds,
+            attributeLabels: attributeLabels,
+          );
+        }
+      }
+
+      _applyProductOrderParams(queryParams, orderBy);
+
+      if ((effectiveBrandId == null || effectiveBrandId <= 0) &&
+          cleanBrandName != null &&
+          cleanBrandName.isNotEmpty) {
         return _getLocalBrandFilteredCatalogResult(
           categoryId: categoryId,
-          brandName: brandName,
+          brandName: cleanBrandName,
           search: cleanSearch,
           orderBy: orderBy,
           page: page,
@@ -1929,81 +2199,48 @@ class ApiService {
         );
       }
 
-      // 1) Primero intentamos como en la beta / Store API:
-      // taxonomía de marcas tipo products/brands.
-      final brandQueryParams = Map<String, dynamic>.from(baseQueryParams)
-        ..['brand'] = brandId.toString()
-        ..['brand_operator'] = 'in';
-
-      final brandResult = await _requestCatalogProducts(
-        brandQueryParams,
-        page: page,
-        perPage: perPage,
-      );
-
-      if (_catalogResultMatchesBrand(brandResult, brandName)) {
-        final verifiedBrandResult = _filterCatalogResultByBrand(
-          brandResult,
-          brandName,
+      if ((effectiveBrandId == null || effectiveBrandId <= 0) &&
+          _isAccessorySearch(cleanSearch)) {
+        return _getAccessorySearchCatalogResult(
+          categoryId: categoryId,
+          search: cleanSearch!,
+          page: page,
+          perPage: perPage,
           orderBy: orderBy,
         );
-
-        if (kDebugMode) {
-          debugPrint(
-            '📦 Catálogo filtrado por brand=ID: category=$categoryId '
-                'brandId=$brandId brand="$brandName" search="$cleanSearch" '
-                'page=$page/${verifiedBrandResult.totalPages} '
-                'total=${verifiedBrandResult.totalItems} '
-                'items=${verifiedBrandResult.products.length}',
-          );
-        }
-
-        return verifiedBrandResult;
       }
 
-      // 2) Fallback para webs donde la marca está como atributo pa_marca.
-      final attributeQueryParams = Map<String, dynamic>.from(baseQueryParams)
-        ..['attribute'] = 'pa_marca'
-        ..['attribute_term'] = brandId.toString();
-
-      final attributeResult = await _requestCatalogProducts(
-        attributeQueryParams,
+      final result = await _requestCatalogProducts(
+        queryParams,
         page: page,
         perPage: perPage,
       );
+
+      if (_shouldUseExpandedTechnicalSearch(cleanSearch) &&
+          (effectiveBrandId == null || effectiveBrandId <= 0) &&
+          result.totalItems <= 0 &&
+          cleanSearch != null &&
+          cleanSearch.isNotEmpty) {
+        return _getExpandedTechnicalSearchCatalogResult(
+          categoryId: categoryId,
+          brandId: effectiveBrandId,
+          search: cleanSearch,
+          page: page,
+          perPage: perPage,
+          orderBy: orderBy,
+        );
+      }
 
       if (kDebugMode) {
         debugPrint(
-          '📦 Catálogo filtrado por pa_marca: category=$categoryId '
-              'brandId=$brandId brand="$brandName" search="$cleanSearch" '
-              'page=$page/${attributeResult.totalPages} '
-              'total=${attributeResult.totalItems} items=${attributeResult.products.length}',
+          '📦 Catálogo filtrado: category=$categoryId '
+              'fabricante=$effectiveBrandId search="$cleanSearch" '
+              'page=$page/${result.totalPages} total=${result.totalItems} '
+              'items=${result.products.length}',
         );
       }
 
-      final verifiedAttributeResult = _filterCatalogResultByBrand(
-        attributeResult,
-        brandName,
-        orderBy: orderBy,
-      );
-
-      if (verifiedAttributeResult.products.isNotEmpty ||
-          verifiedAttributeResult.totalItems > 0) {
-        return verifiedAttributeResult;
-      }
-
-      if (brandName != null && brandName.trim().isNotEmpty) {
-        return _getLocalBrandFilteredCatalogResult(
-          categoryId: categoryId,
-          brandName: brandName,
-          search: cleanSearch,
-          orderBy: orderBy,
-          page: page,
-          perPage: perPage,
-        );
-      }
-
-      return _sortCatalogResultPage(verifiedAttributeResult, orderBy);
+      return _sortCatalogResultPage(result, orderBy);
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
     } catch (e) {
@@ -2023,6 +2260,7 @@ class ApiService {
       final result = await getProductosCatalogoFiltrado(
         categoryId: categoryId,
         brandId: brandId,
+        brandName: brand,
         page: 1,
         perPage: perPage,
         orderBy: orderBy,
@@ -2030,15 +2268,15 @@ class ApiService {
 
       List<Product> productos = result.products;
 
-      // Fallback solo para compatibilidad con filtros antiguos por texto.
-      // La nueva lógica correcta debe usar brandId + pa_marca.
       if (brand != null && brand.isNotEmpty && brandId == null) {
         productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
       }
 
       _sortProductsByRequestedOrder(productos, orderBy);
 
-      debugPrint('📊 Productos finales mostrados: ${productos.length}');
+      if (kDebugMode) {
+        debugPrint('📊 Productos finales mostrados: ${productos.length}');
+      }
       return productos;
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
@@ -2062,6 +2300,7 @@ class ApiService {
       final result = await getProductosCatalogoFiltrado(
         categoryId: categoryId,
         brandId: effectiveBrandId,
+        brandName: brand,
         search: search,
         page: page,
         perPage: perPage,
@@ -2070,8 +2309,6 @@ class ApiService {
 
       List<Product> productos = result.products;
 
-      // Fallback para código antiguo que todavía pase marca como texto
-      // sin poder resolver el ID del término pa_marca.
       if (brand != null && brand.isNotEmpty && effectiveBrandId == null) {
         productos = productos.where((p) => _productMatchesBrand(p, brand)).toList();
       }
@@ -2089,6 +2326,7 @@ class ApiService {
   // ================================================================
   // PEDIDOS
   // ================================================================
+
   Future<List<OrderMundicam>> getOrders(String customerEmail) async {
     await _ensureInitialized();
 
@@ -2130,22 +2368,26 @@ class ApiService {
         )
             .toList();
 
-        debugPrint('📦 Pedidos cargados: ${orders.length}');
+        if (kDebugMode) {
+          debugPrint('📦 Pedidos cargados: ${orders.length}');
+        }
 
         return orders;
       }
 
       return [];
     } catch (e) {
-      debugPrint('Error obteniendo pedidos: $e');
+      if (kDebugMode) {
+        debugPrint('Error obteniendo pedidos: $e');
+      }
       return [];
     }
   }
 
-
   // ================================================================
   // CREAR PEDIDO CON RESULTADO COMPLETO
   // ================================================================
+
   Future<OrderCreateResult> crearPedidoConResultado(
       Map<String, dynamic> orderData, {
         bool forceProcessingIfPending = true,
@@ -2153,7 +2395,9 @@ class ApiService {
     await _ensureInitialized();
 
     try {
-      debugPrint('📦 Creando pedido con resultado...');
+      if (kDebugMode) {
+        debugPrint('📦 Creando pedido con resultado...');
+      }
 
       final data = Map<String, dynamic>.from(orderData);
       final sanitizedLineItems = _sanitizeNewOrderLineItems(data['line_items']);
@@ -2171,8 +2415,10 @@ class ApiService {
         data['status'] = 'processing';
       }
 
-      debugPrint('📦 Status enviado: ${data['status']}');
-      debugPrint('📦 Payment method: ${data['payment_method']}');
+      if (kDebugMode) {
+        debugPrint('📦 Status enviado: ${data['status']}');
+        debugPrint('📦 Payment method: ${data['payment_method']}');
+      }
       _debugLineItems('LINE ITEMS PEDIDO ENVIADOS', sanitizedLineItems);
 
       final response = await _dio.post(
@@ -2181,11 +2427,15 @@ class ApiService {
         options: _wooOptions,
       );
 
-      debugPrint('📦 Status HTTP: ${response.statusCode}');
+      if (kDebugMode) {
+        debugPrint('📦 Status HTTP: ${response.statusCode}');
+      }
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         if (response.data is! Map) {
-          debugPrint('❌ Respuesta inesperada al crear pedido: ${response.data}');
+          if (kDebugMode) {
+            debugPrint('❌ Respuesta inesperada al crear pedido: ${response.data}');
+          }
 
           return OrderCreateResult.failure(
             'WooCommerce devolvió una respuesta no válida.',
@@ -2194,29 +2444,35 @@ class ApiService {
 
         final responseData = Map<String, dynamic>.from(response.data as Map);
 
-        debugPrint('✅ Pedido #${responseData['id']} creado correctamente');
-        debugPrint('🔑 Order key: ${responseData['order_key']}');
-        debugPrint('📌 Estado WooCommerce: ${responseData['status']}');
+        if (kDebugMode) {
+          debugPrint('✅ Pedido #${responseData['id']} creado correctamente');
+          debugPrint('🔑 Order key: ${responseData['order_key']}');
+          debugPrint('📌 Estado WooCommerce: ${responseData['status']}');
+        }
 
         final createdItems = responseData['line_items'];
-        if (createdItems is List) {
+        if (createdItems is List && kDebugMode) {
           debugPrint('📦 WooCommerce devolvió ${createdItems.length} línea(s)');
         }
 
         return OrderCreateResult.success(responseData);
       }
 
-      debugPrint('❌ Error al crear pedido: ${response.statusCode}');
-      debugPrint('Respuesta: ${response.data}');
+      if (kDebugMode) {
+        debugPrint('❌ Error al crear pedido: ${response.statusCode}');
+        debugPrint('Respuesta: ${response.data}');
+      }
 
       return OrderCreateResult.failure(
         'WooCommerce respondió con código ${response.statusCode}.',
       );
     } on DioException catch (e) {
-      debugPrint('❌ DioException al crear pedido:');
-      debugPrint('Status Code: ${e.response?.statusCode}');
-      debugPrint('Response: ${e.response?.data}');
-      debugPrint('Message: ${e.message}');
+      if (kDebugMode) {
+        debugPrint('❌ DioException al crear pedido:');
+        debugPrint('Status Code: ${e.response?.statusCode}');
+        debugPrint('Response: ${e.response?.data}');
+        debugPrint('Message: ${e.message}');
+      }
 
       final responseData = e.response?.data;
 
@@ -2226,11 +2482,12 @@ class ApiService {
 
       return OrderCreateResult.failure(_mapDioError(e));
     } catch (e) {
-      debugPrint('❌ Error al crear pedido: $e');
+      if (kDebugMode) {
+        debugPrint('❌ Error al crear pedido: $e');
+      }
       return OrderCreateResult.failure(e.toString());
     }
   }
-
 
   Future<bool> crearPedido(Map<String, dynamic> orderData) async {
     final result = await crearPedidoConResultado(
@@ -2243,6 +2500,7 @@ class ApiService {
   // ================================================================
   // CREAR PRESUPUESTO
   // ================================================================
+
   Future<Map<String, dynamic>?> _buscarPresupuestoAbiertoPorEmail(
       String email,
       ) async {
@@ -2291,10 +2549,13 @@ class ApiService {
 
       return null;
     } catch (e) {
-      debugPrint('⚠️ No se pudo buscar presupuesto abierto: $e');
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo buscar presupuesto abierto: $e');
+      }
       return null;
     }
   }
+
   Future<bool> crearPresupuesto({
     required String email,
     required int productId,
@@ -2313,11 +2574,13 @@ class ApiService {
         return false;
       }
 
-      debugPrint('📝 Solicitando presupuesto...');
-      debugPrint('📝 Email: $cleanEmail');
-      debugPrint('📝 Producto ID: $productId');
-      debugPrint('📝 Producto: $productName');
-      debugPrint('📝 Cantidad: $safeQuantity');
+      if (kDebugMode) {
+        debugPrint('📝 Solicitando presupuesto...');
+        debugPrint('📝 Email: $cleanEmail');
+        debugPrint('📝 Producto ID: $productId');
+        debugPrint('📝 Producto: $productName');
+        debugPrint('📝 Cantidad: $safeQuantity');
+      }
 
       final presupuestoAbierto =
       await _buscarPresupuestoAbiertoPorEmail(cleanEmail);
@@ -2326,9 +2589,11 @@ class ApiService {
         final orderId = presupuestoAbierto['id']?.toString();
 
         if (orderId != null && orderId.isNotEmpty) {
-          debugPrint(
-            '📝 Presupuesto abierto encontrado #$orderId. Actualizando líneas...',
-          );
+          if (kDebugMode) {
+            debugPrint(
+              '📝 Presupuesto abierto encontrado #$orderId. Actualizando líneas...',
+            );
+          }
 
           return actualizarPresupuesto(
             orderId: orderId,
@@ -2376,20 +2641,27 @@ class ApiService {
         options: _wooOptions,
       );
 
-      debugPrint('✅ Presupuesto creado - Status: ${response.statusCode}');
+      if (kDebugMode) {
+        debugPrint('✅ Presupuesto creado - Status: ${response.statusCode}');
+      }
 
       return response.statusCode == 201 || response.statusCode == 200;
     } on DioException catch (e) {
-      debugPrint('❌ Error al crear presupuesto:');
-      debugPrint('❌ Status Code: ${e.response?.statusCode}');
-      debugPrint('❌ Response: ${e.response?.data}');
+      if (kDebugMode) {
+        debugPrint('❌ Error al crear presupuesto:');
+        debugPrint('❌ Status Code: ${e.response?.statusCode}');
+        debugPrint('❌ Response: ${e.response?.data}');
+      }
 
       throw Exception(_mapDioError(e));
     } catch (e) {
-      debugPrint('❌ Error inesperado creando presupuesto: $e');
+      if (kDebugMode) {
+        debugPrint('❌ Error inesperado creando presupuesto: $e');
+      }
       return false;
     }
   }
+
   Future<bool> actualizarPresupuesto({
     required String orderId,
     required int productId,
@@ -2439,10 +2711,13 @@ class ApiService {
 
       return response.statusCode == 200;
     } catch (e) {
-      debugPrint('Error actualizando presupuesto: $e');
+      if (kDebugMode) {
+        debugPrint('Error actualizando presupuesto: $e');
+      }
       return false;
     }
   }
+
   Future<bool> eliminarProductoPresupuesto({
     required String orderId,
     required int productId,
@@ -2476,11 +2751,12 @@ class ApiService {
 
       return response.statusCode == 200;
     } catch (e) {
-      debugPrint('Error eliminando producto de presupuesto: $e');
+      if (kDebugMode) {
+        debugPrint('Error eliminando producto de presupuesto: $e');
+      }
       return false;
     }
   }
-
 
   // ================================================================
   // BÚSQUEDA DE PRODUCTOS
@@ -2510,7 +2786,9 @@ class ApiService {
 
       return lista;
     } catch (e) {
-      debugPrint('Error en buscarProductos: $e');
+      if (kDebugMode) {
+        debugPrint('Error en buscarProductos: $e');
+      }
       return [];
     }
   }
@@ -2518,6 +2796,46 @@ class ApiService {
   // ================================================================
   // CATEGORÍAS
   // ================================================================
+
+  List<CategoryModel> _filtrarCategoriasVisibles(
+      List<CategoryModel> categorias,
+      ) {
+    return categorias.where((categoria) {
+      if (categoria.id <= 0) return false;
+      if (categoria.count <= 0) return false;
+
+      final normalizedName = categoria.name
+          .toLowerCase()
+          .trim()
+          .replaceAll('á', 'a')
+          .replaceAll('à', 'a')
+          .replaceAll('ä', 'a')
+          .replaceAll('â', 'a')
+          .replaceAll('é', 'e')
+          .replaceAll('è', 'e')
+          .replaceAll('ë', 'e')
+          .replaceAll('ê', 'e')
+          .replaceAll('í', 'i')
+          .replaceAll('ì', 'i')
+          .replaceAll('ï', 'i')
+          .replaceAll('î', 'i')
+          .replaceAll('ó', 'o')
+          .replaceAll('ò', 'o')
+          .replaceAll('ö', 'o')
+          .replaceAll('ô', 'o')
+          .replaceAll('ú', 'u')
+          .replaceAll('ù', 'u')
+          .replaceAll('ü', 'u')
+          .replaceAll('û', 'u')
+          .replaceAll('ñ', 'n')
+          .replaceAll(RegExp(r'\s+'), '');
+
+      final forbidden = normalizedName.contains('sincategoria') ||
+          normalizedName.contains('uncategorized');
+
+      return !forbidden;
+    }).toList();
+  }
 
   Future<List<CategoryModel>> getCategorias({
     bool soloConProductos = true,
@@ -2638,15 +2956,12 @@ class ApiService {
     }
 
     try {
-      // Primero intentamos la lógica de marcas tipo beta/Store API.
       var marcas = await _getBrandTermsFromStoreApi(hideEmpty: hideEmpty);
 
-      // Segundo intento: endpoint de marcas de WooCommerce Brands si existe.
       if (marcas.isEmpty) {
         marcas = await _getBrandTermsFromWooBrandsApi(hideEmpty: hideEmpty);
       }
 
-      // Último fallback: atributo pa_marca.
       if (marcas.isEmpty) {
         marcas = await _getBrandTermsFromAttributeTerms(hideEmpty: hideEmpty);
       }
@@ -2673,7 +2988,9 @@ class ApiService {
 
       return marcas;
     } catch (e) {
-      debugPrint('⚠️ Error cargando marcas: $e');
+      if (kDebugMode) {
+        debugPrint('⚠️ Error cargando marcas: $e');
+      }
       return [];
     }
   }
@@ -2877,7 +3194,6 @@ class ApiService {
     int? categoryId,
     String? search,
   }) async {
-    // 1) WooCommerce Brands / Product Brands como taxonomía.
     final productBrandCounts = await _getStoreCollectionTaxonomyCounts(
       taxonomy: 'product_brand',
       categoryId: categoryId,
@@ -2906,9 +3222,8 @@ class ApiService {
       }
     }
 
-    // 2) Marca como atributo pa_marca.
     final attributeCounts = await _getStoreCollectionAttributeCounts(
-      taxonomy: 'pa_marca',
+      taxonomy: 'pa_marcas',
       categoryId: categoryId,
       search: search,
     );
@@ -2924,7 +3239,7 @@ class ApiService {
       if (result.isNotEmpty) {
         if (kDebugMode) {
           debugPrint(
-            '⚡ Marcas rápidas pa_marca: category=$categoryId '
+            '⚡ Fabricantes rápidos pa_marcas: category=$categoryId '
                 'search="${search?.trim()}" total=${result.length}',
           );
         }
@@ -2935,16 +3250,57 @@ class ApiService {
     return [];
   }
 
+  // ✅ MÉTODO PRINCIPAL ACTUALIZADO CON CACHÉ
   Future<List<Map<String, dynamic>>> getMarcasDisponiblesCatalogo({
     int? categoryId,
     String? search,
   }) async {
+    final cacheKey = 'marcas_cat:${categoryId ?? 0}|search:${search?.trim().toLowerCase() ?? ''}';
+
+    final cached = _marcasDisponiblesCache[cacheKey];
+    if (cached != null && cached.isValid) {
+      if (kDebugMode) {
+        debugPrint('⚡ Marcas disponibles desde caché: $cacheKey');
+      }
+      return cached.marcas;
+    }
+
+    final cleanSearch = search?.trim();
+
+    if (categoryId != null &&
+        categoryId > 0 &&
+        (cleanSearch == null || cleanSearch.isEmpty)) {
+      final categoryBrands = await getBrandsForCategory(categoryId);
+
+      if (categoryBrands.isNotEmpty) {
+        _marcasDisponiblesCache[cacheKey] = _MarcasDisponiblesCache(
+          marcas: categoryBrands,
+          timestamp: DateTime.now(),
+        );
+
+        return categoryBrands;
+      }
+    }
+
     final fastBrands = await _getFastBrandCountsFromStoreApi(
       categoryId: categoryId,
       search: search,
     );
 
     if (fastBrands.isNotEmpty) {
+      _marcasDisponiblesCache[cacheKey] = _MarcasDisponiblesCache(
+        marcas: fastBrands,
+        timestamp: DateTime.now(),
+      );
+
+      if (_marcasDisponiblesCache.length > 50) {
+        final entries = _marcasDisponiblesCache.entries.toList()
+          ..sort((a, b) => a.value.timestamp.compareTo(b.value.timestamp));
+        for (final entry in entries.take(10)) {
+          _marcasDisponiblesCache.remove(entry.key);
+        }
+      }
+
       return fastBrands;
     }
 
@@ -3031,6 +3387,13 @@ class ApiService {
         ),
       );
 
+      if (disponibles.isNotEmpty) {
+        _marcasDisponiblesCache[cacheKey] = _MarcasDisponiblesCache(
+          marcas: disponibles,
+          timestamp: DateTime.now(),
+        );
+      }
+
       if (kDebugMode) {
         debugPrint(
           '🏷️ Marcas compatibles por fallback local: category=$categoryId '
@@ -3048,24 +3411,296 @@ class ApiService {
   }
 
   // ================================================================
-  // FILTRAR CATEGORÍAS
+  // FILTROS CATÁLOGO COMO WEB MUNDICAM
   // ================================================================
 
-  List<CategoryModel> _filtrarCategoriasVisibles(
-      List<CategoryModel> categorias,
-      ) {
-    final Map<int, List<CategoryModel>> hijosPorPadre = {};
-    for (final categoria in categorias) {
-      hijosPorPadre.putIfAbsent(categoria.parent, () => []).add(categoria);
+  static const List<CatalogFilterDefinition> _catalogFilterDefinitions = [
+    CatalogFilterDefinition(
+      key: 'fabricante',
+      title: 'Fabricante',
+      taxonomy: 'pa_marcas',
+      attributeId: 26,
+    ),
+    CatalogFilterDefinition(
+      key: 'resolucion',
+      title: 'Resolución',
+      taxonomy: 'pa_resolucion',
+      attributeId: 4,
+    ),
+    CatalogFilterDefinition(
+      key: 'lente',
+      title: 'Lente',
+      taxonomy: 'pa_lente',
+      attributeId: 1,
+    ),
+    CatalogFilterDefinition(
+      key: 'proteccion',
+      title: 'Protección',
+      taxonomy: 'pa_proteccion',
+      attributeId: 7,
+    ),
+    CatalogFilterDefinition(
+      key: 'microfono',
+      title: 'Micrófono Integrado',
+      taxonomy: 'pa_microfono-integrado',
+      attributeId: 2,
+    ),
+    CatalogFilterDefinition(
+      key: 'wifi',
+      title: 'WIFI',
+      taxonomy: 'pa_wifi',
+      attributeId: 6,
+    ),
+    CatalogFilterDefinition(
+      key: 'ancho_banda',
+      title: 'Ancho de Banda',
+      taxonomy: 'pa_ancho-de-banda',
+      attributeId: 9,
+    ),
+    CatalogFilterDefinition(
+      key: 'grabacion_main_stream',
+      title: 'Grabación Main Stream',
+      taxonomy: 'pa_grabacion-main-stream',
+      attributeId: 11,
+    ),
+    CatalogFilterDefinition(
+      key: 'protocolo',
+      title: 'Protocolo',
+      taxonomy: 'pa_protocolo',
+      attributeId: 3,
+    ),
+    CatalogFilterDefinition(
+      key: 'smd',
+      title: 'SMD+',
+      taxonomy: 'pa_smd',
+      attributeId: 12,
+    ),
+  ];
+
+  String _catalogFiltersCacheKey({
+    required int categoryId,
+    String? search,
+  }) {
+    return [
+      'category:$categoryId',
+      'search:${search?.trim().toLowerCase() ?? ''}',
+    ].join('|');
+  }
+
+  Map<int, int> _parseAttributeCounts(dynamic data) {
+    final counts = <int, int>{};
+
+    if (data is! List) {
+      return counts;
     }
 
-    bool tieneProductos(CategoryModel cat) {
-      if (cat.count > 0) return true;
-      final hijos = hijosPorPadre[cat.id] ?? [];
-      return hijos.any((h) => tieneProductos(h));
+    for (final raw in data) {
+      if (raw is! Map) continue;
+
+      final item = Map<dynamic, dynamic>.from(raw);
+      final termId = _parseIntValue(item['term']);
+      final count = _parseIntValue(item['count']);
+
+      if (termId > 0 && count > 0) {
+        counts[termId] = count;
+      }
     }
 
-    return categorias.where(tieneProductos).toList();
+    return counts;
+  }
+
+  Future<List<Map<String, dynamic>>> _getAttributeTerms(
+      CatalogFilterDefinition definition,
+      ) async {
+    final cached = _attributeTermsCache[definition.attributeId];
+    if (cached != null && cached.isNotEmpty) {
+      return cached;
+    }
+
+    final terms = <Map<String, dynamic>>[];
+
+    int page = 1;
+    int totalPages = 1;
+
+    do {
+      final response = await _dio.get(
+        '/wp-json/wc/v3/products/attributes/${definition.attributeId}/terms',
+        queryParameters: {
+          'per_page': 100,
+          'page': page,
+          'hide_empty': false,
+        },
+        options: _wooOptions,
+      );
+
+      final data = response.data is List ? response.data as List : [];
+
+      for (final raw in data) {
+        if (raw is! Map) continue;
+
+        final term = Map<String, dynamic>.from(raw);
+        final id = _parseIntValue(term['id']);
+        final name = term['name']?.toString().trim() ?? '';
+
+        if (id <= 0 || name.isEmpty) continue;
+
+        terms.add({
+          'id': id,
+          'name': name,
+          'slug': term['slug']?.toString().trim() ?? '',
+          'taxonomy': definition.taxonomy,
+          'attribute_id': definition.attributeId,
+        });
+      }
+
+      totalPages = _parseHeaderInt(response.headers, 'x-wp-totalpages', 1);
+      page++;
+    } while (page <= totalPages);
+
+    _attributeTermsCache[definition.attributeId] = terms;
+
+    return terms;
+  }
+
+  Future<List<CatalogFilterGroup>> getCatalogFiltersForCategory({
+    required int categoryId,
+    String? search,
+    bool forceRefresh = false,
+  }) async {
+    await _ensureInitialized();
+
+    if (categoryId <= 0) {
+      return [];
+    }
+
+    final cacheKey = _catalogFiltersCacheKey(
+      categoryId: categoryId,
+      search: search,
+    );
+
+    if (!forceRefresh) {
+      final cached = _catalogFiltersCache[cacheKey];
+      if (cached != null && cached.isValid) {
+        if (kDebugMode) {
+          debugPrint('⚡ Filtros catálogo desde caché: $cacheKey');
+        }
+        return cached.groups;
+      }
+    }
+
+    final queryParams = <String, dynamic>{
+      'category': categoryId.toString(),
+    };
+
+    final cleanSearch = search?.trim();
+    if (cleanSearch != null && cleanSearch.isNotEmpty) {
+      queryParams['search'] = cleanSearch;
+    }
+
+    for (int i = 0; i < _catalogFilterDefinitions.length; i++) {
+      final definition = _catalogFilterDefinitions[i];
+      queryParams['calculate_attribute_counts[$i][taxonomy]'] =
+          definition.taxonomy;
+      queryParams['calculate_attribute_counts[$i][query_type]'] = 'or';
+    }
+
+    final response = await _dio.get(
+      '/wp-json/wc/store/v1/products/collection-data',
+      queryParameters: queryParams,
+    );
+
+    final responseData = response.data is Map
+        ? Map<String, dynamic>.from(response.data as Map)
+        : <String, dynamic>{};
+
+    final countsByTermId = _parseAttributeCounts(
+      responseData['attribute_counts'],
+    );
+
+    if (countsByTermId.isEmpty) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ collection-data no devolvió attribute_counts para category=$categoryId',
+        );
+      }
+      return [];
+    }
+
+    final groups = <CatalogFilterGroup>[];
+
+    for (final definition in _catalogFilterDefinitions) {
+      final terms = await _getAttributeTerms(definition);
+      final options = <CatalogFilterOption>[];
+
+      for (final term in terms) {
+        final id = _parseIntValue(term['id']);
+        final count = countsByTermId[id] ?? 0;
+
+        if (id <= 0 || count <= 0) continue;
+
+        options.add(
+          CatalogFilterOption(
+            id: id,
+            name: term['name']?.toString().trim() ?? '',
+            slug: term['slug']?.toString().trim() ?? '',
+            count: count,
+          ),
+        );
+      }
+
+      if (options.isEmpty) continue;
+
+      groups.add(
+        CatalogFilterGroup(
+          key: definition.key,
+          title: definition.title,
+          taxonomy: definition.taxonomy,
+          attributeId: definition.attributeId,
+          options: options,
+        ),
+      );
+    }
+
+    _catalogFiltersCache[cacheKey] = _CatalogFiltersCacheEntry(
+      groups: groups,
+      createdAt: DateTime.now(),
+    );
+
+    if (kDebugMode) {
+      debugPrint('✅ Filtros catálogo web cargados category=$categoryId');
+      for (final group in groups) {
+        debugPrint('   ${group.title}: ${group.options.length} opciones');
+      }
+    }
+
+    return groups;
+  }
+
+  Future<List<Map<String, dynamic>>> getBrandsForCategory(
+      int categoryId, {
+        String? search,
+      }) async {
+    final groups = await getCatalogFiltersForCategory(
+      categoryId: categoryId,
+      search: search,
+    );
+
+    final fabricanteGroup = groups.where(
+          (group) => group.taxonomy == 'pa_marcas',
+    );
+
+    if (fabricanteGroup.isEmpty) {
+      return [];
+    }
+
+    return fabricanteGroup.first.options.map((option) {
+      return {
+        ...option.toMap(),
+        'taxonomy': 'pa_marcas',
+        'attribute_id': 26,
+        'source': 'collection_data_pa_marcas',
+      };
+    }).toList();
   }
 
   // ================================================================
@@ -3114,6 +3749,7 @@ class ApiService {
   // ================================================================
   // ÓRDENES
   // ================================================================
+
   Future<Map<String, dynamic>?> getOrdenCompleta(String orderId) async {
     await _ensureInitialized();
 
@@ -3132,19 +3768,24 @@ class ApiService {
         final rawLineItems = orderData['line_items'];
         final lineItems = rawLineItems is List ? rawLineItems : <dynamic>[];
 
-        debugPrint(
-          '📦 Orden #$cleanOrderId cargada con ${lineItems.length} producto(s)',
-        );
+        if (kDebugMode) {
+          debugPrint(
+            '📦 Orden #$cleanOrderId cargada con ${lineItems.length} producto(s)',
+          );
+        }
 
         return orderData;
       }
 
       return null;
     } catch (e) {
-      debugPrint('Error al obtener orden $cleanOrderId: $e');
+      if (kDebugMode) {
+        debugPrint('Error al obtener orden $cleanOrderId: $e');
+      }
       return null;
     }
   }
+
   Future<List<QuoteMundicam>> getPresupuestosPorEmail(String email) async {
     await _ensureInitialized();
 
@@ -3164,7 +3805,9 @@ class ApiService {
       final data = response.data;
       final total = data is List ? data.length : 0;
 
-      debugPrint('📊 Presupuestos encontrados: $total');
+      if (kDebugMode) {
+        debugPrint('📊 Presupuestos encontrados: $total');
+      }
 
       if (data is! List) return [];
 
@@ -3177,11 +3820,12 @@ class ApiService {
       )
           .toList();
     } catch (e) {
-      debugPrint('❌ Error getPresupuestosPorEmail: $e');
+      if (kDebugMode) {
+        debugPrint('❌ Error getPresupuestosPorEmail: $e');
+      }
       return [];
     }
   }
-
 
   // ================================================================
   // PRODUCTO POR ID
@@ -3199,7 +3843,9 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      debugPrint('Error al obtener producto $id: $e');
+      if (kDebugMode) {
+        debugPrint('Error al obtener producto $id: $e');
+      }
       return null;
     }
   }
@@ -3225,7 +3871,9 @@ class ApiService {
         'description': descripcion,
       };
 
-      debugPrint('📝 Creando RMA: ${jsonEncode(data)}');
+      if (kDebugMode) {
+        debugPrint('📝 Creando RMA: ${jsonEncode(data)}');
+      }
 
       final response = await _dio.post(
         '/wp-json/mundicam/v1/rma',
@@ -3233,10 +3881,14 @@ class ApiService {
         options: _wooOptions,
       );
 
-      debugPrint('✅ RMA creada - Status: ${response.statusCode}');
+      if (kDebugMode) {
+        debugPrint('✅ RMA creada - Status: ${response.statusCode}');
+      }
       return response.statusCode == 201 || response.statusCode == 200;
     } catch (e) {
-      debugPrint('❌ Error al crear RMA: $e');
+      if (kDebugMode) {
+        debugPrint('❌ Error al crear RMA: $e');
+      }
       return false;
     }
   }
@@ -3279,54 +3931,41 @@ class ApiService {
   // ================================================================
   // MANEJO DE ERRORES
   // ================================================================
+
   String _mapDioError(DioException e) {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
         return 'Tiempo de conexión agotado';
-
       case DioExceptionType.receiveTimeout:
         return 'Tiempo de respuesta agotado';
-
       case DioExceptionType.sendTimeout:
         return 'Tiempo de envío agotado';
-
       case DioExceptionType.badResponse:
         if (e.response?.statusCode == 401) {
           return 'Error de autenticación (401). Verifica las credenciales API.';
         }
-
         if (e.response?.statusCode == 403) {
           return 'No tienes permisos para realizar esta acción.';
         }
-
         if (e.response?.statusCode == 404) {
           return 'No se encontró el recurso solicitado.';
         }
-
         if (e.response?.statusCode == 400) {
           final data = e.response?.data;
-
           if (data is Map && data['message'] != null) {
             return data['message'].toString();
           }
-
           return 'Solicitud no válida. Revisa los datos enviados.';
         }
-
         final data = e.response?.data;
-
         if (data is Map && data['message'] != null) {
           return data['message'].toString();
         }
-
         return 'Error del servidor: ${e.response?.statusCode}';
-
       case DioExceptionType.cancel:
         return 'Petición cancelada';
-
       default:
         return 'Error de red: ${e.message}';
     }
   }
-
 }

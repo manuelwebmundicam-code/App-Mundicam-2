@@ -7,7 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_page.dart';
 import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
-import 'package:mundicam/features/profile/presentation/providers/user_provider.dart';
+import 'package:mundicam/core/network/api_service.dart';
 
 // ================================================================
 // PROVIDER
@@ -203,11 +203,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       '📄 Puedes solicitar presupuesto desde el botón "Presupuesto" del producto. Si no hay stock, la compra queda bloqueada, pero puedes pedir valoración comercial.',
       options: [
         _ChatOption(
-          label: 'Abrir presupuestos',
+          label: 'Ir a presupuestos',
           icon: Icons.description_rounded,
           action: _ChatAction.navigateToQuotes,
           successMessage: '📄 Abriendo presupuestos...',
-          requiresLogin: true,
         ),
         _ChatOption(
           label: 'Contactar comercial',
@@ -226,11 +225,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       '📦 Puedes consultar tus pedidos desde la sección "Pedidos". Verás estado, fecha, total y productos incluidos.',
       options: [
         _ChatOption(
-          label: 'Abrir pedidos',
+          label: 'Ir a pedidos',
           icon: Icons.local_shipping_rounded,
           action: _ChatAction.navigateToOrders,
           successMessage: '📦 Abriendo pedidos...',
-          requiresLogin: true,
         ),
       ],
     ),
@@ -242,11 +240,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       '🔧 Para solicitar una RMA, entra en pedidos, localiza un pedido completado y pulsa el botón RMA del producto correspondiente.',
       options: [
         _ChatOption(
-          label: 'Abrir pedidos',
+          label: 'Ir a pedidos',
           icon: Icons.local_shipping_rounded,
           action: _ChatAction.navigateToOrders,
           successMessage: '📦 Abriendo pedidos para gestionar RMA...',
-          requiresLogin: true,
         ),
         _ChatOption(
           label: 'Contactar soporte',
@@ -346,12 +343,14 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
           const _ChatOption(
             label: 'Pedidos',
             icon: Icons.local_shipping_rounded,
-            nextNodeKey: 'pedidos',
+            action: _ChatAction.navigateToOrders,
+            successMessage: '📦 Abriendo pedidos...',
           ),
           const _ChatOption(
             label: 'Presupuestos',
             icon: Icons.description_rounded,
-            nextNodeKey: 'presupuestos',
+            action: _ChatAction.navigateToQuotes,
+            successMessage: '📄 Abriendo presupuestos...',
           ),
           const _ChatOption(
             label: 'Soporte / RMA',
@@ -426,11 +425,10 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         '📦 Consulta pedidos, estados, productos incluidos y gestiones asociadas.',
         options: [
           const _ChatOption(
-            label: 'Abrir pedidos',
+            label: 'Ir a pedidos',
             icon: Icons.local_shipping_rounded,
             action: _ChatAction.navigateToOrders,
             successMessage: '📦 Abriendo pedidos...',
-            requiresLogin: true,
           ),
           _faqOption('pedido'),
           _faqOption('pedidos'),
@@ -443,15 +441,13 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
         ],
       ),
       'presupuestos': _ChatNode(
-        prompt:
-        '📄 Gestiona presupuestos aceptables y solicitudes comerciales.',
+        prompt: '📄 Gestiona presupuestos aceptables y solicitudes comerciales.',
         options: [
           const _ChatOption(
-            label: 'Abrir presupuestos',
+            label: 'Ir a presupuestos',
             icon: Icons.description_rounded,
             action: _ChatAction.navigateToQuotes,
             successMessage: '📄 Abriendo presupuestos...',
-            requiresLogin: true,
           ),
           _faqOption('presupuesto'),
           const _ChatOption(
@@ -737,19 +733,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     FocusScope.of(context).unfocus();
     _addMessage(_ChatSender.user, option.label);
 
-    if (option.requiresLogin) {
-      final user = ref.read(currentUserProvider).value;
-
-      if (user == null) {
-        await _simulateTyping(milliseconds: 300);
-        _addMessage(
-          _ChatSender.bot,
-          '⚠️ Necesitas iniciar sesión para acceder a esta sección.',
-        );
-        return;
-      }
-    }
-
     await _simulateTyping();
 
     if (option.successMessage != null && option.successMessage!.isNotEmpty) {
@@ -777,23 +760,22 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
 
       case _ChatAction.searchBrand:
         final brand = option.brandName;
-
         if (brand == null) return;
 
         _addMessage(
           _ChatSender.bot,
-          'Te llevo al catálogo para buscar $brand. Si el filtro automático no se aplica, escribe "$brand" en el buscador del catálogo.',
+          'Te llevo al catálogo para buscar $brand.',
         );
 
         _openCatalog(searchQuery: brand, brandName: brand);
         break;
 
       case _ChatAction.navigateToOrders:
-        _navigateTo(const OrdersPage());
+        _navigateToOrders();
         break;
 
       case _ChatAction.navigateToQuotes:
-        _navigateTo(const QuotesPage());
+        _navigateToQuotes();
         break;
 
       case _ChatAction.whatsapp:
@@ -833,6 +815,22 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     }
   }
 
+  void _navigateToOrders() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const OrdersPage()),
+    );
+    _closeChatAfterNavigation();
+  }
+
+  void _navigateToQuotes() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const QuotesPage()),
+    );
+    _closeChatAfterNavigation();
+  }
+
   void _openCatalog({String? searchQuery, String? brandName}) {
     final args = <String, String>{};
 
@@ -844,20 +842,23 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       args['brandName'] = brandName.trim();
     }
 
-    _navigateTo(const ProductosPage(), arguments: args.isEmpty ? null : args);
-  }
-
-  void _navigateTo(Widget page, {Object? arguments}) {
-    Navigator.of(context).push(
+    Navigator.push(
+      context,
       MaterialPageRoute(
-        builder: (_) => page,
-        settings: RouteSettings(arguments: arguments),
+        builder: (_) => ProductosPage(
+          onGoHome: () => Navigator.pop(context),
+          onGoCart: () {},
+          onGoQuotes: () {},
+        ),
+        settings: RouteSettings(arguments: args.isEmpty ? null : args),
       ),
     );
+    _closeChatAfterNavigation();
+  }
 
+  void _closeChatAfterNavigation() {
     Future.delayed(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-
       ref.read(chatBoxProvider.notifier).state = false;
       FocusScope.of(context).unfocus();
     });
@@ -878,253 +879,99 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
       }) async {
     try {
       final launched = await launchUrl(uri, mode: mode);
-
-      if (!launched) {
+      if (!launched && mounted) {
         _addMessage(_ChatSender.bot, '⚠️ $errorMessage');
       }
     } catch (_) {
-      _addMessage(_ChatSender.bot, '⚠️ $errorMessage');
+      if (mounted) {
+        _addMessage(_ChatSender.bot, '⚠️ $errorMessage');
+      }
+    }
+  }
+
+  Future<void> _searchProductAndNavigate(String query) async {
+    try {
+      final api = ApiService();
+      final productos = await api.buscarProductos(query);
+
+      if (!mounted) return;
+
+      if (productos.isEmpty) {
+        _addMessage(
+          _ChatSender.bot,
+          'No he encontrado productos con "$query". ¿Quieres abrir el catálogo para buscar?',
+        );
+        _setContextOptions([
+          _ChatOption(
+            label: 'Abrir catálogo',
+            icon: Icons.grid_view_rounded,
+            action: _ChatAction.openCatalog,
+            searchQuery: query,
+          ),
+          const _ChatOption(
+            label: 'Volver al menú',
+            icon: Icons.home_rounded,
+            nextNodeKey: 'root',
+          ),
+        ]);
+        return;
+      }
+
+      if (productos.length == 1) {
+        final producto = productos.first;
+        _addMessage(_ChatSender.bot, '✅ Encontrado: ${producto.name}');
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ProductosPage(
+              onGoHome: () => Navigator.pop(context),
+              onGoCart: () {},
+              onGoQuotes: () {},
+            ),
+          ),
+        );
+        _closeChatAfterNavigation();
+        return;
+      }
+
+      final message =
+          'Encontrados ${productos.length} productos. ¿Quieres verlos en el catálogo?';
+      _addMessage(_ChatSender.bot, message);
+      _setContextOptions([
+        _ChatOption(
+          label: 'Ver en catálogo',
+          icon: Icons.grid_view_rounded,
+          action: _ChatAction.openCatalog,
+          searchQuery: query,
+          successMessage: '📋 Abriendo catálogo...',
+        ),
+        const _ChatOption(
+          label: 'Volver al menú',
+          icon: Icons.home_rounded,
+          nextNodeKey: 'root',
+        ),
+      ]);
+    } catch (e) {
+      if (mounted) {
+        _addMessage(
+          _ChatSender.bot,
+          'No he podido buscar productos. Inténtalo de nuevo.',
+        );
+      }
     }
   }
 
   Future<void> _handleFreeText() async {
     final raw = _inputController.text.trim();
-
     if (raw.isEmpty || _isTyping) return;
 
     _inputController.clear();
     _addMessage(_ChatSender.user, raw);
 
     await _simulateTyping(milliseconds: 550);
-
     if (!mounted) return;
 
-    final normalized = _normalize(raw);
-
-    final brand = _detectBrand(raw);
-    if (brand != null) {
-      _setContextOptions([
-        _ChatOption(
-          label: 'Ver $brand',
-          icon: Icons.sell_outlined,
-          action: _ChatAction.searchBrand,
-          brandName: brand,
-        ),
-        const _ChatOption(
-          label: 'Abrir catálogo',
-          icon: Icons.grid_view_rounded,
-          action: _ChatAction.openCatalog,
-        ),
-        const _ChatOption(
-          label: 'Contactar comercial',
-          icon: Icons.chat_rounded,
-          action: _ChatAction.whatsapp,
-          whatsappText:
-          'Hola MundiCam, necesito asesoramiento comercial sobre una marca o producto.',
-        ),
-      ]);
-
-      _addMessage(
-        _ChatSender.bot,
-        'He detectado la marca $brand. ¿Quieres ver productos o contactar con MundiCam?',
-      );
-
-      return;
-    }
-
-    if (_looksLikeReference(raw)) {
-      _setContextOptions([
-        _ChatOption(
-          label: 'Buscar referencia',
-          icon: Icons.search_rounded,
-          action: _ChatAction.openCatalog,
-          searchQuery: raw,
-        ),
-        const _ChatOption(
-          label: 'Pedir ayuda',
-          icon: Icons.chat_rounded,
-          action: _ChatAction.whatsapp,
-          whatsappText:
-          'Hola MundiCam, necesito ayuda para localizar una referencia de producto.',
-        ),
-      ]);
-
-      _addMessage(
-        _ChatSender.bot,
-        'Parece una referencia o SKU. Puedo buscarla en catálogo o ayudarte por WhatsApp.',
-      );
-
-      return;
-    }
-
-    final category = _detectCategory(normalized);
-    if (category != null) {
-      _showNode('cat_${category.key}');
-      return;
-    }
-
-    final intentNode = _detectIntent(normalized);
-    if (intentNode != null) {
-      _showNode(intentNode);
-      return;
-    }
-
-    if (_containsAny(normalized, [
-      'hola',
-      'buenas',
-      'buenos dias',
-      'buenas tardes',
-    ])) {
-      _addMessage(
-        _ChatSender.bot,
-        '¡Hola! Puedes escribir una marca, referencia o elegir una opción rápida.',
-      );
-      return;
-    }
-
-    if (_containsAny(normalized, ['gracias', 'perfecto', 'ok', 'vale'])) {
-      _addMessage(_ChatSender.bot, 'De nada. ¿Te ayudo con algo más?');
-      return;
-    }
-
-    _setContextOptions([
-      const _ChatOption(
-        label: 'Abrir catálogo',
-        icon: Icons.grid_view_rounded,
-        action: _ChatAction.openCatalog,
-      ),
-      const _ChatOption(
-        label: 'FAQ',
-        icon: Icons.help_outline_rounded,
-        nextNodeKey: 'faq_pedido',
-      ),
-      const _ChatOption(
-        label: 'Contactar MundiCam',
-        icon: Icons.chat_rounded,
-        action: _ChatAction.whatsapp,
-        whatsappText:
-        'Hola MundiCam, necesito ayuda con una consulta desde la app.',
-      ),
-    ]);
-
-    _addMessage(
-      _ChatSender.bot,
-      'No he podido identificar exactamente tu consulta. Prueba con una marca, referencia, "cámaras", "alarmas", "pedido", "RMA" o "presupuesto".',
-    );
-  }
-
-  _CategoryDef? _detectCategory(String normalized) {
-    final checks = <String, List<String>>{
-      'video': [
-        'camara',
-        'camaras',
-        'cctv',
-        'videovigilancia',
-        'nvr',
-        'dvr',
-        'grabador',
-        'ip',
-        'poe',
-      ],
-      'alarmas': [
-        'alarma',
-        'alarmas',
-        'intrusion',
-        'detector',
-        'sensor',
-        'sirena',
-        'teclado',
-        'central',
-      ],
-      'acceso': [
-        'acceso',
-        'cerradura',
-        'lector',
-        'biometrico',
-        'huella',
-        'tarjeta',
-      ],
-      'incendio': ['incendio', 'fuego', 'humo', 'pulsador'],
-      'networking': [
-        'red',
-        'switch',
-        'router',
-        'wifi',
-        'wi-fi',
-        'networking',
-        'omada',
-        'punto de acceso',
-      ],
-      'iot': [
-        'sim',
-        'm2m',
-        'iot',
-        'datos',
-        'multioperador',
-        'apn',
-        'conectividad',
-        'wisim',
-      ],
-      'autonoma': [
-        'solar',
-        'autonoma',
-        'torre',
-        'pod',
-        'obra',
-        'evento',
-        'evolve',
-        'xtender',
-      ],
-    };
-
-    for (final entry in checks.entries) {
-      if (_containsAny(normalized, entry.value)) {
-        return _categories.firstWhere((category) => category.key == entry.key);
-      }
-    }
-
-    return null;
-  }
-
-  String? _detectIntent(String normalized) {
-    final checks = <String, List<String>>{
-      'faq_stock': ['stock', 'disponible', 'existencias', 'sin stock'],
-      'faq_presupuesto': [
-        'presupuesto',
-        'presupuestos',
-        'cotizacion',
-        'oferta',
-      ],
-      'faq_pedidos': [
-        'pedido',
-        'pedidos',
-        'estado',
-        'seguimiento',
-        'donde esta',
-        'cuando llega',
-      ],
-      'faq_rma': ['rma', 'garantia', 'averia', 'reparacion', 'devolucion'],
-      'faq_credito': ['credito', 'limite', 'forma de pago', 'pago'],
-      'faq_gestor': ['gestor', 'comercial', 'asesor'],
-      'faq_direccion': ['direccion', 'envio', 'entrega', 'checkout'],
-      'contacto': [
-        'contacto',
-        'telefono',
-        'whatsapp',
-        'email',
-        'correo',
-        'hablar',
-        'soporte',
-      ],
-    };
-
-    for (final entry in checks.entries) {
-      if (_containsAny(normalized, entry.value)) {
-        return entry.key;
-      }
-    }
-
-    return null;
+    await _searchProductAndNavigate(raw);
   }
 
   void _setContextOptions(List<_ChatOption> options) {
@@ -1216,7 +1063,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
                   if (_isTyping && index == _messages.length) {
                     return const _TypingIndicator();
                   }
-
                   return _buildBubble(_messages[index]);
                 },
               ),

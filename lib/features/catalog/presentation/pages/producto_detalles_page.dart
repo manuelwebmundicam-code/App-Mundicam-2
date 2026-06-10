@@ -74,7 +74,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
       final precioActual = double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0;
       final recomendados = todos
-          .where((p) => p.id != product.id && p.hasStock)
+          .where((p) => p.id != product.id && p.canAddToCart)
           .map((p) {
         int score = 0;
         if (marca != null) {
@@ -112,7 +112,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               .where(
                 (p) =>
             p.id != product.id &&
-                p.hasStock &&
+                p.canAddToCart &&
                 !finales.any((f) => f.id == p.id),
           )
               .take(8 - finales.length),
@@ -242,6 +242,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     tieneDescuento ? ((precioRegular - precio) / precioRegular * 100).round() : 0;
     final ahorro = tieneDescuento ? precioRegular - precio : 0.0;
     final enStock = p.hasStock;
+    final bajoConsulta = p.isUnderConsultation;
     final descCorta = _normalizeMultilineText(_limpiarHtml(p.shortDescription));
     final descLimpia = _normalizeMultilineText(_limpiarHtml(p.description));
     final descripcionCompletaRows = _parseKeyValueRows(descLimpia);
@@ -279,11 +280,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             descuento: descuento,
             ahorro: ahorro,
             enStock: enStock,
+            bajoConsulta: bajoConsulta,
           ),
-          if (!enStock) ...[
-            const SizedBox(height: 12),
-            _outOfStockNotice(),
-          ],
           const SizedBox(height: 16),
           _trustBlock(),
           const SizedBox(height: 18),
@@ -366,6 +364,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     required int descuento,
     required double ahorro,
     required bool enStock,
+    required bool bajoConsulta,
   }) {
     final marcaText = marca?.trim();
     return Container(
@@ -380,7 +379,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         children: [
           Row(
             children: [
-              _stockBadge(enStock),
+              _stockBadge(enStock, bajoConsulta),
               if (marcaText != null && marcaText.isNotEmpty) ...[
                 const SizedBox(width: 10),
                 Expanded(
@@ -483,7 +482,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   ],
                 ),
               ),
-              if (enStock) _quantityControl(p),
+              if (p.canAddToCart) _quantityControl(p),
             ],
           ),
         ],
@@ -531,9 +530,19 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
-  Widget _stockBadge(bool enStock) {
-    final bg = enStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
-    final fg = enStock ? const Color(0xFF218047) : const Color(0xFFC62828);
+  Widget _stockBadge(bool enStock, bool bajoConsulta) {
+    final bg = bajoConsulta
+        ? const Color(0xFFFFF7ED)
+        : enStock
+        ? const Color(0xFFEAF7EE)
+        : const Color(0xFFFDECEC);
+    final fg = bajoConsulta
+        ? const Color(0xFFC2410C)
+        : enStock
+        ? const Color(0xFF218047)
+        : const Color(0xFFC62828);
+    final label = bajoConsulta ? 'Bajo consulta' : enStock ? 'En stock' : 'Sin stock';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -554,7 +563,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           ),
           const SizedBox(width: 7),
           Text(
-            enStock ? 'En stock' : 'Sin stock',
+            label,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w900,
@@ -606,33 +615,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
-  Widget _outOfStockNotice() {
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.red.shade200),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.error_outline, color: Colors.red, size: 20),
-          SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              'Producto sin stock. Puedes añadirlo al presupuesto para consultar disponibilidad.',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: Colors.red,
-                height: 1.35,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _trustBlock() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
@@ -654,6 +636,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   }
 
   Widget _bottomActions(Product p, bool enStock) {
+    final canAddToCart = p.canAddToCart;
+    final canAddToQuote = p.canRequestQuote;
+    final bajoConsulta = p.isUnderConsultation;
+
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(14, 10, 14, 14),
       child: Container(
@@ -675,7 +661,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               child: SizedBox(
                 height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: enStock && !_isAddingToCart ? _addToCart : null,
+                  onPressed: canAddToCart && !_isAddingToCart ? _addToCart : null,
                   icon: _isAddingToCart
                       ? const SizedBox(
                     width: 16,
@@ -686,17 +672,23 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     ),
                   )
                       : Icon(
-                    enStock ? Icons.shopping_cart_outlined : Icons.block,
+                    canAddToCart ? Icons.shopping_cart_outlined : Icons.block,
                     size: 18,
                   ),
                   label: Text(
-                    enStock ? 'Añadir carrito' : 'Sin stock',
+                    bajoConsulta
+                        ? 'Bajo consulta'
+                        : canAddToCart
+                        ? 'Añadir carrito'
+                        : 'Sin stock',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: enStock ? AppColors.primary : Colors.grey.shade400,
+                    backgroundColor: canAddToCart ? AppColors.primary : Colors.grey.shade400,
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    disabledForegroundColor: Colors.grey.shade600,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
@@ -711,8 +703,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               child: SizedBox(
                 height: 48,
                 child: OutlinedButton.icon(
-                  // Solo habilitado si hay stock y no se está añadiendo ya
-                  onPressed: enStock && !_isAddingToQuote ? _addToQuote : null,
+                  onPressed: canAddToQuote && !_isAddingToQuote ? _addToQuote : null,
                   icon: _isAddingToQuote
                       ? const SizedBox(
                     width: 16,
@@ -720,21 +711,25 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                       : Icon(
-                    enStock ? Icons.description_outlined : Icons.block,
+                    canAddToQuote ? Icons.description_outlined : Icons.block,
                     size: 18,
                   ),
                   label: Text(
                     _isAddingToQuote
                         ? 'Añadiendo...'
-                        : (enStock ? 'Presupuesto' : 'Sin stock'),
+                        : bajoConsulta
+                        ? 'No presupuestar'
+                        : canAddToQuote
+                        ? 'Presupuesto'
+                        : 'No presupuestar',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: enStock ? AppColors.textPrimary : Colors.grey,
+                    foregroundColor: canAddToQuote ? AppColors.textPrimary : Colors.grey,
                     side: BorderSide(
-                      color: enStock ? const Color(0xFFD9DEE7) : Colors.grey.shade300,
+                      color: canAddToQuote ? const Color(0xFFD9DEE7) : Colors.grey.shade300,
                       width: 1.2,
                     ),
                     shape: RoundedRectangleBorder(
@@ -751,7 +746,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   }
 
   Future<void> _addToCart() async {
-    if (!widget.product.hasStock || _isAddingToCart) return;
+    if (!widget.product.canAddToCart || _isAddingToCart) return;
     setState(() => _isAddingToCart = true);
     ref.read(cartProvider.notifier).addProduct(widget.product, _cantidad);
     HapticFeedback.mediumImpact();
@@ -1185,7 +1180,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                   width: double.infinity,
                                   height: 32,
                                   child: ElevatedButton(
-                                    onPressed: rp.hasStock
+                                    onPressed: rp.canAddToCart
                                         ? () {
                                       ref
                                           .read(cartProvider.notifier)
@@ -1203,7 +1198,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                     }
                                         : null,
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: rp.hasStock
+                                      backgroundColor: rp.canAddToCart
                                           ? AppColors.primary
                                           : Colors.grey.shade300,
                                       foregroundColor: Colors.white,
@@ -1215,7 +1210,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                       disabledBackgroundColor: Colors.grey.shade300,
                                     ),
                                     child: Text(
-                                      rp.hasStock ? 'Añadir' : 'Sin stock',
+                                      rp.canAddToCart ? 'Añadir' : (rp.isUnderConsultation ? 'Consulta' : 'Sin stock'),
                                       style: const TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
@@ -1279,6 +1274,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
     final prod = widget.product;
     if (prod.id == 0) return;
+
+    if (!prod.canRequestQuote) return;
 
     final precio = _precioDouble(prod);
 

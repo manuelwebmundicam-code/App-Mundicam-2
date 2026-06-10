@@ -49,8 +49,14 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   Future<void> _saveCart() async {
     final prefs = await SharedPreferences.getInstance();
 
+    final validItems = state.where((item) {
+      return item.product.id > 0 &&
+          item.quantity > 0 &&
+          item.product.canAddToCart;
+    }).toList();
+
     final encodedData = jsonEncode(
-      state.map((item) => item.toJson()).toList(),
+      validItems.map((item) => item.toJson()).toList(),
     );
 
     await prefs.setString('cart_mundicam_data', encodedData);
@@ -84,6 +90,7 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
       )
           .where((item) => item.product.id > 0)
           .where((item) => item.quantity > 0)
+          .where((item) => item.product.canAddToCart)
           .toList();
 
       _debugCart('CARGADO');
@@ -103,6 +110,14 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
     if (product.id <= 0) {
       debugPrint('❌ Producto sin ID válido. No se añade al carrito.');
+      return;
+    }
+
+    if (!product.canAddToCart) {
+      debugPrint(
+        '⛔ Producto bloqueado para carrito: ${product.name} · '
+            'estado=${product.commercialStatusLabel}',
+      );
       return;
     }
 
@@ -154,13 +169,15 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     state = [
       for (final item in state)
         if (item.product.id == productId)
-          CartItem(
+          item.product.canAddToCart
+              ? CartItem(
             product: item.product,
             quantity: newQty,
           )
+              : item
         else
           item,
-    ];
+    ].where((item) => item.product.canAddToCart).toList();
 
     _saveCart();
   }
@@ -171,6 +188,8 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   }
 
   double get total => state.fold(0, (sum, item) {
+    if (!item.product.canAddToCart) return sum;
+
     final price = double.tryParse(
       item.product.price.replaceAll(',', '.'),
     ) ??

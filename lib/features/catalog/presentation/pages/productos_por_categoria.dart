@@ -9,6 +9,7 @@ import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
+import 'package:mundicam/features/catalog/presentation/pages/busqueda_resultados_page.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
@@ -522,9 +523,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       addSuggestion(
         _CatalogSearchSuggestion.query(
           title: text,
-          subtitle: hasRedirectTarget
-              ? 'Buscar en $suggestionsCategoryName'
-              : 'Buscar en $suggestionsCategoryName',
+          subtitle: 'Buscar en todo el catálogo',
           value: suggestionValue,
           targetCategoryId: suggestionTarget?.id,
           targetCategoryName: suggestionTarget?.name,
@@ -561,7 +560,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       suggestions.add(
         _CatalogSearchSuggestion.query(
           title: cleanTitle,
-          subtitle: 'Buscar en ${widget.categoryName}',
+          subtitle: 'Buscar en todo el catálogo',
           value: cleanTitle,
         ),
       );
@@ -784,40 +783,6 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     _hideSearchSuggestions();
     FocusScope.of(context).unfocus();
 
-    if (suggestion.type == _CatalogSearchSuggestionType.brand &&
-        suggestion.brandId != null &&
-        suggestion.brandId! > 0 &&
-        suggestion.brandName != null &&
-        suggestion.brandName!.trim().isNotEmpty) {
-      _searchController.clear();
-      ref.read(productFilterProvider.notifier).clearSearch();
-      ref.read(productFilterProvider.notifier).setBrand(
-        name: suggestion.brandName!.trim(),
-        id: suggestion.brandId!,
-      );
-      return;
-    }
-
-    if (suggestion.targetCategoryId != null &&
-        suggestion.targetCategoryId! > 0 &&
-        suggestion.targetCategoryId != widget.categoryId) {
-      ref.read(productFilterProvider.notifier).reset();
-      ref.read(productFilterProvider.notifier).setSearch(suggestion.value);
-      _preserveFiltersForNextCategoryOpen = true;
-
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => ProductosPorCategoriaScreen(
-            categoryId: suggestion.targetCategoryId!,
-            categoryName: suggestion.targetCategoryName ?? 'Catálogo',
-            onGoCart: widget.onGoCart,
-            onGoQuotes: widget.onGoQuotes,
-          ),
-        ),
-      );
-      return;
-    }
-
     final product = suggestion.product;
     if (product != null) {
       Navigator.of(context).push(
@@ -826,18 +791,27 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
             product: product,
             onGoCart: widget.onGoCart,
             onGoQuotes: widget.onGoQuotes,
-            contextCategoryName: suggestion.global ? 'Catálogo MundiCam' : widget.categoryName,
+            contextCategoryName: suggestion.global
+                ? 'Catálogo MundiCam'
+                : widget.categoryName,
           ),
         ),
       );
       return;
     }
 
-    _searchController.text = suggestion.value;
+    final cleanValue = suggestion.type == _CatalogSearchSuggestionType.brand &&
+        suggestion.brandName != null &&
+        suggestion.brandName!.trim().isNotEmpty
+        ? suggestion.brandName!.trim()
+        : suggestion.value.trim();
+
+    _searchController.text = cleanValue;
     _searchController.selection = TextSelection.fromPosition(
       TextPosition(offset: _searchController.text.length),
     );
-    ref.read(productFilterProvider.notifier).setSearch(suggestion.value);
+
+    _openGlobalSearchResults(cleanValue);
   }
 
   String _normalizeForSearch(String value) {
@@ -1433,40 +1407,22 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     _searchDebounce?.cancel();
 
     final cleanSearch = _searchController.text.trim();
-    if (cleanSearch.length >= 3) {
-      final queryIntents = _detectSearchIntents(cleanSearch);
-      final categoryIntents = _detectSearchIntents(widget.categoryName);
-      if (_hasClearExternalIntent(
-        queryIntents: queryIntents,
-        categoryIntents: categoryIntents,
-        categoryName: widget.categoryName,
-      )) {
-        unawaited(_redirectSearchIfNeeded(cleanSearch, queryIntents));
-        return;
-      }
-    }
-
-    ref.read(productFilterProvider.notifier).setSearch(cleanSearch);
-  }
-
-  Future<void> _redirectSearchIfNeeded(
-      String cleanSearch,
-      Set<String> queryIntents,
-      ) async {
-    final target = await _resolveRedirectCategoryForQuery(cleanSearch, queryIntents);
-    if (!mounted || target == null || target.id == widget.categoryId) {
-      ref.read(productFilterProvider.notifier).setSearch(cleanSearch);
+    if (cleanSearch.isEmpty) {
+      _clearSearch();
       return;
     }
 
-    ref.read(productFilterProvider.notifier).reset();
-    ref.read(productFilterProvider.notifier).setSearch(cleanSearch);
-    _preserveFiltersForNextCategoryOpen = true;
+    _openGlobalSearchResults(cleanSearch);
+  }
+
+  void _openGlobalSearchResults(String query) {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty) return;
+
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => ProductosPorCategoriaScreen(
-          categoryId: target.id,
-          categoryName: target.name,
+        builder: (context) => BusquedaResultadosPage(
+          query: cleanQuery,
           onGoCart: widget.onGoCart,
           onGoQuotes: widget.onGoQuotes,
         ),
@@ -1983,12 +1939,14 @@ class _CatalogControls extends StatelessWidget {
     if (isLoading && loadedItems == 0) {
       return 'Cargando productos...';
     }
-    if (totalItems > 0) {
-      return '$totalItems productos encontrados';
+
+    // No mostramos contador aquí porque WooCommerce puede devolver totales
+    // globales o aproximados según categoría/filtros. El listado real ya se
+    // controla por la carga paginada y por los contadores del panel de filtros.
+    if (loadedItems > 0 || totalItems > 0) {
+      return 'Productos encontrados';
     }
-    if (loadedItems > 0) {
-      return '$loadedItems productos cargados';
-    }
+
     return 'Sin resultados';
   }
 }
@@ -2093,7 +2051,7 @@ class _CatalogSearchSuggestion {
     return _CatalogSearchSuggestion(
       type: _CatalogSearchSuggestionType.brand,
       title: brandName.toUpperCase(),
-      subtitle: 'Marca · Ver productos $brandName en $categoryName',
+      subtitle: 'Marca · Buscar $brandName en todo el catálogo',
       value: brandName,
       brandName: brandName,
       brandId: brandId,
@@ -2658,9 +2616,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     return '${buffer.toString()},$decimales €';
   }
 
-  bool get _tieneStock => widget.p.isInstock;
-  bool get _puedeComprar => _tieneStock && cantidad > 0;
-  bool get _puedeAnadirPresupuesto => _tieneStock && !_isAddingToQuote;
+  bool get _bajoConsulta => widget.p.isUnderConsultation;
+  bool get _tieneStock => widget.p.hasStock;
+  bool get _puedeComprar => widget.p.canAddToCart && cantidad > 0;
+  bool get _puedeAnadirPresupuesto => widget.p.canRequestQuote && !_isAddingToQuote;
+  bool get _puedeCambiarCantidad => widget.p.canAddToCart;
 
   void _goToQuotesKeepingTabs() {
     if (widget.onGoQuotes != null) {
@@ -2808,12 +2768,12 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         }
                             : null,
                         icon: Icon(
-                          _tieneStock ? Icons.shopping_cart_outlined : Icons.block_rounded,
+                          _puedeComprar ? Icons.shopping_cart_outlined : Icons.block_rounded,
                           size: 17,
                           color: Colors.white,
                         ),
                         label: Text(
-                          _tieneStock ? 'AÑADIR CARRITO' : 'SIN STOCK',
+                          _bajoConsulta ? 'BAJO CONSULTA' : (_tieneStock ? 'AÑADIR CARRITO' : 'SIN STOCK'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -2825,7 +2785,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           ),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _tieneStock ? AppColors.primary : Colors.grey.shade400,
+                          backgroundColor: _puedeComprar ? AppColors.primary : Colors.grey.shade400,
                           foregroundColor: Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
@@ -2856,14 +2816,16 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     ),
                   )
                       : Icon(
-                    _tieneStock
+                    _puedeAnadirPresupuesto
                         ? Icons.description_outlined
                         : Icons.block_rounded,
                     size: 17,
                   ),
                   label: Text(
-                    !_tieneStock
-                        ? 'SIN STOCK'
+                    _bajoConsulta
+                        ? 'NO PRESUPUESTAR'
+                        : !_tieneStock
+                        ? 'NO PRESUPUESTAR'
                         : _isAddingToQuote
                         ? 'AÑADIENDO...'
                         : 'AÑADIR AL PRESUPUESTO',
@@ -2878,11 +2840,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                   ),
                   style: OutlinedButton.styleFrom(
                     backgroundColor:
-                    _tieneStock ? Colors.white : Colors.grey.shade100,
+                    _puedeAnadirPresupuesto ? Colors.white : Colors.grey.shade100,
                     foregroundColor: AppColors.textPrimary,
                     disabledForegroundColor: Colors.grey.shade500,
                     side: BorderSide(
-                      color: _tieneStock
+                      color: _puedeAnadirPresupuesto
                           ? const Color(0xFFD9DEE7)
                           : Colors.grey.shade300,
                       width: 1.2,
@@ -2902,7 +2864,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
   Widget _quantitySelector() {
     return Opacity(
-      opacity: _tieneStock ? 1.0 : 0.55,
+      opacity: _puedeCambiarCantidad ? 1.0 : 0.55,
       child: Container(
         height: 44,
         decoration: BoxDecoration(
@@ -2913,7 +2875,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _qtyBtn(Icons.remove, _tieneStock, () {
+            _qtyBtn(Icons.remove, _puedeCambiarCantidad, () {
               if (cantidad > 1) {
                 setState(() => cantidad--);
               }
@@ -2926,15 +2888,15 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w900,
-                  color: _tieneStock ? AppColors.textPrimary : Colors.grey,
+                  color: _puedeCambiarCantidad ? AppColors.textPrimary : Colors.grey,
                 ),
               ),
             ),
             _qtyBtn(
               Icons.add,
-              _tieneStock,
+              _puedeCambiarCantidad,
                   () => setState(() => cantidad++),
-              isPrimary: _tieneStock,
+              isPrimary: _puedeCambiarCantidad,
             ),
           ],
         ),
@@ -2943,8 +2905,22 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   Widget _stockChip() {
-    final Color bgColor = _tieneStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
-    final Color textColor = _tieneStock ? const Color(0xFF218047) : const Color(0xFFC62828);
+    final Color bgColor = _bajoConsulta
+        ? const Color(0xFFFFF7ED)
+        : _tieneStock
+        ? const Color(0xFFEAF7EE)
+        : const Color(0xFFFDECEC);
+    final Color textColor = _bajoConsulta
+        ? const Color(0xFFC2410C)
+        : _tieneStock
+        ? const Color(0xFF218047)
+        : const Color(0xFFC62828);
+    final label = _bajoConsulta
+        ? 'Bajo consulta'
+        : _tieneStock
+        ? 'En stock'
+        : 'Sin stock';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -2965,7 +2941,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
           ),
           const SizedBox(width: 5),
           Text(
-            _tieneStock ? 'En stock' : 'Sin stock',
+            label,
             style: TextStyle(
               fontSize: 10.5,
               color: textColor,
@@ -3008,12 +2984,14 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     if (_isAddingToQuote) return;
     if (product.id == 0) return;
 
-    if (!product.isInstock) {
+    if (!product.canRequestQuote) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
+            product.isUnderConsultation
+                ? 'Producto bajo consulta. No se puede añadir al presupuesto desde la app.'
+                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
           ),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
@@ -3022,6 +3000,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       );
       return;
     }
+
 
     final precio = _precioDouble(product);
 

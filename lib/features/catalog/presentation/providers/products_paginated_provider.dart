@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
-import 'package:mundicam/core/cache/product_cache_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:mundicam/core/cache/product_cache_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
@@ -23,7 +24,6 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   final Ref ref;
 
   static const Duration _cacheTtl = Duration(minutes: 3);
-
 
   int _currentPage = 1;
   int _totalPages = 1;
@@ -56,40 +56,6 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   Object? get lastError => _lastError;
 
-  double _productPrice(Product product) {
-    return double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
-  }
-
-  CatalogProductsResult _sortCatalogResultPage(
-      CatalogProductsResult result,
-      String orderBy,
-      ) {
-    final products = [...result.products];
-
-    if (orderBy == 'price_asc') {
-      products.sort((a, b) {
-        final comparePrice = _productPrice(a).compareTo(_productPrice(b));
-        if (comparePrice != 0) return comparePrice;
-        return b.id.compareTo(a.id);
-      });
-    } else if (orderBy == 'price_desc') {
-      products.sort((a, b) {
-        final comparePrice = _productPrice(b).compareTo(_productPrice(a));
-        if (comparePrice != 0) return comparePrice;
-        return b.id.compareTo(a.id);
-      });
-    } else if (orderBy == 'date') {
-      products.sort((a, b) => b.id.compareTo(a.id));
-    }
-
-    return CatalogProductsResult(
-      products: products,
-      currentPage: result.currentPage,
-      totalPages: result.totalPages,
-      totalItems: result.totalItems,
-    );
-  }
-
   static void clearGlobalCache() {
     ProductCacheService().clearCatalogMemory();
   }
@@ -101,8 +67,6 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   Future<void> loadFirstPage({
     bool forceRefresh = false,
   }) async {
-    // Si llega una bÃºsqueda nueva mientras otra sigue en curso, no la ignoramos.
-    // La peticiÃ³n anterior queda invalidada por el token y no puede pisar el listado.
     if (_isLoading && !forceRefresh) return;
 
     final token = ++_requestToken;
@@ -133,7 +97,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       _hasMore = false;
 
       if (kDebugMode) {
-        debugPrint('âŒ Error cargando primera pÃ¡gina catÃ¡logo: $e');
+        debugPrint('❌ Error cargando primera página catálogo: $e');
       }
     } finally {
       if (token == _requestToken) {
@@ -179,7 +143,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       _lastError = e;
 
       if (kDebugMode) {
-        debugPrint('âŒ Error cargando mÃ¡s productos catÃ¡logo: $e');
+        debugPrint('❌ Error cargando más productos catálogo: $e');
       }
     } finally {
       if (token == _requestToken) {
@@ -202,6 +166,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
     final brandName = filters.brand.trim();
     final search = filters.search.trim();
+    final orderBy = filters.orderBy.trim();
 
     final effectiveBrandId = filters.brandId ??
         await apiService
@@ -209,7 +174,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
           brandName.isEmpty ? null : brandName,
         )
             .timeout(
-          const Duration(seconds: 3),
+          const Duration(seconds: 2),
           onTimeout: () => null,
         );
 
@@ -218,7 +183,8 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       brandId: effectiveBrandId,
       brandName: brandName,
       search: search,
-      orderBy: filters.orderBy,
+      orderBy: orderBy,
+      attributeTermIds: filters.attributeTermIds,
       page: page,
       perPage: _perPage,
     );
@@ -231,22 +197,22 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
         final result = await apiService.getProductosCatalogoFiltrado(
           categoryId: categoryId,
           brandId: effectiveBrandId,
+          brandName: brandName.isEmpty ? null : brandName,
           search: search.isEmpty ? null : search,
           page: page,
           perPage: _perPage,
-          orderBy: filters.orderBy,
-        );
-
-        final orderedResult = _sortCatalogResultPage(
-          result,
-          filters.orderBy,
+          orderBy: orderBy,
+          attributeTermIds: filters.attributeTermIds,
+          attributeLabels: filters.attributeLabels,
         );
 
         if (kDebugMode) {
-          debugPrint('ðŸŒ CatÃ¡logo cargado: $cacheKey Â· total=${orderedResult.totalItems}');
+          debugPrint(
+            '🌐 Catálogo cargado: $cacheKey · total=${result.totalItems}',
+          );
         }
 
-        return orderedResult;
+        return result;
       },
     );
   }
@@ -257,6 +223,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     required String brandName,
     required String search,
     required String orderBy,
+    required Map<String, int> attributeTermIds,
     required int page,
     required int perPage,
   }) {
@@ -266,9 +233,16 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       'brand:${brandName.toLowerCase().trim()}',
       'search:${search.toLowerCase().trim()}',
       'order:$orderBy',
+      'attrs:${_attributesCachePart(attributeTermIds)}',
       'page:$page',
       'perPage:$perPage',
     ].join('|');
   }
-}
 
+  static String _attributesCachePart(Map<String, int> attributeTermIds) {
+    if (attributeTermIds.isEmpty) return '';
+
+    final keys = attributeTermIds.keys.toList()..sort();
+    return keys.map((key) => '$key:${attributeTermIds[key]}').join(',');
+  }
+}

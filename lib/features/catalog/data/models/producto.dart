@@ -12,6 +12,24 @@ class Product {
   final String description;
   final List<ProductAttribute> attributes;
 
+  /// Indica si WooCommerce permite comprar el producto.
+  /// En productos de "Bajo consulta" suele venir como:
+  /// - Store API: is_purchasable = false
+  /// - WC REST v3: purchasable = false
+  final bool isPurchasable;
+
+  /// HTML de precio/estado devuelto por WooCommerce. Se usa solo como respaldo
+  /// para detectar textos tipo "Bajo consulta" sin bloquear productos normales.
+  final String priceHtml;
+
+  /// Estado de stock original de WooCommerce.
+  final String stockStatus;
+
+  /// Categorías del producto para detectar apartados tipo "Bajo consulta".
+  final List<int> categoryIds;
+  final List<String> categoryNames;
+  final List<String> categorySlugs;
+
   Product({
     required this.id,
     required this.name,
@@ -25,52 +43,61 @@ class Product {
     required this.shortDescription,
     required this.description,
     required this.attributes,
+    this.isPurchasable = true,
+    this.priceHtml = '',
+    this.stockStatus = '',
+    this.categoryIds = const <int>[],
+    this.categoryNames = const <String>[],
+    this.categorySlugs = const <String>[],
   });
 
-  // =========================
-  // CONTROL REAL DE STOCK
-  // =========================
-
   bool get hasStock {
-    if (stockQuantity > 0) {
-      return true;
-    }
-
-    if (isInstock) {
-      return true;
-    }
-
+    if (stockQuantity > 0) return true;
+    if (isInstock) return true;
     return false;
   }
 
-  // =========================
-  // MÁXIMO COMPRABLE
-  // =========================
-
   int get maxPurchaseQty {
-    if (stockQuantity > 0) {
-      return stockQuantity;
-    }
-
-    if (isInstock) {
-      return 999;
-    }
-
+    if (!canAddToCart) return 0;
+    if (stockQuantity > 0) return stockQuantity;
+    if (isInstock) return 999;
     return 0;
   }
 
-  // =========================
-  // MARCA
-  // =========================
+  /// Producto visible, pero no accionable comercialmente.
+  /// No usamos solo precio 0 porque en una app B2B puede haber precios ocultos
+  /// por permisos. La fuente principal es purchasable/is_purchasable.
+  bool get isUnderConsultation {
+    if (!isPurchasable) return true;
+
+    final commercialText = _normalizeCommercialText([
+      priceHtml,
+      ...categoryNames,
+      ...categorySlugs,
+    ].join(' '));
+
+    return commercialText.contains('bajoconsulta') ||
+        commercialText.contains('consultarprecio') ||
+        commercialText.contains('solicitarprecio') ||
+        commercialText.contains('nopurchasable') ||
+        commercialText.contains('nocomprable');
+  }
+
+  bool get canAddToCart => !isUnderConsultation && hasStock;
+
+  bool get canRequestQuote => !isUnderConsultation && hasStock;
+
+  String get commercialStatusLabel {
+    if (isUnderConsultation) return 'Bajo consulta';
+    if (hasStock) return 'En stock';
+    return 'Sin stock';
+  }
 
   String? get brandName {
     for (final attr in attributes) {
-      final attrName = attr.name.toLowerCase().trim();
+      final attrName = _normalizeAttributeName(attr.name);
 
-      if ((attrName.contains('marca') ||
-          attrName.contains('brand') ||
-          attrName == 'pa_marca') &&
-          attr.options.isNotEmpty) {
+      if (_isBrandAttribute(attrName) && attr.options.isNotEmpty) {
         final value = attr.options.first.trim();
         if (value.isNotEmpty) return value;
       }
@@ -80,92 +107,200 @@ class Product {
   }
 
   factory Product.fromJson(Map<String, dynamic> json) {
-    // =========================
-    // IMAGEN
-    // =========================
-
     String firstImage = 'https://via.placeholder.com/150';
 
-    if (json['images'] != null && (json['images'] as List).isNotEmpty) {
-      firstImage = json['images'][0]['src'] ?? firstImage;
+    if (json['images'] != null &&
+        json['images'] is List &&
+        (json['images'] as List).isNotEmpty) {
+      final first = (json['images'] as List).first;
+      if (first is Map) {
+        firstImage = first['src']?.toString() ?? firstImage;
+      }
     }
 
-    // =========================
-    // DESCRIPCIÓN CORTA
-    // =========================
+    final rawShort = json['short_description']?.toString() ?? '';
+    final cleanShort = _cleanHtml(rawShort);
 
-    final String rawShort = json['short_description']?.toString() ?? '';
+    final rawLong = json['description']?.toString() ?? '';
+    final cleanLong = _cleanHtml(rawLong);
 
-    final String cleanShort = rawShort.replaceAll(
-      RegExp(r'<[^>]*>|&[^;]+;'),
-      '',
-    );
-
-    // =========================
-    // DESCRIPCIÓN LARGA
-    // =========================
-
-    final String rawLong = json['description']?.toString() ?? '';
-
-    final String cleanLong = rawLong.replaceAll(RegExp(r'<[^>]*>|&[^;]+;'), '');
-
-    // =========================
-    // ATRIBUTOS + MARCA
-    // =========================
-
-    final parsedAttributes =
-        (json['attributes'] as List?)
-            ?.map((attr) => ProductAttribute.fromJson(attr))
-            .toList() ??
-            <ProductAttribute>[];
+    final parsedAttributes = (json['attributes'] as List?)
+        ?.whereType<Map>()
+        .map((attr) => ProductAttribute.fromJson(
+      Map<String, dynamic>.from(attr),
+    ))
+        .toList() ??
+        <ProductAttribute>[];
 
     final extractedBrand = _extractBrandFromJson(json);
 
-    final hasMarcaAttribute = parsedAttributes.any((attr) {
-      final name = attr.name.toLowerCase().trim();
-      return name.contains('marca') || name.contains('brand') || name == 'pa_marca';
+    final hasBrandAttribute = parsedAttributes.any((attr) {
+      return _isBrandAttribute(_normalizeAttributeName(attr.name));
     });
 
     if (extractedBrand != null &&
         extractedBrand.trim().isNotEmpty &&
-        !hasMarcaAttribute) {
+        !hasBrandAttribute) {
       parsedAttributes.add(
         ProductAttribute(
-          name: 'Marca',
+          name: 'Fabricante',
           options: [extractedBrand.trim()],
         ),
       );
     }
 
+    final categories = _parseCategories(json['categories']);
+    final stockStatus = (json['stock_status'] ?? '').toString().trim();
+
     return Product(
       id: _parseInt(json['id']),
-
-      name: json['name'] ?? 'Sin nombre',
-
-      price: (json['price'] ?? '0.00').toString(),
-
-      regularPrice: (json['regular_price'] ?? '').toString(),
-
+      name: _cleanTextEntities(json['name']?.toString() ?? 'Sin nombre'),
+      price: _extractPrice(json['price'] ?? json['prices']?['price']),
+      regularPrice: _extractPrice(
+        json['regular_price'] ?? json['prices']?['regular_price'],
+      ),
       imageUrl: firstImage,
-
       sku: (json['sku'] ?? '').toString(),
-
       stockQuantity: _parseInt(json['stock_quantity']),
-
-      onSale: json['on_sale'] ?? false,
-
-      isInstock: json['stock_status']?.toString() == 'instock',
-
-      shortDescription: cleanShort.trim().isEmpty
-          ? 'Sin descripción'
-          : cleanShort.trim(),
-
+      onSale: json['on_sale'] == true,
+      isInstock: stockStatus == 'instock' || json['is_in_stock'] == true,
+      shortDescription:
+      cleanShort.trim().isEmpty ? 'Sin descripción' : cleanShort.trim(),
       description: cleanLong.trim().isEmpty
           ? 'Sin descripción detallada'
           : cleanLong.trim(),
-
       attributes: parsedAttributes,
+      isPurchasable: _parsePurchasable(json),
+      priceHtml: json['price_html']?.toString() ?? '',
+      stockStatus: stockStatus,
+      categoryIds: categories.ids,
+      categoryNames: categories.names,
+      categorySlugs: categories.slugs,
     );
+  }
+
+  static String _extractPrice(dynamic value) {
+    if (value == null) return '0.00';
+    final raw = value.toString().trim();
+    if (raw.isEmpty) return '0.00';
+    return raw;
+  }
+
+  static bool _parsePurchasable(Map<String, dynamic> json) {
+    if (json.containsKey('is_purchasable')) {
+      return json['is_purchasable'] == true;
+    }
+
+    if (json.containsKey('purchasable')) {
+      return json['purchasable'] == true;
+    }
+
+    final addToCart = json['add_to_cart'];
+    if (addToCart is Map) {
+      final text = addToCart['text']?.toString().toLowerCase().trim() ?? '';
+      if (text.contains('leer más') || text.contains('leer mas')) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  static _ParsedCategories _parseCategories(dynamic value) {
+    final ids = <int>[];
+    final names = <String>[];
+    final slugs = <String>[];
+
+    if (value is List) {
+      for (final raw in value) {
+        if (raw is! Map) continue;
+        final category = Map<dynamic, dynamic>.from(raw);
+        final id = _parseInt(category['id']);
+        final name = category['name']?.toString().trim() ?? '';
+        final slug = category['slug']?.toString().trim() ?? '';
+
+        if (id > 0) ids.add(id);
+        if (name.isNotEmpty) names.add(name);
+        if (slug.isNotEmpty) slugs.add(slug);
+      }
+    }
+
+    return _ParsedCategories(
+      ids: ids,
+      names: names,
+      slugs: slugs,
+    );
+  }
+
+  static String _cleanHtml(String value) {
+    return _cleanTextEntities(
+      value
+          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim(),
+    );
+  }
+
+  static String _cleanTextEntities(String value) {
+    return value
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&#8211;', '-')
+        .replaceAll('&ndash;', '-')
+        .replaceAll('&mdash;', '-')
+        .replaceAll(RegExp(r'&[^;]+;'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  static String _normalizeCommercialText(String value) {
+    return _normalizeAttributeName(
+      value
+          .replaceAll('&nbsp;', ' ')
+          .replaceAll('&amp;', '&')
+          .replaceAll(RegExp(r'<[^>]*>'), ' '),
+    );
+  }
+
+  static String _normalizeAttributeName(String value) {
+    return value
+        .toLowerCase()
+        .trim()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[\s\-_]+'), '')
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  static bool _isBrandAttribute(String normalizedName) {
+    return normalizedName.contains('marca') ||
+        normalizedName.contains('brand') ||
+        normalizedName.contains('fabricante') ||
+        normalizedName.contains('manufacturer') ||
+        normalizedName == 'pamarca' ||
+        normalizedName == 'pafabricante' ||
+        normalizedName == 'productbrand';
   }
 
   static String? _extractBrandFromJson(Map<String, dynamic> json) {
@@ -183,18 +318,18 @@ class Product {
 
     final brands = json['brands'];
     if (brands is List && brands.isNotEmpty) {
-      final firstBrand = brands.first;
+      for (final firstBrand in brands) {
+        if (firstBrand is String && firstBrand.trim().isNotEmpty) {
+          return firstBrand.trim();
+        }
 
-      if (firstBrand is String && firstBrand.trim().isNotEmpty) {
-        return firstBrand.trim();
-      }
+        if (firstBrand is Map) {
+          final name = firstBrand['name']?.toString().trim();
+          if (name != null && name.isNotEmpty) return name;
 
-      if (firstBrand is Map) {
-        final name = firstBrand['name']?.toString().trim();
-        if (name != null && name.isNotEmpty) return name;
-
-        final slug = firstBrand['slug']?.toString().trim();
-        if (slug != null && slug.isNotEmpty) return slug;
+          final slug = firstBrand['slug']?.toString().trim();
+          if (slug != null && slug.isNotEmpty) return slug;
+        }
       }
     }
 
@@ -205,7 +340,6 @@ class Product {
 
         final name = category['name']?.toString().trim();
         final slug = category['slug']?.toString().trim();
-
         final candidate = name ?? slug;
         if (candidate == null || candidate.isEmpty) continue;
 
@@ -224,6 +358,14 @@ class Product {
           'wisim',
           'evolve',
           'secury360',
+          'security360',
+          'uniview',
+          'uniarch',
+          'zkteco',
+          'ip-com',
+          'ipcom',
+          'seagate',
+          'mci',
         ];
 
         for (final brand in knownBrands) {
@@ -254,10 +396,23 @@ class Product {
     ],
     'sku': sku,
     'on_sale': onSale,
-    'stock_status': isInstock ? 'instock' : 'outofstock',
+    'stock_quantity': stockQuantity,
+    'stock_status': stockStatus.isNotEmpty
+        ? stockStatus
+        : (isInstock ? 'instock' : 'outofstock'),
+    'is_purchasable': isPurchasable,
+    'purchasable': isPurchasable,
+    'price_html': priceHtml,
     'short_description': shortDescription,
     'description': description,
     'attributes': attributes.map((a) => a.toJson()).toList(),
+    'categories': List.generate(categoryIds.length, (index) {
+      return {
+        'id': categoryIds[index],
+        'name': index < categoryNames.length ? categoryNames[index] : '',
+        'slug': index < categorySlugs.length ? categorySlugs[index] : '',
+      };
+    }),
   };
 }
 
@@ -268,11 +423,60 @@ class ProductAttribute {
   ProductAttribute({required this.name, required this.options});
 
   factory ProductAttribute.fromJson(Map<String, dynamic> json) {
+    final rawOptions = json['options'];
+    final rawOption = json['option'];
+    final rawTerms = json['terms'];
+
+    final options = <String>[];
+
+    if (rawOptions is List) {
+      options.addAll(
+        rawOptions
+            .map((value) => value?.toString().trim() ?? '')
+            .where((value) => value.isNotEmpty),
+      );
+    } else if (rawOptions != null) {
+      final value = rawOptions.toString().trim();
+      if (value.isNotEmpty) options.add(value);
+    }
+
+    if (options.isEmpty && rawTerms is List) {
+      for (final rawTerm in rawTerms) {
+        if (rawTerm is Map) {
+          final name = rawTerm['name']?.toString().trim() ?? '';
+          if (name.isNotEmpty) options.add(name);
+        } else if (rawTerm != null) {
+          final value = rawTerm.toString().trim();
+          if (value.isNotEmpty) options.add(value);
+        }
+      }
+    }
+
+    if (options.isEmpty && rawOption != null) {
+      final value = rawOption.toString().trim();
+      if (value.isNotEmpty) options.add(value);
+    }
+
     return ProductAttribute(
-      name: json['name'] ?? '',
-      options: List<String>.from(json['options'] ?? []),
+      name: json['name']?.toString() ??
+          json['taxonomy']?.toString() ??
+          json['slug']?.toString() ??
+          '',
+      options: options,
     );
   }
 
   Map<String, dynamic> toJson() => {'name': name, 'options': options};
+}
+
+class _ParsedCategories {
+  final List<int> ids;
+  final List<String> names;
+  final List<String> slugs;
+
+  const _ParsedCategories({
+    required this.ids,
+    required this.names,
+    required this.slugs,
+  });
 }

@@ -868,7 +868,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   child: SizedBox(
                     height: 44,
                     child: ElevatedButton.icon(
-                      onPressed: p.isInstock
+                      onPressed: p.canAddToCart
                           ? () {
                         ref
                             .read(cartProvider.notifier)
@@ -888,14 +888,16 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       }
                           : null,
                       icon: Icon(
-                        p.isInstock
+                        p.canAddToCart
                             ? Icons.shopping_cart_outlined
                             : Icons.block_rounded,
                         size: 17,
                         color: Colors.white,
                       ),
                       label: Text(
-                        p.isInstock ? 'AÑADIR CARRITO' : 'SIN STOCK',
+                        p.isUnderConsultation
+                            ? 'BAJO CONSULTA'
+                            : (p.hasStock ? 'AÑADIR CARRITO' : 'SIN STOCK'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -908,7 +910,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor:
-                        p.isInstock ? AppColors.primary : Colors.grey.shade400,
+                        p.canAddToCart ? AppColors.primary : Colors.grey.shade400,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
@@ -926,7 +928,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
               width: double.infinity,
               height: 42,
               child: OutlinedButton.icon(
-                onPressed: (p.isInstock && !_isAddingToQuote)
+                onPressed: (p.canRequestQuote && !_isAddingToQuote)
                     ? () => _addToQuote(p)
                     : null,
                 icon: _isAddingToQuote
@@ -939,14 +941,16 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   ),
                 )
                     : Icon(
-                  p.isInstock
+                  p.canRequestQuote
                       ? Icons.description_outlined
                       : Icons.block_rounded,
                   size: 17,
                 ),
                 label: Text(
-                  !p.isInstock
-                      ? 'SIN STOCK'
+                  p.isUnderConsultation
+                      ? 'NO PRESUPUESTAR'
+                      : !p.hasStock
+                      ? 'NO PRESUPUESTAR'
                       : _isAddingToQuote
                       ? 'AÑADIENDO...'
                       : 'AÑADIR AL PRESUPUESTO',
@@ -960,13 +964,13 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   ),
                 ),
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: p.isInstock
+                  backgroundColor: p.canRequestQuote
                       ? Colors.white
                       : Colors.grey.shade100,
                   foregroundColor: AppColors.textPrimary,
                   disabledForegroundColor: Colors.grey.shade500,
                   side: BorderSide(
-                    color: p.isInstock
+                    color: p.canRequestQuote
                         ? const Color(0xFFD9DEE7)
                         : Colors.grey.shade300,
                     width: 1.2,
@@ -985,7 +989,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Widget _quantitySelector(Product p) {
     return Opacity(
-      opacity: p.isInstock ? 1.0 : 0.55,
+      opacity: p.canAddToCart ? 1.0 : 0.55,
       child: Container(
         height: 44,
         decoration: BoxDecoration(
@@ -998,7 +1002,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
           children: [
             _qtyBtn(
               Icons.remove,
-              enabled: p.isInstock,
+              enabled: p.canAddToCart,
               onTap: () {
                 if (cantidad > 1) setState(() => cantidad--);
               },
@@ -1011,16 +1015,16 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w900,
-                  color: p.isInstock ? AppColors.textPrimary : Colors.grey,
+                  color: p.canAddToCart ? AppColors.textPrimary : Colors.grey,
                 ),
               ),
             ),
             _qtyBtn(
               Icons.add,
-              enabled: p.isInstock,
-              isPrimary: p.isInstock,
+              enabled: p.canAddToCart,
+              isPrimary: p.canAddToCart,
               onTap: () {
-                if (p.isInstock) setState(() => cantidad++);
+                if (p.canAddToCart) setState(() => cantidad++);
               },
             ),
           ],
@@ -1030,9 +1034,23 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   }
 
   Widget _stockChip(Product p) {
-    final hasStock = p.isInstock;
-    final bgColor = hasStock ? const Color(0xFFEAF7EE) : const Color(0xFFFDECEC);
-    final textColor = hasStock ? const Color(0xFF218047) : const Color(0xFFC62828);
+    final bajoConsulta = p.isUnderConsultation;
+    final hasStock = p.hasStock;
+    final bgColor = bajoConsulta
+        ? const Color(0xFFFFF7ED)
+        : hasStock
+        ? const Color(0xFFEAF7EE)
+        : const Color(0xFFFDECEC);
+    final textColor = bajoConsulta
+        ? const Color(0xFFC2410C)
+        : hasStock
+        ? const Color(0xFF218047)
+        : const Color(0xFFC62828);
+    final label = bajoConsulta
+        ? 'Bajo consulta'
+        : hasStock
+        ? 'En stock'
+        : 'Sin stock';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1054,7 +1072,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
           ),
           const SizedBox(width: 5),
           Text(
-            hasStock ? 'En stock' : 'Sin stock',
+            label,
             style: TextStyle(
               fontSize: 10.5,
               color: textColor,
@@ -1097,12 +1115,14 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     if (_isAddingToQuote) return;
     if (product.id == 0) return;
 
-    if (!product.isInstock) {
+    if (!product.canRequestQuote) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
+            product.isUnderConsultation
+                ? '"${product.name}" está bajo consulta y no puede añadirse al presupuesto.'
+                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
           ),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/core/network/api_service.dart';
@@ -10,9 +11,6 @@ import 'package:mundicam/shared/theme/app_theme.dart';
 class FiltroSelector extends ConsumerStatefulWidget {
   final int parentCategoryId;
   final String categoryName;
-
-  /// Se mantiene para no romper llamadas existentes desde ProductosPorCategoriaScreen.
-  /// En esta versión no se usa para recalcular filtros: la fuente de verdad sigue siendo WooCommerce.
   final List<Product> productosEnPantalla;
 
   const FiltroSelector({
@@ -35,14 +33,16 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
   bool _loading = true;
   String? _error;
-  List<Map<String, dynamic>> _availableBrands = [];
+  List<CatalogFilterGroup> _availableFilterGroups = [];
   List<CategoryModel> _availableSubcategories = [];
-  int _previewTotal = 0;
   int _loadToken = 0;
+  late MundiFilters _draftFilters;
+  bool _applyingFiltersAndClosing = false;
 
   @override
   void initState() {
     super.initState();
+    _draftFilters = ref.read(productFilterProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadFilterData();
     });
@@ -51,15 +51,22 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   @override
   Widget build(BuildContext context) {
     ref.listen<MundiFilters>(productFilterProvider, (previous, next) {
+      if (_applyingFiltersAndClosing) {
+        return;
+      }
+
       if (previous != next) {
+        setState(() {
+          _draftFilters = next;
+        });
         _loadFilterData();
       }
     });
 
-    final filtroState = ref.watch(productFilterProvider);
+    final filtroState = _draftFilters;
 
     return Drawer(
-      width: MediaQuery.of(context).size.width * 0.90,
+      width: MediaQuery.of(context).size.width * 0.92,
       backgroundColor: const Color(0xFFF4F7FB),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.horizontal(left: Radius.circular(28)),
@@ -109,43 +116,14 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                     ),
                     const SizedBox(height: 12),
                     _sectionCard(
-                      title: 'Filtrar por marca',
-                      icon: Icons.sell_outlined,
-                      subtitle: 'Marcas disponibles para ${widget.categoryName}',
-                      child: _loading && _availableBrands.isEmpty
-                          ? _loadingBox('Cargando marcas...')
-                          : _availableBrands.isEmpty
-                          ? _emptyInfo(
-                        'No hay marcas compatibles en este contexto.',
-                        Icons.info_outline,
-                      )
-                          : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (filtroState.hasBrand) ...[
-                            _allBrandsTile(),
-                            const SizedBox(height: 10),
-                          ],
-                          Wrap(
-                            spacing: 7,
-                            runSpacing: 8,
-                            children: _availableBrands
-                                .map(_buildMarcaChip)
-                                .toList(),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _sectionCard(
-                      title: 'Subcategorías',
+                      title: 'Categorías del producto',
                       icon: Icons.folder_special_rounded,
                       subtitle: 'Subfamilias dentro de ${widget.categoryName}',
                       child: _loading && _availableSubcategories.isEmpty
-                          ? _loadingBox('Cargando subcategorías...')
+                          ? _loadingBox('Cargando categorías...')
                           : _availableSubcategories.isEmpty
                           ? _emptyInfo(
-                        'No hay más subcategorías.',
+                        'No hay más subcategorías en este apartado.',
                         Icons.folder_off_outlined,
                       )
                           : Column(
@@ -154,6 +132,29 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                             .toList(),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    if (_loading && _availableFilterGroups.isEmpty)
+                      _sectionCard(
+                        title: 'Filtros',
+                        icon: Icons.tune_rounded,
+                        child: _loadingBox('Cargando filtros de la web...'),
+                      )
+                    else if (!_loading && _availableFilterGroups.isEmpty)
+                      _sectionCard(
+                        title: 'Filtros',
+                        icon: Icons.tune_rounded,
+                        child: _emptyInfo(
+                          'No hay filtros compatibles en este contexto.',
+                          Icons.info_outline,
+                        ),
+                      )
+                    else
+                      ..._availableFilterGroups.expand(
+                            (group) => [
+                          _buildFilterGroupCard(group),
+                          const SizedBox(height: 12),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -177,9 +178,8 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       if (cached != null) {
         if (!mounted || requestToken != _loadToken) return;
         setState(() {
-          _availableBrands = cached.availableBrands;
+          _availableFilterGroups = cached.availableFilterGroups;
           _availableSubcategories = cached.availableSubcategories;
-          _previewTotal = cached.previewTotal;
           _loading = false;
           _error = null;
         });
@@ -189,9 +189,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
     if (mounted && requestToken == _loadToken) {
       setState(() {
-        // No vaciamos lo que ya hay: así el panel no se queda bloqueado visualmente
-        // cada vez que se cambia el orden.
-        _loading = _availableBrands.isEmpty && _availableSubcategories.isEmpty;
+        _loading = true;
         _error = null;
       });
     }
@@ -200,26 +198,21 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       final search = filters.search.trim();
       final effectiveSearch = search.isEmpty ? null : search;
 
-      final brandIdFuture = _resolveBrandIdQuick(filters);
-      final brandsFuture = _loadBrandsFast(search: effectiveSearch);
-      final subcategoriesFuture = _loadSubcategoriesFast();
-
-      final effectiveBrandId = await brandIdFuture;
-
-      final previewFuture = _loadPreviewTotalFast(
-        brandId: effectiveBrandId,
+      // Primera carga: no usamos timeout corto aquí.
+      // La primera vez WooCommerce tiene que cargar términos de varios atributos
+      // y puede tardar más que en un refresh posterior. Si cortamos a los pocos
+      // segundos, aparece el mensaje de error aunque la API termine respondiendo.
+      final groups = await _apiService.getCatalogFiltersForCategory(
+        categoryId: widget.parentCategoryId,
         search: effectiveSearch,
-        orderBy: filters.orderBy,
+        forceRefresh: forceRefresh,
       );
 
-      final brands = await brandsFuture;
-      final subcategories = await subcategoriesFuture;
-      final previewTotal = await previewFuture;
+      final subcategories = await _loadSubcategoriesFast();
 
       final cacheEntry = _FilterDataCacheEntry(
-        availableBrands: brands,
+        availableFilterGroups: groups,
         availableSubcategories: subcategories,
-        previewTotal: previewTotal,
         createdAt: DateTime.now(),
       );
 
@@ -227,149 +220,35 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
       if (!mounted || requestToken != _loadToken) return;
       setState(() {
-        _availableBrands = brands;
+        _availableFilterGroups = groups;
         _availableSubcategories = subcategories;
-        _previewTotal = previewTotal;
         _loading = false;
         _error = null;
       });
-    } catch (_) {
+
+      if (kDebugMode) {
+        debugPrint(
+          '📊 Filtros web cargados: ${groups.length} grupos, '
+              '${subcategories.length} subcats',
+        );
+      }
+    } catch (e) {
       if (!mounted || requestToken != _loadToken) return;
       setState(() {
         _loading = false;
         _error = 'No se pudieron cargar los filtros.';
       });
-    }
-  }
-
-  Future<int?> _resolveBrandIdQuick(MundiFilters filters) async {
-    if (filters.brandId != null && filters.brandId! > 0) {
-      return filters.brandId;
-    }
-
-    final brandName = filters.brand.trim();
-    if (brandName.isEmpty) return null;
-
-    try {
-      return await _apiService
-          .getMarcaIdPorNombre(brandName)
-          .timeout(const Duration(seconds: 2));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<int> _loadPreviewTotalFast({
-    required int? brandId,
-    required String? search,
-    required String orderBy,
-  }) async {
-    try {
-      final preview = await _apiService
-          .getProductosCatalogoFiltrado(
-        categoryId: widget.parentCategoryId,
-        brandId: brandId,
-        search: search,
-        page: 1,
-        perPage: 1,
-        orderBy: orderBy,
-      )
-          .timeout(const Duration(seconds: 3));
-
-      return preview.totalItems;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _loadBrandsFast({
-    String? search,
-  }) async {
-    List<Map<String, dynamic>> cleanBrandList(List<Map<String, dynamic>> brands) {
-      final list = brands
-          .where((brand) => _brandNameFromMap(brand).isNotEmpty)
-          .where((brand) => _brandIdFromMap(brand) != null)
-          .where((brand) => _brandCountFromMap(brand) > 0)
-          .toList();
-
-      list.sort(
-            (a, b) => _brandNameFromMap(a).toLowerCase().compareTo(
-          _brandNameFromMap(b).toLowerCase(),
-        ),
-      );
-
-      return list;
-    }
-
-    try {
-      final brands = await _apiService
-          .getMarcasDisponiblesCatalogo(
-        categoryId: widget.parentCategoryId,
-        search: search,
-      )
-          .timeout(const Duration(seconds: 3));
-
-      final list = cleanBrandList(List<Map<String, dynamic>>.from(brands));
-      if (list.isNotEmpty) return list;
-    } catch (_) {
-      // No bloqueamos el panel de filtros si falla el cálculo contextual.
-    }
-
-    // Fallback importante: si una búsqueda genérica como “camara” no devuelve
-    // counts de marcas a tiempo, mostramos las marcas disponibles de la familia
-    // principal. Es preferible ofrecer marcas filtrables a dejar el panel vacío.
-    if (search != null && search.trim().isNotEmpty) {
-      try {
-        final brands = await _apiService
-            .getMarcasDisponiblesCatalogo(
-          categoryId: widget.parentCategoryId,
-          search: null,
-        )
-            .timeout(const Duration(seconds: 3));
-
-        final list = cleanBrandList(List<Map<String, dynamic>>.from(brands));
-        if (list.isNotEmpty) return list;
-      } catch (_) {
-        // Último fallback debajo.
+      if (kDebugMode) {
+        debugPrint('❌ Error loading web filters: $e');
       }
-    }
-
-    try {
-      final brands = await _apiService
-          .getMarcas(hideEmpty: true)
-          .timeout(const Duration(seconds: 3));
-
-      final list = List<Map<String, dynamic>>.from(brands)
-          .where((brand) => _brandNameFromMap(brand).isNotEmpty)
-          .where((brand) => _brandIdFromMap(brand) != null)
-          .map((brand) {
-        final count = _brandCountFromMap(brand);
-        return <String, dynamic>{
-          ...brand,
-          // Evita que la UI oculte todas las marcas si WooCommerce no trae
-          // count en este endpoint de fallback.
-          if (count <= 0) 'available_count': 1,
-        };
-      })
-          .toList();
-
-      list.sort(
-            (a, b) => _brandNameFromMap(a).toLowerCase().compareTo(
-          _brandNameFromMap(b).toLowerCase(),
-        ),
-      );
-
-      return list;
-    } catch (_) {
-      return [];
     }
   }
 
   Future<List<CategoryModel>> _loadSubcategoriesFast() async {
     try {
-      final subcategories = await _apiService
-          .getSubcategoriasDe(widget.parentCategoryId)
-          .timeout(const Duration(seconds: 3));
+      final subcategories = await _apiService.getSubcategoriasDe(
+        widget.parentCategoryId,
+      );
 
       final list = subcategories.where((category) => category.count > 0).toList()
         ..sort(
@@ -383,15 +262,19 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   }
 
   String _buildCacheKey(MundiFilters filters) {
-    // El orden no cambia marcas ni subcategorías ni el total de productos.
-    // Si lo metemos en la clave, cada pulsación en "precio bajo/alto" vuelve a
-    // pedir filtros a la API y ralentiza el panel sin necesidad.
     return [
       'cat:${widget.parentCategoryId}',
       'brandId:${filters.brandId ?? 0}',
       'brand:${filters.brand.trim().toLowerCase()}',
       'search:${filters.search.trim().toLowerCase()}',
+      'attrs:${_attributesCachePart(filters.attributeTermIds)}',
     ].join('|');
+  }
+
+  static String _attributesCachePart(Map<String, int> attrs) {
+    if (attrs.isEmpty) return '';
+    final keys = attrs.keys.toList()..sort();
+    return keys.map((key) => '$key:${attrs[key]}').join(',');
   }
 
   static _FilterDataCacheEntry? _readCache(String key) {
@@ -417,48 +300,114 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     }
   }
 
-  int? _brandIdFromMap(Map<String, dynamic> brand) {
-    final raw = brand['id'];
-    if (raw is int && raw > 0) return raw;
-    return int.tryParse(raw?.toString() ?? '');
+  void _toggleOption(CatalogFilterGroup group, CatalogFilterOption option) {
+    if (option.id <= 0 || option.name.trim().isEmpty) return;
+
+    // Cambio local dentro del drawer: no tocamos el provider global hasta
+    // pulsar "Ver productos". Así se pueden marcar varios filtros sin
+    // lanzar una recarga por cada clic.
+    setState(() {
+      if (group.taxonomy == 'pa_marcas') {
+        final isSelected = _draftFilters.brandId == option.id ||
+            _draftFilters.brand.trim().toLowerCase() ==
+                option.name.trim().toLowerCase();
+
+        if (isSelected) {
+          _draftFilters = _draftFilters.copyWith(
+            brand: '',
+            clearBrandId: true,
+          );
+        } else {
+          _draftFilters = _draftFilters.copyWith(
+            brand: option.name.trim(),
+            brandId: option.id,
+          );
+        }
+        return;
+      }
+
+      final cleanTaxonomy = group.taxonomy.trim();
+      final cleanLabel = option.name.trim();
+      if (cleanTaxonomy.isEmpty || cleanLabel.isEmpty) return;
+
+      final currentTermId = _draftFilters.attributeTermIds[cleanTaxonomy];
+      final nextTerms = Map<String, int>.from(_draftFilters.attributeTermIds);
+      final nextLabels = Map<String, String>.from(_draftFilters.attributeLabels);
+      final nextGroupLabels =
+      Map<String, String>.from(_draftFilters.attributeGroupLabels);
+
+      if (currentTermId == option.id) {
+        nextTerms.remove(cleanTaxonomy);
+        nextLabels.remove(cleanTaxonomy);
+        nextGroupLabels.remove(cleanTaxonomy);
+      } else {
+        nextTerms[cleanTaxonomy] = option.id;
+        nextLabels[cleanTaxonomy] = cleanLabel;
+        nextGroupLabels[cleanTaxonomy] =
+        group.title.trim().isEmpty ? cleanTaxonomy : group.title.trim();
+      }
+
+      _draftFilters = _draftFilters.copyWith(
+        attributeTermIds: nextTerms,
+        attributeLabels: nextLabels,
+        attributeGroupLabels: nextGroupLabels,
+      );
+    });
   }
 
-  String _brandNameFromMap(Map<String, dynamic> brand) {
-    return brand['name']?.toString().trim() ?? '';
+  void _clearGroup(CatalogFilterGroup group) {
+    setState(() {
+      if (group.taxonomy == 'pa_marcas') {
+        _draftFilters = _draftFilters.copyWith(
+          brand: '',
+          clearBrandId: true,
+        );
+        return;
+      }
+
+      final cleanTaxonomy = group.taxonomy.trim();
+      if (cleanTaxonomy.isEmpty) return;
+
+      final nextTerms = Map<String, int>.from(_draftFilters.attributeTermIds)
+        ..remove(cleanTaxonomy);
+      final nextLabels = Map<String, String>.from(_draftFilters.attributeLabels)
+        ..remove(cleanTaxonomy);
+      final nextGroupLabels =
+      Map<String, String>.from(_draftFilters.attributeGroupLabels)
+        ..remove(cleanTaxonomy);
+
+      _draftFilters = _draftFilters.copyWith(
+        attributeTermIds: nextTerms,
+        attributeLabels: nextLabels,
+        attributeGroupLabels: nextGroupLabels,
+      );
+    });
   }
 
-  int _brandCountFromMap(Map<String, dynamic> brand) {
-    final raw = brand['available_count'] ?? brand['count'];
-    if (raw is int) return raw;
-    return int.tryParse(raw?.toString() ?? '') ?? 0;
-  }
-
-  void _seleccionarMarca(Map<String, dynamic> brand) {
-    final brandId = _brandIdFromMap(brand);
-    final brandName = _brandNameFromMap(brand);
-
-    if (brandId == null || brandId <= 0 || brandName.isEmpty) {
-      return;
+  bool _isOptionSelected(
+      MundiFilters filters,
+      CatalogFilterGroup group,
+      CatalogFilterOption option,
+      ) {
+    if (group.taxonomy == 'pa_marcas') {
+      return filters.brandId == option.id ||
+          filters.brand.trim().toLowerCase() == option.name.trim().toLowerCase();
     }
 
-    final current = ref.read(productFilterProvider);
-    if (current.brandId == brandId ||
-        current.brand.trim().toLowerCase() == brandName.toLowerCase()) {
-      ref.read(productFilterProvider.notifier).clearBrand();
-      return;
+    return filters.attributeTermIds[group.taxonomy] == option.id;
+  }
+
+  bool _isGroupSelected(MundiFilters filters, CatalogFilterGroup group) {
+    if (group.taxonomy == 'pa_marcas') {
+      return filters.hasBrand;
     }
 
-    ref.read(productFilterProvider.notifier).setBrand(
-      name: brandName,
-      id: brandId,
-    );
+    return filters.attributeTermIds.containsKey(group.taxonomy);
   }
 
   void _irAProductos(CategoryModel cat) {
     final categoryId = cat.id;
-    if (categoryId <= 0) {
-      return;
-    }
+    if (categoryId <= 0) return;
 
     _filterCache.clear();
     ref.read(productFilterProvider.notifier).reset();
@@ -476,14 +425,27 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   }
 
   void _limpiarFiltros() {
-    _filterCache.clear();
-    ref.read(productFilterProvider.notifier).reset();
-
-    if (!mounted) return;
-    Navigator.of(context).pop();
+    setState(() {
+      _draftFilters = const MundiFilters();
+    });
   }
 
-  void _aplicarYCerrar() => Navigator.pop(context);
+  void _aplicarYCerrar() {
+    _applyingFiltersAndClosing = true;
+
+    ref.read(productFilterProvider.notifier).update(
+      brand: _draftFilters.brand,
+      brandId: _draftFilters.brandId,
+      search: _draftFilters.search,
+      orderBy: _draftFilters.orderBy,
+      attributeTermIds: Map<String, int>.from(_draftFilters.attributeTermIds),
+      attributeLabels: Map<String, String>.from(_draftFilters.attributeLabels),
+      attributeGroupLabels:
+      Map<String, String>.from(_draftFilters.attributeGroupLabels),
+    );
+
+    Navigator.pop(context);
+  }
 
   void _cerrarDrawer() => Navigator.pop(context);
 
@@ -512,6 +474,33 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         .replaceAll('ü', 'u')
         .replaceAll('û', 'u')
         .replaceAll('ñ', 'n');
+  }
+
+  IconData _iconForFilterGroup(CatalogFilterGroup group) {
+    switch (group.taxonomy) {
+      case 'pa_marcas':
+        return Icons.sell_outlined;
+      case 'pa_resolucion':
+        return Icons.high_quality_rounded;
+      case 'pa_lente':
+        return Icons.camera_alt_outlined;
+      case 'pa_proteccion':
+        return Icons.shield_outlined;
+      case 'pa_microfono-integrado':
+        return Icons.mic_none_rounded;
+      case 'pa_wifi':
+        return Icons.wifi_rounded;
+      case 'pa_ancho-de-banda':
+        return Icons.speed_rounded;
+      case 'pa_grabacion-main-stream':
+        return Icons.videocam_outlined;
+      case 'pa_protocolo':
+        return Icons.hub_outlined;
+      case 'pa_smd':
+        return Icons.memory_rounded;
+      default:
+        return Icons.tune_rounded;
+    }
   }
 
   IconData _subcategoryIcon(String name) {
@@ -560,6 +549,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     final contextParts = <String>[
       widget.categoryName,
       if (filtroState.brand.trim().isNotEmpty) filtroState.brand.trim(),
+      ...filtroState.attributeLabels.values.where((value) => value.trim().isNotEmpty),
       if (filtroState.search.trim().isNotEmpty) '“${filtroState.search.trim()}”',
     ];
 
@@ -624,23 +614,6 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
               ],
             ),
           ),
-          if (filtroState.hasActiveFilters && _previewTotal > 0)
-            Container(
-              margin: const EdgeInsets.only(right: 2),
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                '$_previewTotal',
-                style: const TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 11,
-                ),
-              ),
-            ),
           IconButton(
             icon: const Icon(
               Icons.close_rounded,
@@ -754,6 +727,131 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     );
   }
 
+  Widget _buildFilterGroupCard(CatalogFilterGroup group) {
+    final filters = _draftFilters;
+    final groupSelected = _isGroupSelected(filters, group);
+
+    return _sectionCard(
+      title: group.title,
+      icon: _iconForFilterGroup(group),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (groupSelected) ...[
+            _clearGroupTile(group),
+            const SizedBox(height: 8),
+          ],
+          ...group.options.map((option) => _buildFilterOptionRow(group, option)),
+        ],
+      ),
+    );
+  }
+
+  Widget _clearGroupTile(CatalogFilterGroup group) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => _clearGroup(group),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7F7),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFF0D4D4)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.clear_rounded, color: AppColors.primary, size: 17),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Todos los ${group.title.toLowerCase()}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterOptionRow(
+      CatalogFilterGroup group,
+      CatalogFilterOption option,
+      ) {
+    final selectedFilter = _draftFilters;
+    final isSelected = _isOptionSelected(selectedFilter, group, option);
+
+    return InkWell(
+      onTap: () => _toggleOption(group, option),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              width: 15,
+              height: 15,
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.primary : Colors.white,
+                border: Border.all(
+                  color: isSelected
+                      ? AppColors.primary
+                      : const Color(0xFFD1D5DB),
+                  width: 1,
+                ),
+              ),
+              child: isSelected
+                  ? const Icon(
+                Icons.check,
+                size: 11,
+                color: Colors.white,
+              )
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                option.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13.2,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '${option.count}',
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _loadingBox(String text) {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -817,17 +915,17 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   }
 
   Widget _buildSortTile(String label, String value, IconData icon) {
-    final currentSort = ref.watch(productFilterProvider).orderBy;
+    final currentSort = _draftFilters.orderBy;
     final isSelected = currentSort == value;
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: () {
-        if (isSelected) {
-          ref.read(productFilterProvider.notifier).clearOrderBy();
-        } else {
-          ref.read(productFilterProvider.notifier).setOrderBy(value);
-        }
+        setState(() {
+          _draftFilters = _draftFilters.copyWith(
+            orderBy: isSelected ? '' : value,
+          );
+        });
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
@@ -886,103 +984,6 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                 key: ValueKey('unselected'),
                 size: 21,
                 color: Color(0xFF9CA3AF),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _allBrandsTile() {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () => ref.read(productFilterProvider.notifier).clearBrand(),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFF7F7),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFF0D4D4)),
-        ),
-        child: const Row(
-          children: [
-            Icon(
-              Icons.clear_rounded,
-              color: AppColors.primary,
-              size: 18,
-            ),
-            SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                'Todas las marcas',
-                style: TextStyle(
-                  fontSize: 13.2,
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMarcaChip(Map<String, dynamic> brand) {
-    final selectedFilter = ref.watch(productFilterProvider);
-    final brandId = _brandIdFromMap(brand);
-    final marcaNombre = _brandNameFromMap(brand);
-
-    if (marcaNombre.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final isSelected =
-        (brandId != null && brandId > 0 && selectedFilter.brandId == brandId) ||
-            selectedFilter.brand.trim().toLowerCase() ==
-                marcaNombre.toLowerCase();
-
-    return GestureDetector(
-      onTap: () {
-        _seleccionarMarca(brand);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary : const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected ? AppColors.primary : const Color(0xFFDDE3EC),
-            width: isSelected ? 1.5 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-            BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.18),
-              blurRadius: 9,
-              offset: const Offset(0, 3),
-            ),
-          ]
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.sell_outlined,
-              size: 13,
-              color: isSelected ? Colors.white : AppColors.primary,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              marcaNombre,
-              style: TextStyle(
-                fontSize: 11.8,
-                fontWeight: FontWeight.w900,
-                color: isSelected ? Colors.white : AppColors.textPrimary,
               ),
             ),
           ],
@@ -1121,13 +1122,11 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                 ),
-                child: Text(
-                  _previewTotal > 0
-                      ? 'Ver $_previewTotal productos'
-                      : 'Ver productos',
+                child: const Text(
+                  'Ver productos',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w900,
                     fontSize: 14.2,
                     fontFamily: 'Oswald',
@@ -1143,15 +1142,13 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 }
 
 class _FilterDataCacheEntry {
-  final List<Map<String, dynamic>> availableBrands;
+  final List<CatalogFilterGroup> availableFilterGroups;
   final List<CategoryModel> availableSubcategories;
-  final int previewTotal;
   final DateTime createdAt;
 
   const _FilterDataCacheEntry({
-    required this.availableBrands,
+    required this.availableFilterGroups,
     required this.availableSubcategories,
-    required this.previewTotal,
     required this.createdAt,
   });
 
