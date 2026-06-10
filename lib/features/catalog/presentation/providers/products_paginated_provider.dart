@@ -1,41 +1,29 @@
-import 'package:flutter/foundation.dart';
-import 'package:mundicam/core/cache/product_cache_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
-import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
+import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
+import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 
+/// Provider para productos con scroll infinito
 final productsPaginatedProvider =
-StateNotifierProvider.family<ProductsPaginatedNotifier, List<Product>, int>(
+    StateNotifierProvider.family<ProductsPaginatedNotifier, List<Product>, int>(
       (ref, categoryId) {
-    return ProductsPaginatedNotifier(
-      apiService: ref.read(apiServiceProvider),
-      categoryId: categoryId,
-      ref: ref,
+        return ProductsPaginatedNotifier(
+          apiService: ref.read(apiServiceProvider),
+          categoryId: categoryId,
+          ref: ref,
+        );
+      },
     );
-  },
-);
 
 class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   final ApiService apiService;
   final int categoryId;
   final Ref ref;
 
-  static const Duration _cacheTtl = Duration(minutes: 3);
-
-
   int _currentPage = 1;
-  int _totalPages = 1;
-  int _totalItems = 0;
-  int _requestToken = 0;
-
   bool _isLoading = false;
   bool _hasMore = true;
-  bool _hasLoadedFirstPage = false;
-
-  Object? _lastError;
-
   final int _perPage = 30;
 
   ProductsPaginatedNotifier({
@@ -43,232 +31,67 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     required this.categoryId,
     required this.ref,
   }) : super([]) {
-    Future<void>.microtask(loadFirstPage);
+    loadFirstPage();
   }
 
   bool get isLoading => _isLoading;
   bool get hasMore => _hasMore;
-  bool get hasLoadedFirstPage => _hasLoadedFirstPage;
 
-  int get currentPage => _currentPage;
-  int get totalPages => _totalPages;
-  int get totalItems => _totalItems;
-
-  Object? get lastError => _lastError;
-
-  double _productPrice(Product product) {
-    return double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0.0;
-  }
-
-  CatalogProductsResult _sortCatalogResultPage(
-      CatalogProductsResult result,
-      String orderBy,
-      ) {
-    final products = [...result.products];
-
-    if (orderBy == 'price_asc') {
-      products.sort((a, b) {
-        final comparePrice = _productPrice(a).compareTo(_productPrice(b));
-        if (comparePrice != 0) return comparePrice;
-        return b.id.compareTo(a.id);
-      });
-    } else if (orderBy == 'price_desc') {
-      products.sort((a, b) {
-        final comparePrice = _productPrice(b).compareTo(_productPrice(a));
-        if (comparePrice != 0) return comparePrice;
-        return b.id.compareTo(a.id);
-      });
-    } else if (orderBy == 'date') {
-      products.sort((a, b) => b.id.compareTo(a.id));
-    }
-
-    return CatalogProductsResult(
-      products: products,
-      currentPage: result.currentPage,
-      totalPages: result.totalPages,
-      totalItems: result.totalItems,
-    );
-  }
-
-  static void clearGlobalCache() {
-    ProductCacheService().clearCatalogMemory();
-  }
-
-  void clearCacheForCurrentCategory() {
-    ProductCacheService().clearMemoryPrefix('catalog_page|cat:$categoryId|');
-  }
-
-  Future<void> loadFirstPage({
-    bool forceRefresh = false,
-  }) async {
-    // Si llega una bÃºsqueda nueva mientras otra sigue en curso, no la ignoramos.
-    // La peticiÃ³n anterior queda invalidada por el token y no puede pisar el listado.
-    if (_isLoading && !forceRefresh) return;
-
-    final token = ++_requestToken;
-
+  Future<void> loadFirstPage() async {
     _currentPage = 1;
     _hasMore = true;
     _isLoading = true;
-    _lastError = null;
 
     try {
-      final result = await _loadPage(
+      final filters = ref.read(productFilterProvider);
+      final productos = await apiService.getProductosPaginado(
+        categoryId: categoryId,
         page: _currentPage,
-        forceRefresh: forceRefresh,
+        perPage: _perPage,
+        brand: filters.brand,
+        orderBy: filters.orderBy,
       );
 
-      if (token != _requestToken) return;
-
-      _hasLoadedFirstPage = true;
-      state = result.products;
-      _totalPages = result.totalPages;
-      _totalItems = result.totalItems;
-      _hasMore = result.hasNextPage;
+      state = productos;
+      _hasMore = productos.length >= _perPage;
     } catch (e) {
-      if (token != _requestToken) return;
-
-      _hasLoadedFirstPage = true;
-      _lastError = e;
-      _hasMore = false;
-
-      if (kDebugMode) {
-        debugPrint('âŒ Error cargando primera pÃ¡gina catÃ¡logo: $e');
-      }
+      // Mantener estado actual en caso de error
     } finally {
-      if (token == _requestToken) {
-        _isLoading = false;
-      }
+      _isLoading = false;
     }
   }
 
-  Future<void> loadNextPage({
-    bool forceRefresh = false,
-  }) async {
+  Future<void> loadNextPage() async {
     if (_isLoading || !_hasMore) return;
 
-    final token = ++_requestToken;
-
     _isLoading = true;
-    _lastError = null;
-
-    final nextPage = _currentPage + 1;
+    _currentPage++;
 
     try {
-      final result = await _loadPage(
-        page: nextPage,
-        forceRefresh: forceRefresh,
+      final filters = ref.read(productFilterProvider);
+      final productos = await apiService.getProductosPaginado(
+        categoryId: categoryId,
+        page: _currentPage,
+        perPage: _perPage,
+        brand: filters.brand,
+        orderBy: filters.orderBy,
       );
 
-      if (token != _requestToken) return;
-
-      _currentPage = result.currentPage;
-      _totalPages = result.totalPages;
-      _totalItems = result.totalItems;
-
-      if (result.products.isEmpty) {
+      if (productos.isEmpty) {
         _hasMore = false;
       } else {
-        state = [...state, ...result.products];
-        _hasMore = result.hasNextPage;
+        state = [...state, ...productos];
+        _hasMore = productos.length >= _perPage;
       }
     } catch (e) {
-      if (token != _requestToken) return;
-
-      _hasLoadedFirstPage = true;
-      _lastError = e;
-
-      if (kDebugMode) {
-        debugPrint('âŒ Error cargando mÃ¡s productos catÃ¡logo: $e');
-      }
+      _currentPage--; // Revertir la página en caso de error
     } finally {
-      if (token == _requestToken) {
-        _isLoading = false;
-      }
+      _isLoading = false;
     }
   }
 
-  void refresh({
-    bool forceRefresh = false,
-  }) {
-    loadFirstPage(forceRefresh: forceRefresh);
-  }
-
-  Future<CatalogProductsResult> _loadPage({
-    required int page,
-    required bool forceRefresh,
-  }) async {
-    final filters = ref.read(productFilterProvider);
-
-    final brandName = filters.brand.trim();
-    final search = filters.search.trim();
-
-    final effectiveBrandId = filters.brandId ??
-        await apiService
-            .getMarcaIdPorNombre(
-          brandName.isEmpty ? null : brandName,
-        )
-            .timeout(
-          const Duration(seconds: 3),
-          onTimeout: () => null,
-        );
-
-    final cacheKey = _buildCacheKey(
-      categoryId: categoryId,
-      brandId: effectiveBrandId,
-      brandName: brandName,
-      search: search,
-      orderBy: filters.orderBy,
-      page: page,
-      perPage: _perPage,
-    );
-
-    return ProductCacheService().getOrLoadMemory<CatalogProductsResult>(
-      cacheKey,
-      ttl: _cacheTtl,
-      forceRefresh: forceRefresh,
-      loader: () async {
-        final result = await apiService.getProductosCatalogoFiltrado(
-          categoryId: categoryId,
-          brandId: effectiveBrandId,
-          search: search.isEmpty ? null : search,
-          page: page,
-          perPage: _perPage,
-          orderBy: filters.orderBy,
-        );
-
-        final orderedResult = _sortCatalogResultPage(
-          result,
-          filters.orderBy,
-        );
-
-        if (kDebugMode) {
-          debugPrint('ðŸŒ CatÃ¡logo cargado: $cacheKey Â· total=${orderedResult.totalItems}');
-        }
-
-        return orderedResult;
-      },
-    );
-  }
-
-  static String _buildCacheKey({
-    required int categoryId,
-    required int? brandId,
-    required String brandName,
-    required String search,
-    required String orderBy,
-    required int page,
-    required int perPage,
-  }) {
-    return [
-      'catalog_page|cat:$categoryId',
-      'brandId:${brandId ?? 0}',
-      'brand:${brandName.toLowerCase().trim()}',
-      'search:${search.toLowerCase().trim()}',
-      'order:$orderBy',
-      'page:$page',
-      'perPage:$perPage',
-    ].join('|');
+  /// Reiniciar cuando cambian los filtros
+  void refresh() {
+    loadFirstPage();
   }
 }
-

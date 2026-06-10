@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 import 'package:mundicam/features/support/presentation/providers/tickets_providers.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
-import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class SupportTicketsPage extends ConsumerWidget {
   const SupportTicketsPage({super.key});
@@ -21,18 +19,30 @@ class SupportTicketsPage extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
-      appBar: ProfessionalPageAppBar(
-        title: 'SOPORTE TÉCNICO',
-        subtitle: '',
-        icon: Icons.support_agent_rounded,
-        onBack: () => Navigator.pop(context),
-        onRefresh: () => ref.invalidate(ticketsProvider),
+      appBar: AppBar(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text("SOPORTE TÉCNICO"),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            onPressed: () => ref.invalidate(ticketsProvider),
+            tooltip: 'Actualizar',
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Info horario
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -96,7 +106,7 @@ class SupportTicketsPage extends ConsumerWidget {
               "WhatsApp",
               _whatsappFormateado,
               const Color(0xFF25D366),
-                  () => launchUrl(
+              () => launchUrl(
                 Uri.parse("https://wa.me/$_whatsapp"),
                 mode: LaunchMode.externalApplication,
               ),
@@ -107,7 +117,7 @@ class SupportTicketsPage extends ConsumerWidget {
               "Llamada",
               _telefonoFormateado,
               Colors.blue,
-                  () => launchUrl(Uri.parse("tel:$_telefono")),
+              () => launchUrl(Uri.parse("tel:$_telefono")),
             ),
             const SizedBox(height: 10),
             _contactCard(
@@ -115,7 +125,7 @@ class SupportTicketsPage extends ConsumerWidget {
               "Email",
               _email,
               Colors.red,
-                  () => launchUrl(
+              () => launchUrl(
                 Uri(
                   scheme: 'mailto',
                   path: _email,
@@ -139,18 +149,12 @@ class SupportTicketsPage extends ConsumerWidget {
                 loading: () => const Center(
                   child: CircularProgressIndicator(color: AppColors.primary),
                 ),
-                error: (error, stackTrace) => _buildEmptyTickets(),
+                error: (_, __) => _buildEmptyTickets(),
                 data: (tickets) {
                   if (tickets.isEmpty) return _buildEmptyTickets();
-
-                  return RefreshIndicator(
-                    color: AppColors.primary,
-                    onRefresh: () async => ref.invalidate(ticketsProvider),
-                    child: ListView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      itemCount: tickets.length,
-                      itemBuilder: (_, i) => _buildTicketCard(tickets[i]),
-                    ),
+                  return ListView.builder(
+                    itemCount: tickets.length,
+                    itemBuilder: (_, i) => _buildTicketCard(tickets[i]),
                   );
                 },
               ),
@@ -162,12 +166,12 @@ class SupportTicketsPage extends ConsumerWidget {
   }
 
   Widget _contactCard(
-      IconData icon,
-      String title,
-      String subtitle,
-      Color color,
-      VoidCallback onTap,
-      ) {
+    IconData icon,
+    String title,
+    String subtitle,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: onTap,
       child: Container(

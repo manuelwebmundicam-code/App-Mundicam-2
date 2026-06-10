@@ -36,14 +36,12 @@ class _BrandsBannerState extends State<BrandsBanner> {
     {"img": "assets/brands/ZKTECO.png", "name": "Zkteco"},
   ];
 
-  late final List<Map<String, String>> _infiniteLogos;
+  late List<Map<String, String>> _infiniteLogos;
 
   @override
   void initState() {
     super.initState();
-
     _infiniteLogos = [..._logos, ..._logos, ..._logos];
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(
@@ -55,17 +53,14 @@ class _BrandsBannerState extends State<BrandsBanner> {
   }
 
   void _startAutoScroll() {
-    _timer?.cancel();
-
-    _timer = Timer.periodic(const Duration(milliseconds: 18), (_) {
-      if (!_scrollController.hasClients || _isUserInteracting) return;
-
-      final next = _scrollController.offset + 0.35;
-
-      if (next >= _scrollController.position.maxScrollExtent) {
-        _scrollController.jumpTo(_scrollController.position.minScrollExtent);
-      } else {
-        _scrollController.jumpTo(next);
+    _timer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      if (_scrollController.hasClients && !_isUserInteracting) {
+        double next = _scrollController.offset + 0.4;
+        if (next >= _scrollController.position.maxScrollExtent) {
+          _scrollController.jumpTo(_scrollController.position.minScrollExtent);
+        } else {
+          _scrollController.jumpTo(next);
+        }
       }
     });
   }
@@ -79,75 +74,72 @@ class _BrandsBannerState extends State<BrandsBanner> {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 94,
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (notification) {
-          if (notification is ScrollStartNotification) {
-            _isUserInteracting = true;
-          }
-
-          if (notification is ScrollEndNotification) {
-            _isUserInteracting = false;
-          }
-
-          return false;
-        },
-        child: ListView.builder(
-          controller: _scrollController,
-          scrollDirection: Axis.horizontal,
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          itemCount: _infiniteLogos.length,
-          itemBuilder: (context, index) {
-            final brand = _infiniteLogos[index];
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          ProductoPorMarca(brandName: brand['name']!),
-                    ),
-                  );
-                },
-                child: Container(
-                  width: 118,
-                  height: 78,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: const Color(0xFFE1E7EF),
-                      width: 1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.055),
-                        blurRadius: 14,
-                        offset: const Offset(0, 6),
+    // 1. Usamos Padding para el desplazamiento hacia arriba (evita errores de Container)
+    return Padding(
+      padding: const EdgeInsets.only(
+        top: 0,
+      ), // Cambia a -10 si quieres probar subirlo
+      child: SizedBox(
+        height: 70,
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (notification is ScrollStartNotification) {
+              _isUserInteracting = true;
+            }
+            if (notification is ScrollEndNotification) {
+              _isUserInteracting = false;
+            }
+            return false;
+          },
+          child: ListView.builder(
+            controller: _scrollController,
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: _infiniteLogos.length,
+            itemBuilder: (context, index) {
+              final brand = _infiniteLogos[index];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                child: GestureDetector(
+                  // GestureDetector es más ligero que InkWell
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            ProductoPorMarca(brandName: brand['name']!),
                       ),
-                    ],
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
+                    );
+                  },
+                  child: Container(
+                    width: 90,
+                    // 2. IMPORTANTE: No pongas 'color' fuera de decoration
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black12,
+                          blurRadius: 2,
+                          offset: Offset(0, 1),
+                        ),
+                      ],
                     ),
-                    child: Image.asset(
-                      brand['img']!,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) =>
-                      const Icon(Icons.business, color: Colors.grey),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Image.asset(
+                        brand['img']!,
+                        fit: BoxFit.contain,
+                        // Añadimos esto por si alguna imagen falla
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Icon(Icons.business, color: Colors.grey),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

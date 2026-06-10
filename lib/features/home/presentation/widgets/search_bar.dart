@@ -52,76 +52,52 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     final bool hasText = _controller.text.trim().isNotEmpty;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        height: 50,
-        decoration: BoxDecoration(
-          color: AppColors.primary,
-          borderRadius: BorderRadius.circular(17),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.16),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            ),
-          ],
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: TextField(
+        controller: _controller,
+        textInputAction: TextInputAction.search,
+        keyboardType: TextInputType.text,
+        onSubmitted: _buscar,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontFamily: 'Oswald',
         ),
-        child: TextField(
-          controller: _controller,
-          textInputAction: TextInputAction.search,
-          keyboardType: TextInputType.text,
-          onSubmitted: _buscar,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
+        decoration: InputDecoration(
+          hintText: 'Buscar por producto, marca, tecnología...',
+          hintStyle: TextStyle(
+            color: Colors.white.withValues(alpha: 0.72),
             fontFamily: 'Oswald',
-            fontWeight: FontWeight.w600,
           ),
-          decoration: InputDecoration(
-            hintText: 'Buscar por producto, marca, tecnología...',
-            hintStyle: TextStyle(
-              color: Colors.white.withValues(alpha: 0.78),
-              fontFamily: 'Oswald',
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
+          prefixIcon: IconButton(
+            icon: const Icon(
+              Icons.search_rounded,
+              color: Colors.white,
+              size: 24,
             ),
-            prefixIcon: IconButton(
-              icon: const Icon(
-                Icons.search_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
-              onPressed: () => _buscar(_controller.text),
-            ),
-            suffixIcon: hasText
-                ? IconButton(
-              icon: const Icon(
-                Icons.clear_rounded,
-                color: Colors.white70,
-                size: 20,
-              ),
-              onPressed: () {
-                _controller.clear();
-              },
-            )
-                : IconButton(
-              icon: const Icon(
-                Icons.arrow_forward_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
-              onPressed: () => _buscar(_controller.text),
-            ),
-            filled: true,
-            fillColor: Colors.transparent,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(17),
-              borderSide: BorderSide.none,
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              vertical: 14,
-              horizontal: 4,
-            ),
+            onPressed: () => _buscar(_controller.text),
+          ),
+          suffixIcon: hasText
+              ? IconButton(
+                  icon: const Icon(
+                    Icons.clear_rounded,
+                    color: Colors.white70,
+                    size: 22,
+                  ),
+                  onPressed: () {
+                    _controller.clear();
+                  },
+                )
+              : null,
+          filled: true,
+          fillColor: AppColors.primary,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(30),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 12,
+            horizontal: 4,
           ),
         ),
       ),

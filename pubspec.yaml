@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  equatable: ^2.0.5
+
   cached_network_image: ^3.4.1
   flutter_riverpod: ^2.5.1
   flutter_native_splash: ^2.4.3
@@ -47,7 +47,7 @@ flutter:
 
   assets:
     - assets/logo.png
-    - assets/gif/
+    - assets/gif/fondo.gif
     - assets/banners/
     - assets/brands/
     - assets/images/

@@ -8,84 +8,83 @@ class ChatbotButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      bottom: 16,
-      right: 14,
+      bottom: 20,
+      right: 20,
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
-          width: 112,
-          height: 46,
-          padding: const EdgeInsets.symmetric(horizontal: 9),
-          decoration: BoxDecoration(
-            color: const Color(0xFF111827),
-            borderRadius: BorderRadius.circular(17),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.12),
-              width: 1.1,
+        child: CustomPaint(
+          size: const Size(150, 72),
+          painter: SpeechBubblePainter(),
+          child: Container(
+            width: 150,
+            height: 72,
+            padding: const EdgeInsets.only(
+              left: 14,
+              right: 16,
+              top: 8,
+              bottom: 18,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.16),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 27,
-                height: 27,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Image.asset(
-                  'assets/images/mundicamlogochatbox.png',
-                  width: 20,
-                  height: 20,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Image.asset(
+                  'assets/images/mundicamlogo.png',
+                  width: 34,
+                  height: 34,
                   fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => const Icon(
-                    Icons.support_agent_rounded,
-                    color: Color(0xFFD71920),
-                    size: 18,
-                  ),
                 ),
-              ),
-              const SizedBox(width: 7),
-              const Expanded(
-                child: Text(
-                  '¿Dudas?\nTe ayudo',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11.5,
-                    height: 1.02,
-                    fontWeight: FontWeight.w900,
-                    fontFamily: 'Oswald',
-                  ),
-                ),
-              ),
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF34D399),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF34D399).withValues(alpha: 0.55),
-                      blurRadius: 6,
-                      spreadRadius: 1,
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    '¿Dudas?\nTe ayudo',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      height: 1.1,
+                      fontWeight: FontWeight.w800,
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+// ESTO ES LO QUE DIBUJA LA FORMA DE BOCADILLO
+class SpeechBubblePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF333333)
+      ..style = PaintingStyle.fill;
+
+    final path = Path();
+
+    const double radius = 22.0;
+    const double tailHeight = 12.0;
+
+    path.addRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, size.width, size.height - tailHeight),
+        const Radius.circular(radius),
+      ),
+    );
+
+    path.moveTo(size.width * 0.68, size.height - tailHeight);
+    path.lineTo(size.width * 0.84, size.height);
+    path.lineTo(size.width * 0.90, size.height - tailHeight);
+    path.close();
+
+    canvas.drawShadow(path, Colors.black, 6.0, true);
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
 }

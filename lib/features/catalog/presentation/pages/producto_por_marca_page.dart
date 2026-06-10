@@ -4,8 +4,6 @@ import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
-import 'package:mundicam/shared/theme/app_theme.dart';
-import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class ProductoPorMarca extends StatefulWidget {
   final String brandName;
@@ -45,21 +43,27 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6F8),
-      appBar: ProfessionalPageAppBar(
-        title: widget.brandName.toUpperCase(),
-        subtitle: '',
-        icon: Icons.local_offer_outlined,
-        onBack: () => Navigator.of(context).pop(),
-        onRefresh: _refreshProductos,
+      backgroundColor: const Color(0xFFF2F2F2),
+      appBar: AppBar(
+        title: Text(widget.brandName.toUpperCase()),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _refreshProductos,
+            tooltip: 'Actualizar',
+          ),
+        ],
       ),
       body: FutureBuilder<List<Product>>(
         future: _productosFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: AppColors.primary),
+            return Center(
+              child: CircularProgressIndicator(color: theme.primaryColor),
             );
           }
 
@@ -97,10 +101,6 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
                       onPressed: _refreshProductos,
                       icon: const Icon(Icons.refresh_rounded),
                       label: const Text('Reintentar'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.primary,
-                        side: const BorderSide(color: AppColors.primary),
-                      ),
                     ),
                   ],
                 ),
@@ -138,10 +138,9 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
           }
 
           return RefreshIndicator(
-            color: AppColors.primary,
             onRefresh: _refreshProductos,
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+              padding: const EdgeInsets.symmetric(vertical: 4),
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: productos.length,
               itemBuilder: (context, index) {
@@ -149,7 +148,6 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
                   key: ValueKey(productos[index].id),
                   p: productos[index],
                   firebase: _firebase,
-                  categoryName: widget.brandName,
                   onGoCart: widget.onGoCart,
                   onGoQuotes: widget.onGoQuotes,
                 );

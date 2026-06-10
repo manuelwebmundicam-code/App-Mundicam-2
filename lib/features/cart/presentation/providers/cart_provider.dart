@@ -1,19 +1,13 @@
 import 'dart:convert';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 
 class CartItem {
   final Product product;
-  final int quantity;
+  int quantity;
 
-  const CartItem({
-    required this.product,
-    this.quantity = 1,
-  });
+  CartItem({required this.product, this.quantity = 1});
 
   Map<String, dynamic> toJson() => {
     'product': product.toJson(),
@@ -22,22 +16,9 @@ class CartItem {
 
   factory CartItem.fromJson(Map<String, dynamic> json) {
     return CartItem(
-      product: Product.fromJson(
-        Map<String, dynamic>.from(json['product'] as Map),
-      ),
-      quantity: _parseInt(json['quantity'], fallback: 1),
+      product: Product.fromJson(json['product']),
+      quantity: json['quantity'],
     );
-  }
-
-  static int _parseInt(dynamic value, {int fallback = 1}) {
-    if (value == null) return fallback;
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-
-    final raw = value.toString().trim();
-    if (raw.isEmpty) return fallback;
-
-    return int.tryParse(raw) ?? double.tryParse(raw)?.toInt() ?? fallback;
   }
 }
 
@@ -48,95 +29,38 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
   Future<void> _saveCart() async {
     final prefs = await SharedPreferences.getInstance();
-
-    final encodedData = jsonEncode(
+    final String encodedData = jsonEncode(
       state.map((item) => item.toJson()).toList(),
     );
-
     await prefs.setString('cart_mundicam_data', encodedData);
-
-    _debugCart('GUARDADO');
   }
 
   Future<void> _loadCart() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedData = prefs.getString('cart_mundicam_data');
-
-    if (savedData == null || savedData.trim().isEmpty) {
-      state = [];
-      return;
-    }
-
-    try {
-      final decodedData = jsonDecode(savedData);
-
-      if (decodedData is! List) {
+    final String? savedData = prefs.getString('cart_mundicam_data');
+    if (savedData != null) {
+      try {
+        final List<dynamic> decodedData = jsonDecode(savedData);
+        state = decodedData.map((item) => CartItem.fromJson(item)).toList();
+      } catch (e) {
         state = [];
-        return;
       }
-
-      state = decodedData
-          .whereType<Map>()
-          .map(
-            (item) => CartItem.fromJson(
-          Map<String, dynamic>.from(item),
-        ),
-      )
-          .where((item) => item.product.id > 0)
-          .where((item) => item.quantity > 0)
-          .toList();
-
-      _debugCart('CARGADO');
-    } catch (e) {
-      debugPrint('❌ Error cargando carrito: $e');
-      state = [];
     }
   }
 
   void addProduct(Product product, int qty) {
-    final safeQty = qty <= 0 ? 1 : qty;
-
-    debugPrint('🛒 AÑADIENDO PRODUCTO AL CARRITO');
-    debugPrint('➡️ ID: ${product.id}');
-    debugPrint('➡️ Nombre: ${product.name}');
-    debugPrint('➡️ Cantidad: $safeQty');
-
-    if (product.id <= 0) {
-      debugPrint('❌ Producto sin ID válido. No se añade al carrito.');
-      return;
-    }
-
-    final index = state.indexWhere(
-          (item) => item.product.id == product.id,
-    );
-
+    final index = state.indexWhere((item) => item.product.id == product.id);
     if (index != -1) {
-      debugPrint(
-        '🔁 Producto ya existe en carrito. Se suma cantidad al ID ${product.id}',
-      );
-
       state = [
         for (final item in state)
           if (item.product.id == product.id)
-            CartItem(
-              product: item.product,
-              quantity: item.quantity + safeQty,
-            )
+            CartItem(product: item.product, quantity: item.quantity + qty)
           else
             item,
       ];
     } else {
-      debugPrint('✅ Producto nuevo añadido al carrito');
-
-      state = [
-        ...state,
-        CartItem(
-          product: product,
-          quantity: safeQty,
-        ),
-      ];
+      state = [...state, CartItem(product: product, quantity: qty)];
     }
-
     _saveCart();
   }
 
@@ -150,18 +74,13 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
       removeProduct(productId);
       return;
     }
-
     state = [
       for (final item in state)
         if (item.product.id == productId)
-          CartItem(
-            product: item.product,
-            quantity: newQty,
-          )
+          CartItem(product: item.product, quantity: newQty)
         else
           item,
     ];
-
     _saveCart();
   }
 
@@ -170,31 +89,20 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     _saveCart();
   }
 
-  double get total => state.fold(0, (sum, item) {
-    final price = double.tryParse(
-      item.product.price.replaceAll(',', '.'),
-    ) ??
-        0;
+  // --- CÁLCULOS CORREGIDOS (IVA INCLUIDO) ---
 
+  /// El TOTAL es la suma directa de los precios de los productos multiplicados por su cantidad.
+  double get total => state.fold(0, (sum, item) {
+    double price =
+        double.tryParse(item.product.price.replaceAll(',', '.')) ?? 0;
     return sum + (price * item.quantity);
   });
 
+  /// El SUBTOTAL es la base imponible (Total dividido por 1.21).
   double get subtotal => total / 1.21;
 
+  /// El IVA es la parte del impuesto ya incluida en el total.
   double get iva => total - subtotal;
-
-  void _debugCart(String origen) {
-    debugPrint('════════ CARRITO $origen ════════');
-    debugPrint('🧾 Líneas en carrito: ${state.length}');
-
-    for (final item in state) {
-      debugPrint(
-        '➡️ ID: ${item.product.id} | Qty: ${item.quantity} | ${item.product.name}',
-      );
-    }
-
-    debugPrint('══════════════════════════════════');
-  }
 }
 
 final cartProvider = StateNotifierProvider<CartNotifier, List<CartItem>>((ref) {

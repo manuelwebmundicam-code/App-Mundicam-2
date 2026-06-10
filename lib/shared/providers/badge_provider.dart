@@ -16,6 +16,6 @@ final quoteBadgeProvider = Provider<int>((ref) {
   return quotesAsync.when(
     data: (quotes) => quotes.length,
     loading: () => 0,
-    error: (error, stackTrace) => 0,
+    error: (_, __) => 0,
   );
 });

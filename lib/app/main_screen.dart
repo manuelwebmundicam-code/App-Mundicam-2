@@ -1,6 +1,6 @@
-import 'dart:math' as math;
-
+// main_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -10,7 +10,6 @@ import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_page.dart';
 import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
 import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
-import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
@@ -24,41 +23,25 @@ class _MainScreenState extends ConsumerState<MainScreen>
     with WidgetsBindingObserver {
   static const String _confirmedQuoteIdsKey = 'mundicam_confirmed_quote_ids';
 
+  final List<GlobalKey<NavigatorState>> _navigatorKeys =
+  List.generate(5, (_) => GlobalKey<NavigatorState>());
+
   int _selectedIndex = 0;
   int _lastIndexBeforeCart = 0;
+
   bool _loadBadges = false;
-
-  final Set<String> _confirmedQuoteIds = <String>{};
-
-  final List<bool> _loadedTabs = [
-    true,
-    false,
-    false,
-    false,
-    false,
-  ];
-
-  final List<GlobalKey<NavigatorState>> _navigatorKeys = [
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-    GlobalKey<NavigatorState>(),
-  ];
+  Set<String> _confirmedQuoteIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _loadConfirmedQuoteIdsFromPrefs();
+    _loadConfirmedQuoteIds();
 
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
-
-      setState(() {
-        _loadBadges = true;
-      });
+      setState(() => _loadBadges = true);
     });
   }
 
@@ -68,33 +51,26 @@ class _MainScreenState extends ConsumerState<MainScreen>
     super.dispose();
   }
 
-  Future<void> _loadConfirmedQuoteIdsFromPrefs() async {
+  Future<void> _loadConfirmedQuoteIds() async {
     final prefs = await SharedPreferences.getInstance();
     final savedIds = prefs.getStringList(_confirmedQuoteIdsKey) ?? <String>[];
 
     if (!mounted) return;
 
     setState(() {
-      _confirmedQuoteIds
-        ..clear()
-        ..addAll(savedIds);
-      _loadBadges = true;
+      _confirmedQuoteIds = savedIds.toSet();
     });
-
-    ref.invalidate(quoteBadgeProvider);
-    ref.invalidate(quotesProvider);
   }
 
   Future<void> _registerConfirmedQuotes(Set<String> quoteIds) async {
     if (quoteIds.isEmpty) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final savedIds = prefs.getStringList(_confirmedQuoteIdsKey) ?? <String>[];
-
     final updatedIds = <String>{
-      ...savedIds,
+      ..._confirmedQuoteIds,
       ...quoteIds,
     };
+
+    final prefs = await SharedPreferences.getInstance();
 
     await prefs.setStringList(
       _confirmedQuoteIdsKey,
@@ -104,38 +80,18 @@ class _MainScreenState extends ConsumerState<MainScreen>
     if (!mounted) return;
 
     setState(() {
-      _confirmedQuoteIds
-        ..clear()
-        ..addAll(updatedIds);
+      _confirmedQuoteIds = updatedIds;
       _loadBadges = true;
     });
 
-    ref.invalidate(quotesProvider);
     ref.invalidate(quoteBadgeProvider);
     ref.invalidate(cartBadgeProvider);
   }
 
-  int _visibleQuoteBadgeCount(int rawQuoteCount) {
-    final quotesAsync = ref.watch(quotesProvider);
-
-    return quotesAsync.maybeWhen(
-      data: (quotes) {
-        return quotes.where((quote) {
-          final quoteId = quote.id.toString();
-
-          if (_confirmedQuoteIds.contains(quoteId)) return false;
-          if (quote.total <= 0) return false;
-
-          return true;
-        }).length;
-      },
-      orElse: () {
-        return math.max(0, rawQuoteCount - _confirmedQuoteIds.length);
-      },
-    );
-  }
-
-  void _switchToTab(int index, {bool popToRoot = false}) {
+  void _switchToTab(
+      int index, {
+        bool popToRoot = false,
+      }) {
     if (index < 0 || index >= _navigatorKeys.length) return;
 
     if (index == 4 && _selectedIndex != 4) {
@@ -144,7 +100,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
     setState(() {
       _selectedIndex = index;
-      _loadedTabs[index] = true;
 
       if (index == 3 || index == 4) {
         _loadBadges = true;
@@ -202,16 +157,16 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
     final shouldExit = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (context) => AlertDialog(
         title: const Text('Salir'),
         content: const Text('¿Deseas salir de la aplicación?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancelar'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
+            onPressed: () => Navigator.pop(context, true),
             child: const Text('Salir'),
           ),
         ],
@@ -221,30 +176,48 @@ class _MainScreenState extends ConsumerState<MainScreen>
     return shouldExit ?? false;
   }
 
+  int _visibleQuoteBadgeCount(int rawQuoteCount) {
+    if (rawQuoteCount <= 0) return 0;
+
+    final visibleCount = rawQuoteCount - _confirmedQuoteIds.length;
+
+    return visibleCount > 0 ? visibleCount : 0;
+  }
+
+  Widget _buildTabNavigator({
+    required int index,
+    required Widget child,
+  }) {
+    return Navigator(
+      key: _navigatorKeys[index],
+      onGenerateRoute: (settings) {
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => child,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final int cartItemCount = _loadBadges ? ref.watch(cartBadgeProvider) : 0;
     final int rawQuoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
-    final int quoteCount =
-    _loadBadges ? _visibleQuoteBadgeCount(rawQuoteCount) : 0;
+    final int quoteCount = _visibleQuoteBadgeCount(rawQuoteCount);
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
 
-        final shouldPop = await _onWillPop();
+        final shouldExit = await _onWillPop();
 
-        if (!context.mounted) return;
-
-        if (shouldPop) {
-          Navigator.of(context).pop();
+        if (shouldExit && mounted) {
+          SystemNavigator.pop();
         }
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFF8F9FB),
-        extendBody: false,
-        resizeToAvoidBottomInset: false,
         body: IndexedStack(
           index: _selectedIndex,
           children: [
@@ -287,6 +260,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
             ),
           ],
         ),
+
+        // Barra inferior personalizada.
+        // SafeArea evita que se monte sobre botones Android o barra de gesto.
         bottomNavigationBar: SafeArea(
           top: false,
           minimum: EdgeInsets.zero,
@@ -346,25 +322,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildTabNavigator({
-    required int index,
-    required Widget child,
-  }) {
-    if (!_loadedTabs[index]) {
-      return const SizedBox.shrink();
-    }
-
-    return Navigator(
-      key: _navigatorKeys[index],
-      onGenerateRoute: (routeSettings) {
-        return MaterialPageRoute(
-          builder: (context) => child,
-          settings: routeSettings,
-        );
-      },
     );
   }
 }
