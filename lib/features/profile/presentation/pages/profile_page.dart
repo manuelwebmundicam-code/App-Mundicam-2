@@ -1,4 +1,3 @@
-// pages/profile_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +10,11 @@ import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
 import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
 import 'package:mundicam/features/support/presentation/pages/support_tickets_page.dart';
+
+const Color _pageBg = Color(0xFFF4F7FB);
+const Color _dark = Color(0xFF111827);
+const Color _muted = Color(0xFF6B7280);
+const Color _border = Color(0xFFE5E7EB);
 
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
@@ -25,6 +29,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   bool _isAdmin = false;
   String? _errorMessage;
 
+  Color get _brandColor => _isAdmin ? Colors.deepPurple : AppColors.primary;
+
   @override
   void initState() {
     super.initState();
@@ -33,22 +39,21 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   Future<void> _cargarDatosUsuario() async {
     final user = FirebaseAuth.instance.currentUser;
-
     if (user == null) {
       if (mounted) setState(() => _loadingData = false);
       return;
     }
 
     debugPrint('🔍 Cargando perfil - UID: ${user.uid}');
-    debugPrint('   Email Firebase Auth: ${user.email}');
+    debugPrint(' Email Firebase Auth: ${user.email}');
 
     try {
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
-      Map<String, dynamic>? firestoreData;
 
+      Map<String, dynamic>? firestoreData;
       if (userDoc.exists) {
         firestoreData = userDoc.data();
         if (firestoreData?['isBlocked'] == true) {
@@ -61,19 +66,19 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           return;
         }
         _isAdmin = firestoreData?['role'] == 'admin';
-        debugPrint('   Firestore role: ${firestoreData?['role']}');
-        debugPrint('   Firestore email: ${firestoreData?['email']}');
+        debugPrint(' Firestore role: ${firestoreData?['role']}');
+        debugPrint(' Firestore email: ${firestoreData?['email']}');
       }
 
       String? email = user.email?.trim().toLowerCase();
       if (email == null || email.isEmpty) {
         email = (firestoreData?['email'] as String?)?.trim().toLowerCase();
       }
-      if (email == null || email.isEmpty) {
-        email = user.providerData.firstOrNull?.email?.trim().toLowerCase();
+      if ((email == null || email.isEmpty) && user.providerData.isNotEmpty) {
+        email = user.providerData.first.email?.trim().toLowerCase();
       }
 
-      debugPrint('   Email final: $email');
+      debugPrint(' Email final: $email');
 
       if (email == null || email.isEmpty) {
         if (mounted) {
@@ -89,7 +94,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       final wooCustomer = await apiService.getCustomerByEmail(email);
 
       if (wooCustomer != null) {
-        debugPrint('✅ Cliente encontrado: ${wooCustomer['first_name']} ${wooCustomer['last_name']}');
+        debugPrint(
+          '✅ Cliente encontrado: ${wooCustomer['first_name']} ${wooCustomer['last_name']}',
+        );
         if (mounted) {
           setState(() {
             _wooCustomer = wooCustomer;
@@ -114,6 +121,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         });
       }
     }
+  }
+
+  void _refreshProfile() {
+    setState(() {
+      _loadingData = true;
+      _errorMessage = null;
+    });
+    _cargarDatosUsuario();
   }
 
   String _getInicial() {
@@ -141,130 +156,1050 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   String _getMeta(String key) {
     if (_wooCustomer == null) return "—";
     final meta = _wooCustomer!['meta_data'] as List? ?? [];
-    final billing = _wooCustomer!['billing'] as Map<String, dynamic>? ?? {};
-
-    for (final m in meta) {
-      if (m is Map && m['key']?.toString().toLowerCase().trim() == key.toLowerCase().trim()) {
-        final value = m['value']?.toString() ?? '';
-        if (value.isNotEmpty) return value;
+    try {
+      for (final m in meta) {
+        if (m is Map && m['key']?.toString().toLowerCase().trim() == key.toLowerCase().trim()) {
+          return m['value']?.toString() ?? "—";
+        }
       }
-    }
-
-    if (key == 'billing_nif') return billing['nif']?.toString() ?? billing['cif']?.toString() ?? "—";
+    } catch (_) {}
     return "—";
   }
 
-  String _getGestor() {
-    final gestor = _getMeta('wpuef_cid_c30');
-    if (gestor != "—" && gestor.isNotEmpty) return gestor;
-    return 'pedidos@mundicam.com';
+  String _safeValue(dynamic value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty || text.toLowerCase() == 'null') return '—';
+    return text;
   }
+
+  String _maskSensitivePaymentData(String value) {
+    var text = value.trim();
+    if (text.isEmpty || text == '—' || text.toLowerCase() == 'null') {
+      return '—';
+    }
+    text = text.replaceAllMapped(
+      RegExp(r'\b([A-Z]{2}\d{2}[A-Z0-9\s]{10,34})\b', caseSensitive: false),
+          (match) {
+        final iban = match.group(1)!.replaceAll(' ', '').toUpperCase();
+        final last4 = iban.length >= 4 ? iban.substring(iban.length - 4) : '****';
+        final prefix = iban.length >= 2 ? iban.substring(0, 2) : '**';
+        return '$prefix** **** **** **** **** $last4';
+      },
+    );
+    text = text.replaceAllMapped(
+      RegExp(r'\b(?:\d[ -]?){12,19}\b'),
+          (match) {
+        final digits = match.group(0)!.replaceAll(RegExp(r'\D'), '');
+        if (digits.length < 12) return match.group(0)!;
+        final last4 = digits.substring(digits.length - 4);
+        return '****$last4';
+      },
+    );
+    return text;
+  }
+
+  String _getPaymentMethodRaw() {
+    final keys = [
+      'payment_method',
+      '_payment_method',
+      'payment_method_title',
+      '_payment_method_title',
+      'billing_payment_method',
+      'customer_payment_method',
+      'default_payment_method',
+      'b2b_payment_method',
+    ];
+    for (final key in keys) {
+      final value = _getMeta(key).trim();
+      if (value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
+        return value;
+      }
+    }
+    return '';
+  }
+
+  String _paymentMethodLabel() {
+    final raw = _getPaymentMethodRaw().trim();
+    if (raw.isEmpty || raw == '—' || raw.toLowerCase() == 'null') {
+      return '—';
+    }
+    final value = raw.toLowerCase();
+    final masked = _maskSensitivePaymentData(raw);
+
+    if (value.contains('bacs') || value.contains('transferencia') || value.contains('bank') || value.contains('iban')) {
+      return masked == raw ? 'Transferencia bancaria' : 'Transferencia bancaria · $masked';
+    }
+    if (value.contains('redsys') || value.contains('tarjeta') || value.contains('card') || value.contains('tpv') || value.contains('stripe')) {
+      final last4Match = RegExp(r'\*{2,}\d{4}').firstMatch(masked);
+      if (last4Match != null) {
+        return 'Tarjeta terminada en ${last4Match.group(0)}';
+      }
+      return 'Tarjeta bancaria';
+    }
+    if (value.contains('paypal')) {
+      return 'PayPal';
+    }
+    if (value.contains('cheque') || value.contains('giro') || value.contains('pagare') || value.contains('pagaré') || value.contains('aplazado') || value.contains('credito') || value.contains('crédito')) {
+      return 'Giro / pago aplazado';
+    }
+    return masked;
+  }
+
+  String _creditLimitLabel() {
+    final credit = _getMeta('credit_limit').trim();
+    if (credit.isEmpty || credit == '—' || credit == '0' || credit == '0.0' || credit == '0.00' || credit.toLowerCase() == 'null') {
+      return 'No aplica';
+    }
+    if (credit.contains('€')) return credit;
+    return '$credit€';
+  }
+
+  // ================= MÉTODOS MEJORADOS =================
+  String _getAssignedManager() {
+    final manager = _getMeta('assigned_manager').trim();
+    if (manager.isEmpty || manager == '—') {
+      return 'Mundicam';
+    }
+    return manager;
+  }
+
+  String _getCifNif() {
+    // Lista ampliada de claves donde puede estar el CIF/NIF
+    final possibleKeys = [
+      'shipping_nif',      // ← clave identificada en el HTML
+      'cif_nif',
+      'cif',
+      'nif',
+      'vat_number',
+      'billing_vat',
+      'company_vat',
+      'tax_id',
+      'billing_cif',
+      'billing_nif',
+      '_billing_cif',
+      '_cif_nif',
+      'customer_vat',
+    ];
+
+    // 1. Buscar en meta_data
+    for (final key in possibleKeys) {
+      final value = _getMeta(key).trim();
+      if (value.isNotEmpty && value != '—') {
+        return value;
+      }
+    }
+
+    // 2. Buscar en billing
+    if (_wooCustomer != null) {
+      final billing = _wooCustomer!['billing'] as Map<String, dynamic>?;
+      if (billing != null) {
+        for (final key in possibleKeys) {
+          final value = billing[key]?.toString().trim();
+          if (value != null && value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
+            return value;
+          }
+        }
+      }
+    }
+
+    // 3. Buscar en shipping (por si el CIF se guardó en la dirección de envío)
+    if (_wooCustomer != null) {
+      final shipping = _wooCustomer!['shipping'] as Map<String, dynamic>?;
+      if (shipping != null) {
+        for (final key in possibleKeys) {
+          final value = shipping[key]?.toString().trim();
+          if (value != null && value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
+            return value;
+          }
+        }
+      }
+    }
+
+    return '—';
+  }
+  // =================================================
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FB),
-      appBar: AppBar(
-        title: const Text("MI CUENTA"),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: _isAdmin ? Colors.deepPurple : AppColors.primary,
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh_rounded, color: Colors.white), onPressed: () { setState(() { _loadingData = true; _errorMessage = null; }); _cargarDatosUsuario(); }),
-          IconButton(icon: const Icon(Icons.logout_rounded, color: Colors.white), onPressed: () => _confirmSignOut(context)),
-        ],
+      backgroundColor: _pageBg,
+      appBar: _ProfilePageAppBar(
+        title: 'MI CUENTA',
+        backgroundColor: _brandColor,
+        onBack: () => Navigator.of(context).maybePop(),
+        onRefresh: _refreshProfile,
+        onLogout: () => _confirmSignOut(context),
       ),
       body: user == null
           ? const Center(child: Text("No has iniciado sesión"))
           : _loadingData
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? Center(
+        child: CircularProgressIndicator(color: _brandColor),
+      )
           : SingleChildScrollView(
         physics: const ClampingScrollPhysics(),
-        child: Column(children: [
-          _buildHeader(),
-          Padding(padding: const EdgeInsets.all(16), child: Column(children: [
-            _buildMainCard(), const SizedBox(height: 24),
-            Row(children: [
-              _quickButton(context, Icons.request_quote_outlined, "Presupuestos", const QuotesPage()),
-              const SizedBox(width: 12),
-              _quickButton(context, Icons.local_shipping_outlined, "Mis Pedidos", const OrdersPage()),
-            ]),
-            const SizedBox(height: 24),
-            _buildMenuCard(context, title: "SOPORTE Y REPARACIONES", items: [
-              _buildMenuItem(context, Icons.handyman_outlined, "Gestión de RMA", "Material en reparación", const RmaPage()),
-              _buildMenuItem(context, Icons.chat_bubble_outline_rounded, "Tickets Técnicos", "Habla con soporte", const SupportTicketsPage()),
-            ]),
-            const SizedBox(height: 32),
-            Text("Mundicam Security Distribution v2.0.1", style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
-            const SizedBox(height: 20),
-          ])),
-        ]),
+        child: Column(
+          children: [
+            _buildHeader(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: Column(
+                children: [
+                  _buildMainCard(),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      _quickButton(
+                        context,
+                        Icons.request_quote_outlined,
+                        "Presupuestos",
+                        const QuotesPage(),
+                      ),
+                      const SizedBox(width: 12),
+                      _quickButton(
+                        context,
+                        Icons.local_shipping_outlined,
+                        "Mis Pedidos",
+                        const OrdersPage(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  _buildMenuCard(
+                    context,
+                    title: "SOPORTE Y REPARACIONES",
+                    items: [
+                      _buildMenuItem(
+                        context,
+                        Icons.handyman_outlined,
+                        "Gestión de RMA",
+                        "Material en reparación",
+                        const RmaPage(),
+                      ),
+                      _buildMenuItem(
+                        context,
+                        Icons.chat_bubble_outline_rounded,
+                        "Tickets Técnicos",
+                        "Habla con soporte",
+                        const SupportTicketsPage(),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildHeader() {
+    final company = _getCompany();
+    final email = _wooCustomer?['email']?.toString() ?? '';
+
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(color: _isAdmin ? Colors.deepPurple : AppColors.primary, borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32))),
-      child: SafeArea(bottom: false, child: Padding(padding: const EdgeInsets.fromLTRB(24, 8, 24, 32), child: Column(children: [
-        Stack(children: [
-          Container(width: 80, height: 80, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle, border: Border.all(color: _isAdmin ? Colors.amber : Colors.white.withValues(alpha: 0.3), width: 3)), child: Center(child: Text(_getInicial(), style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800, fontFamily: 'Oswald')))),
-          if (_isAdmin) Positioned(bottom: 0, right: 0, child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.amber, shape: BoxShape.circle), child: const Icon(Icons.shield, color: Colors.deepPurple, size: 16))),
-        ]),
-        const SizedBox(height: 16),
-        Text(_getDisplayName(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Oswald')),
-        if (_getCompany().isNotEmpty) ...[const SizedBox(height: 4), Text(_getCompany(), textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 14))],
-        const SizedBox(height: 8),
-        Text(_wooCustomer?['email'] ?? '', style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 14)),
-        if (_isAdmin) ...[const SizedBox(height: 8), Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.amber.withValues(alpha: 0.3))), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.admin_panel_settings, color: Colors.amber, size: 16), SizedBox(width: 6), Text("ADMINISTRADOR", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.5))]))],
-      ]))),
+      color: _pageBg,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+          border: Border.all(color: _border),
+        ),
+        child: Row(
+          children: [
+            Stack(
+              children: [
+                Container(
+                  width: 66,
+                  height: 66,
+                  decoration: BoxDecoration(
+                    color: _brandColor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: _brandColor.withValues(alpha: 0.18),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      _getInicial(),
+                      style: TextStyle(
+                        color: _brandColor,
+                        fontSize: 31,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Oswald',
+                      ),
+                    ),
+                  ),
+                ),
+                if (_isAdmin)
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: const BoxDecoration(
+                        color: Colors.amber,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.shield,
+                        color: Colors.deepPurple,
+                        size: 14,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      _getDisplayName(),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _dark,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Oswald',
+                        height: 1.1,
+                      ),
+                    ),
+                    if (company.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        company,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _muted,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 5),
+                    Text(
+                      email,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _muted,
+                        fontSize: 12.2,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 7,
+                      runSpacing: 6,
+                      children: [
+                        _profilePill(
+                          icon: Icons.business_center_outlined,
+                          text: 'Cliente profesional',
+                          color: _brandColor,
+                        ),
+                        if (_isAdmin)
+                          _profilePill(
+                            icon: Icons.admin_panel_settings_outlined,
+                            text: 'Administrador',
+                            color: Colors.deepPurple,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _profilePill({
+    required IconData icon,
+    required String text,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.14)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 10.8,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildMainCard() {
     if (_errorMessage != null) {
-      return Container(width: double.infinity, padding: const EdgeInsets.all(20), decoration: _cardDecoration(), child: Column(children: [
-        const Icon(Icons.error_outline, size: 48, color: Colors.orange), const SizedBox(height: 12),
-        Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, color: Colors.grey)), const SizedBox(height: 16),
-        ElevatedButton.icon(onPressed: () { setState(() { _loadingData = true; _errorMessage = null; }); _cargarDatosUsuario(); }, icon: const Icon(Icons.refresh), label: const Text("Reintentar"), style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white)),
-      ]));
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(22),
+        decoration: _cardDecoration(),
+        child: Column(
+          children: [
+            Container(
+              width: 62,
+              height: 62,
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.error_outline,
+                size: 34,
+                color: Colors.orange,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: _muted,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _refreshProfile,
+              icon: const Icon(Icons.refresh),
+              label: const Text(
+                "REINTENTAR",
+                style: TextStyle(
+                  fontFamily: 'Oswald',
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _brandColor,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
-    if (_wooCustomer == null) return Container(width: double.infinity, padding: const EdgeInsets.all(20), decoration: _cardDecoration(), child: const Center(child: CircularProgressIndicator()));
+
+    if (_wooCustomer == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: _cardDecoration(),
+        child: Center(
+          child: CircularProgressIndicator(color: _brandColor),
+        ),
+      );
+    }
+
     final billing = _wooCustomer!['billing'] as Map<String, dynamic>? ?? {};
-    return Container(width: double.infinity, padding: const EdgeInsets.all(16), decoration: _cardDecoration(), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [Container(width: 4, height: 18, decoration: BoxDecoration(color: _isAdmin ? Colors.deepPurple : AppColors.primary, borderRadius: BorderRadius.circular(2))), const SizedBox(width: 10), Text(_isAdmin ? "PERFIL ADMINISTRADOR" : "DATOS DEL CLIENTE", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: Color(0xFF475569)))]),
-      const SizedBox(height: 18),
-      _infoRow(Icons.person_outline, "Nombre", "${_wooCustomer!['first_name'] ?? ''} ${_wooCustomer!['last_name'] ?? ''}".trim()),
-      const Divider(height: 20), _infoRow(Icons.business_outlined, "Empresa", billing['company'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.badge_outlined, "CIF / NIF", _getMeta('billing_nif')),
-      const Divider(height: 20), _infoRow(Icons.support_agent_outlined, "Gestor asignado", _getGestor()),
-      const Divider(height: 20), _infoRow(Icons.phone_outlined, "Teléfono", billing['phone'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.location_on_outlined, "Dirección", billing['address_1'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.markunread_mailbox_outlined, "Código Postal", billing['postcode'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.location_city_outlined, "Ciudad", billing['city'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.map_outlined, "Provincia", billing['state'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.flag_outlined, "País", billing['country'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.email_outlined, "Email", _wooCustomer!['email'] ?? "—"),
-      const Divider(height: 20), _infoRow(Icons.payments_outlined, "Forma de pago", _getMeta('payment_method')),
-      const Divider(height: 20), _infoRow(Icons.account_balance_wallet_outlined, "Crédito disponible", "${_getMeta('credit_limit')}€"),
-    ]));
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _mainCardHeader(
+            _isAdmin ? "PERFIL ADMINISTRADOR" : "DATOS DEL CLIENTE",
+            _isAdmin ? Icons.admin_panel_settings_outlined : Icons.business_center_outlined,
+          ),
+          const SizedBox(height: 16),
+          _dataGroup(
+            title: 'Datos profesionales',
+            children: [
+              _infoRow(
+                Icons.person_outline,
+                "Nombre",
+                "${_wooCustomer!['first_name'] ?? ''} ${_wooCustomer!['last_name'] ?? ''}"
+                    .trim(),
+              ),
+              _infoRow(
+                Icons.business_outlined,
+                "Empresa",
+                _safeValue(billing['company']),
+              ),
+              _infoRow(
+                Icons.badge_outlined,
+                "CIF / NIF",
+                _getCifNif(),
+              ),
+              _infoRow(
+                Icons.support_agent_outlined,
+                "Gestor asignado",
+                _getAssignedManager(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _dataGroup(
+            title: 'Contacto',
+            children: [
+              _infoRow(
+                Icons.phone_outlined,
+                "Teléfono",
+                _safeValue(billing['phone']),
+              ),
+              _infoRow(
+                Icons.email_outlined,
+                "Email",
+                _safeValue(_wooCustomer!['email']),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _dataGroup(
+            title: 'Dirección',
+            children: [
+              _infoRow(
+                Icons.location_on_outlined,
+                "Dirección",
+                _safeValue(billing['address_1']),
+              ),
+              _infoRow(
+                Icons.markunread_mailbox_outlined,
+                "Código Postal",
+                _safeValue(billing['postcode']),
+              ),
+              _infoRow(
+                Icons.location_city_outlined,
+                "Ciudad",
+                _safeValue(billing['city']),
+              ),
+              _infoRow(
+                Icons.map_outlined,
+                "Provincia",
+                _safeValue(billing['state']),
+              ),
+              _infoRow(
+                Icons.flag_outlined,
+                "País",
+                _safeValue(billing['country']),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _dataGroup(
+            title: 'Condiciones comerciales',
+            children: [
+              _infoRow(
+                Icons.payments_outlined,
+                "Forma de pago",
+                _paymentMethodLabel(),
+              ),
+              _infoRow(
+                Icons.account_balance_wallet_outlined,
+                "Límite de crédito B2B",
+                _creditLimitLabel(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
-  BoxDecoration _cardDecoration() => BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 12, offset: const Offset(0, 4))]);
+  Widget _mainCardHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 24,
+          decoration: BoxDecoration(
+            color: _brandColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: _brandColor.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, size: 19, color: _brandColor),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'Oswald',
+              letterSpacing: 0.6,
+              color: _dark,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
-  Widget _infoRow(IconData icon, String label, String value) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: (_isAdmin ? Colors.deepPurple : AppColors.primary).withOpacity(0.06), borderRadius: BorderRadius.circular(10)), child: Icon(icon, size: 18, color: _isAdmin ? Colors.deepPurple : AppColors.primary)),
-    const SizedBox(width: 14),
-    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)), const SizedBox(height: 2), Text(value.isEmpty ? "—" : value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1A1A1A)))]))
-  ]);
+  Widget _dataGroup({
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFBFCFE),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              fontSize: 11,
+              color: _brandColor,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.7,
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (int i = 0; i < children.length; i++) ...[
+            children[i],
+            if (i < children.length - 1)
+              const Padding(
+                padding: EdgeInsets.only(left: 52),
+                child: Divider(height: 18, color: _border),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
 
-  Widget _quickButton(BuildContext context, IconData icon, String label, Widget page) => Expanded(child: GestureDetector(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)), child: Container(padding: const EdgeInsets.symmetric(vertical: 16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))]), child: Column(children: [Icon(icon, color: _isAdmin ? Colors.deepPurple : AppColors.primary, size: 28), const SizedBox(height: 8), Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary))]))));
+  BoxDecoration _cardDecoration() => BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(24),
+    border: Border.all(color: _border),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.035),
+        blurRadius: 14,
+        offset: const Offset(0, 6),
+      ),
+    ],
+  );
 
-  Widget _buildMenuCard(BuildContext context, {required String title, required List<Widget> items}) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Padding(padding: const EdgeInsets.only(left: 4, bottom: 8), child: Text(title, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.grey.shade600, letterSpacing: 0.8))), Container(decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 12, offset: const Offset(0, 6))]), child: Column(children: items))]);
+  Widget _infoRow(IconData icon, String label, String value) {
+    final displayValue = value.trim().isEmpty ? "—" : value.trim();
+    final isEmpty = displayValue == "—";
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: _brandColor.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: _brandColor,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11.3,
+                    color: _muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  displayValue,
+                  style: TextStyle(
+                    fontSize: 13.3,
+                    height: 1.25,
+                    fontWeight: FontWeight.w800,
+                    color: isEmpty ? const Color(0xFF9CA3AF) : _dark,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
-  Widget _buildMenuItem(BuildContext context, IconData icon, String title, String subtitle, Widget page) => ListTile(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)), leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: _isAdmin ? Colors.deepPurple.withValues(alpha: 0.08) : AppColors.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: _isAdmin ? Colors.deepPurple : AppColors.primary, size: 20)), title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)), subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)), trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey));
+  Widget _quickButton(
+      BuildContext context,
+      IconData icon,
+      String label,
+      Widget page,
+      ) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
+        child: Container(
+          height: 112,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: _border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.035),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: _brandColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(
+                  icon,
+                  color: _brandColor,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    fontFamily: 'Oswald',
+                    color: AppColors.textPrimary,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-  void _confirmSignOut(BuildContext context) => showDialog(context: context, builder: (ctx) => AlertDialog(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), title: const Text("¿Cerrar sesión?"), content: const Text("Se cerrará la sesión."), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")), TextButton(onPressed: () async { await FirebaseAuth.instance.signOut(); final prefs = await SharedPreferences.getInstance(); await prefs.clear(); if (ctx.mounted) Navigator.pop(ctx); SystemNavigator.pop(); }, child: const Text("CERRAR SESIÓN", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)))]));
+  Widget _buildMenuCard(
+      BuildContext context, {
+        required String title,
+        required List<Widget> items,
+      }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle(title),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: _border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.035),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(children: items),
+        ),
+      ],
+    );
+  }
+
+  Widget _sectionTitle(String title) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 20,
+          decoration: BoxDecoration(
+            color: _brandColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        const SizedBox(width: 9),
+        Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            color: _dark,
+            fontFamily: 'Oswald',
+            fontSize: 16,
+            height: 1,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMenuItem(
+      BuildContext context,
+      IconData icon,
+      String title,
+      String subtitle,
+      Widget page,
+      ) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: _brandColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(
+          icon,
+          color: _brandColor,
+          size: 21,
+        ),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: 14.5,
+          fontFamily: 'Oswald',
+          color: _dark,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(
+          fontSize: 12,
+          color: _muted,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      trailing: const Icon(
+        Icons.chevron_right_rounded,
+        color: Color(0xFF9CA3AF),
+      ),
+    );
+  }
+
+  void _confirmSignOut(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("¿Cerrar sesión?"),
+        content: const Text("Se cerrará la sesión."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("CANCELAR"),
+          ),
+          TextButton(
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear();
+              if (ctx.mounted) Navigator.pop(ctx);
+              SystemNavigator.pop();
+            },
+            child: const Text(
+              "CERRAR SESIÓN",
+              style: TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// APP BAR PERSONALIZADO PARA PERFIL (CON FLECHA VISIBLE Y TÍTULO CENTRADO)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final String title;
+  final Color backgroundColor;
+  final VoidCallback onBack;
+  final VoidCallback onRefresh;
+  final VoidCallback onLogout;
+
+  const _ProfilePageAppBar({
+    required this.title,
+    required this.backgroundColor,
+    required this.onBack,
+    required this.onRefresh,
+    required this.onLogout,
+  });
+
+  @override
+  Size get preferredSize => const Size.fromHeight(86);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(30),
+          bottomRight: Radius.circular(30),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: 86,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Flecha izquierda
+              Positioned(
+                left: 8,
+                child: IconButton(
+                  tooltip: 'Volver',
+                  icon: const Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  onPressed: onBack,
+                  splashRadius: 22,
+                ),
+              ),
+              // Título centrado
+              Center(
+                child: Text(
+                  title.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                    letterSpacing: 1.05,
+                    color: Colors.white,
+                    fontFamily: 'Oswald',
+                    height: 1.05,
+                  ),
+                ),
+              ),
+              // Botones derecha
+              Positioned(
+                right: 8,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Actualizar datos',
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      onPressed: onRefresh,
+                      splashRadius: 22,
+                    ),
+                    IconButton(
+                      tooltip: 'Cerrar sesión',
+                      icon: const Icon(
+                        Icons.logout_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      onPressed: onLogout,
+                      splashRadius: 22,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

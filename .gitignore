@@ -25,3 +25,8 @@ doc/api/
 
 .flutter-plugins
 .flutter-plugins-dependencies
+.idea/
+*.iml
+flutter_analyze.txt
+git_status.txt
+idea_files.txt
