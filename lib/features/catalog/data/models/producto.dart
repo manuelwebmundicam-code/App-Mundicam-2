@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class Product {
   final int id;
   final String name;
@@ -13,26 +15,32 @@ class Product {
   final List<ProductAttribute> attributes;
 
   /// Indica si WooCommerce permite comprar el producto.
-  /// En productos de "Bajo consulta" suele venir como:
-  /// - Store API: is_purchasable = false
-  /// - WC REST v3: purchasable = false
+  ///
+  /// Se usa especialmente para productos "Bajo consulta" o productos visibles
+  /// en catálogo, pero no accionables comercialmente.
   final bool isPurchasable;
 
-  /// HTML de precio/estado devuelto por WooCommerce. Se usa solo como respaldo
-  /// para detectar textos tipo "Bajo consulta" sin bloquear productos normales.
+  /// HTML de precio/estado devuelto por WooCommerce.
+  ///
+  /// Sirve como respaldo para detectar textos tipo "Bajo consulta" sin depender
+  /// únicamente del precio, ya que en entorno B2B puede haber precios ocultos.
   final String priceHtml;
 
   /// Estado de stock original de WooCommerce.
   final String stockStatus;
 
-  /// Categorías del producto para detectar apartados tipo "Bajo consulta".
+  /// Categorías del producto para detectar apartados tipo "Bajo consulta" y
+  /// conservar compatibilidad con Store API / WooCommerce REST.
   final List<int> categoryIds;
   final List<String> categoryNames;
   final List<String> categorySlugs;
 
-  /// Stock por almacén/sede cuando el backend lo devuelve.
-  /// Se usa para que perfiles internos (admin/comercial) puedan ver
-  /// desglose de stock sin afectar a clientes normales.
+  /// Stock por almacén/sede.
+  ///
+  /// Compatible con:
+  /// - stock_locations / stockLocations / warehouses / almacenes
+  /// - meta_data stock-gen => General
+  /// - meta_data stock-tie => Murcia
   final List<StockLocation>? stockLocations;
 
   Product({
@@ -57,28 +65,47 @@ class Product {
     this.stockLocations,
   });
 
+  // =========================
+  // STOCK DETALLADO
+  // =========================
+
   List<StockLocation> get effectiveStockLocations =>
       stockLocations ?? const <StockLocation>[];
 
-  bool get hasStockLocationDetails => effectiveStockLocations.isNotEmpty;
+  bool get hasStockLocations => effectiveStockLocations.isNotEmpty;
+
+  bool get hasStockLocationDetails => hasStockLocations;
+
+  int get totalStockLocations => stockTotalByLocations;
 
   int get stockTotalByLocations {
     if (effectiveStockLocations.isEmpty) return 0;
+
     return effectiveStockLocations.fold<int>(
       0,
-          (total, location) => total + location.quantity,
+          (total, location) => total + (location.quantity > 0 ? location.quantity : 0),
     );
   }
 
-  int get murciaStockQuantity {
-    if (effectiveStockLocations.isEmpty) return 0;
+  bool get hasMundicamInternalStock {
+    return effectiveStockLocations.any((location) {
+      final normalized = _normalizeAttributeName(location.name);
+      return normalized == 'general' ||
+          normalized == 'stockgen' ||
+          normalized == 'murcia' ||
+          normalized == 'tienda' ||
+          normalized == 'stocktie' ||
+          normalized.contains('lorqui');
+    });
+  }
+
+  int get generalStockQuantity {
+    if (effectiveStockLocations.isEmpty) return stockQuantity > 0 ? stockQuantity : 0;
 
     for (final location in effectiveStockLocations) {
       final normalized = _normalizeAttributeName(location.name);
-      if (normalized.contains('murcia') ||
-          normalized.contains('lorqui') ||
-          normalized.contains('lorqui') ||
-          normalized.contains('central')) {
+
+      if (normalized == 'general' || normalized == 'stockgen') {
         return location.quantity;
       }
     }
@@ -86,47 +113,63 @@ class Product {
     return 0;
   }
 
-  String? get stockDetailsText {
-    final locations = effectiveStockLocations
-        .where((location) => location.quantity > 0)
-        .toList();
+  int get murciaStockQuantity {
+    if (effectiveStockLocations.isEmpty) return 0;
 
-    if (locations.isNotEmpty) {
-      final parts = locations
-          .map((location) => '${location.displayName}: ${location.quantity}')
-          .toList();
+    for (final location in effectiveStockLocations) {
+      final normalized = _normalizeAttributeName(location.name);
 
-      final total = stockTotalByLocations;
-      if (total > 0 && locations.length > 1) {
-        parts.add('Total: $total');
+      if (normalized.contains('murcia') ||
+          normalized.contains('tienda') ||
+          normalized.contains('lorqui') ||
+          normalized.contains('central') ||
+          normalized == 'stocktie') {
+        return location.quantity;
       }
-
-      return parts.join(' · ');
     }
 
-    if (stockQuantity > 0) {
-      return 'General: $stockQuantity';
+    return 0;
+  }
+
+  /// Texto de stock interno para perfiles admin/comercial.
+  ///
+  /// A diferencia de la versión que ocultaba ubicaciones a 0, aquí se muestran
+  /// todos los almacenes recibidos. Así un usuario interno puede ver:
+  /// "General: 0 · Murcia: 0" cuando realmente no hay stock por almacén.
+  String? get stockDetailsText {
+    // Para usuarios admin/comercial: SIEMPRE mostramos exactamente
+    // General y Murcia, sin totales ni textos raros.
+    if (hasMundicamInternalStock || stockQuantity > 0) {
+      return 'General: $generalStockQuantity | Murcia: $murciaStockQuantity';
     }
 
     return null;
   }
 
+  // =========================
+  // CONTROL REAL DE STOCK
+  // =========================
+
   bool get hasStock {
-    if (stockQuantity > 0) return true;
-    if (stockTotalByLocations > 0) return true;
-    if (isInstock) return true;
-    return false;
+    // Si existen stocks internos de MundiCam, mandan General + Murcia.
+    // Nada de fiarse de stock_status cuando los almacenes internos están a 0.
+    if (hasMundicamInternalStock) {
+      return (generalStockQuantity + murciaStockQuantity) > 0;
+    }
+
+    if (stockQuantity > 0) {
+      return true;
+    }
+
+    return isInstock;
   }
 
-  int get maxPurchaseQty {
-    if (!canAddToCart) return 0;
-    if (stockQuantity > 0) return stockQuantity;
-    if (stockTotalByLocations > 0) return stockTotalByLocations;
-    if (isInstock) return 999;
-    return 0;
-  }
+  // =========================
+  // CONTROL COMERCIAL
+  // =========================
 
   /// Producto visible, pero no accionable comercialmente.
+  ///
   /// No usamos solo precio 0 porque en una app B2B puede haber precios ocultos
   /// por permisos. La fuente principal es purchasable/is_purchasable.
   bool get isUnderConsultation {
@@ -134,6 +177,7 @@ class Product {
 
     final commercialText = _normalizeCommercialText([
       priceHtml,
+      name,
       ...categoryNames,
       ...categorySlugs,
     ].join(' '));
@@ -155,6 +199,32 @@ class Product {
     return 'Sin stock';
   }
 
+  // =========================
+  // MÁXIMO COMPRABLE
+  // =========================
+
+  int get maxPurchaseQty {
+    if (!canAddToCart) return 0;
+
+    if (hasMundicamInternalStock) {
+      return generalStockQuantity + murciaStockQuantity;
+    }
+
+    if (stockQuantity > 0) {
+      return stockQuantity;
+    }
+
+    if (isInstock) {
+      return 999;
+    }
+
+    return 0;
+  }
+
+  // =========================
+  // MARCA / FABRICANTE
+  // =========================
+
   String? get brandName {
     for (final attr in attributes) {
       final attrName = _normalizeAttributeName(attr.name);
@@ -169,28 +239,44 @@ class Product {
   }
 
   factory Product.fromJson(Map<String, dynamic> json) {
+    // =========================
+    // IMAGEN
+    // =========================
+
     String firstImage = 'https://via.placeholder.com/150';
 
-    if (json['images'] != null &&
-        json['images'] is List &&
-        (json['images'] as List).isNotEmpty) {
-      final first = (json['images'] as List).first;
+    final images = json['images'];
+    if (images is List && images.isNotEmpty) {
+      final first = images.first;
       if (first is Map) {
-        firstImage = first['src']?.toString() ?? firstImage;
+        final src = first['src']?.toString().trim();
+        if (src != null && src.isNotEmpty) {
+          firstImage = src;
+        }
       }
     }
 
-    final rawShort = json['short_description']?.toString() ?? '';
-    final cleanShort = _cleanHtml(rawShort);
+    // =========================
+    // DESCRIPCIONES
+    // =========================
 
+    final rawShort = json['short_description']?.toString() ?? '';
     final rawLong = json['description']?.toString() ?? '';
+
+    final cleanShort = _cleanHtml(rawShort);
     final cleanLong = _cleanHtml(rawLong);
+
+    // =========================
+    // ATRIBUTOS + MARCA/FABRICANTE
+    // =========================
 
     final parsedAttributes = (json['attributes'] as List?)
         ?.whereType<Map>()
-        .map((attr) => ProductAttribute.fromJson(
-      Map<String, dynamic>.from(attr),
-    ))
+        .map(
+          (attr) => ProductAttribute.fromJson(
+        Map<String, dynamic>.from(attr),
+      ),
+    )
         .toList() ??
         <ProductAttribute>[];
 
@@ -211,9 +297,17 @@ class Product {
       );
     }
 
+    // =========================
+    // CATEGORÍAS / ESTADO / STOCK
+    // =========================
+
     final categories = _parseCategories(json['categories']);
     final stockStatus = (json['stock_status'] ?? '').toString().trim();
     final parsedStockLocations = StockLocation.parseList(json);
+    final stockTotalByLocations = parsedStockLocations.fold<int>(
+      0,
+          (total, location) => total + (location.quantity > 0 ? location.quantity : 0),
+    );
 
     return Product(
       id: _parseInt(json['id']),
@@ -226,7 +320,9 @@ class Product {
       sku: (json['sku'] ?? '').toString(),
       stockQuantity: _parseInt(json['stock_quantity']),
       onSale: json['on_sale'] == true,
-      isInstock: stockStatus == 'instock' || json['is_in_stock'] == true,
+      isInstock: stockStatus == 'instock' ||
+          json['is_in_stock'] == true ||
+          stockTotalByLocations > 0,
       shortDescription:
       cleanShort.trim().isEmpty ? 'Sin descripción' : cleanShort.trim(),
       description: cleanLong.trim().isEmpty
@@ -239,8 +335,7 @@ class Product {
       categoryIds: categories.ids,
       categoryNames: categories.names,
       categorySlugs: categories.slugs,
-      stockLocations:
-      parsedStockLocations.isEmpty ? null : parsedStockLocations,
+      stockLocations: parsedStockLocations.isEmpty ? null : parsedStockLocations,
     );
   }
 
@@ -263,7 +358,9 @@ class Product {
     final addToCart = json['add_to_cart'];
     if (addToCart is Map) {
       final text = addToCart['text']?.toString().toLowerCase().trim() ?? '';
-      if (text.contains('leer más') || text.contains('leer mas')) {
+      if (text.contains('leer más') ||
+          text.contains('leer mas') ||
+          text.contains('read more')) {
         return false;
       }
     }
@@ -279,9 +376,10 @@ class Product {
     if (value is List) {
       for (final raw in value) {
         if (raw is! Map) continue;
+
         final category = Map<dynamic, dynamic>.from(raw);
         final id = _parseInt(category['id']);
-        final name = category['name']?.toString().trim() ?? '';
+        final name = _cleanTextEntities(category['name']?.toString() ?? '');
         final slug = category['slug']?.toString().trim() ?? '';
 
         if (id > 0) ids.add(id);
@@ -300,8 +398,12 @@ class Product {
   static String _cleanHtml(String value) {
     return _cleanTextEntities(
       value
+          .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</?p[^>]*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'<li[^>]*>', caseSensitive: false), '\n• ')
+          .replaceAll(RegExp(r'</li>', caseSensitive: false), '')
           .replaceAll(RegExp(r'<[^>]*>'), '')
-          .replaceAll(RegExp(r'\s+'), ' ')
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
           .trim(),
     );
   }
@@ -312,11 +414,13 @@ class Product {
         .replaceAll('&amp;', '&')
         .replaceAll('&quot;', '"')
         .replaceAll('&#039;', "'")
+        .replaceAll('&apos;', "'")
         .replaceAll('&#8211;', '-')
         .replaceAll('&ndash;', '-')
         .replaceAll('&mdash;', '-')
         .replaceAll(RegExp(r'&[^;]+;'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'[ \t\r\f\v]+'), ' ')
+        .replaceAll(RegExp(r' *\n *'), '\n')
         .trim();
   }
 
@@ -364,6 +468,7 @@ class Product {
         normalizedName.contains('fabricante') ||
         normalizedName.contains('manufacturer') ||
         normalizedName == 'pamarca' ||
+        normalizedName == 'pamarcas' ||
         normalizedName == 'pafabricante' ||
         normalizedName == 'productbrand';
   }
@@ -383,16 +488,17 @@ class Product {
 
     final brands = json['brands'];
     if (brands is List && brands.isNotEmpty) {
-      for (final firstBrand in brands) {
-        if (firstBrand is String && firstBrand.trim().isNotEmpty) {
-          return firstBrand.trim();
+      for (final rawBrand in brands) {
+        if (rawBrand is String && rawBrand.trim().isNotEmpty) {
+          return rawBrand.trim();
         }
 
-        if (firstBrand is Map) {
-          final name = firstBrand['name']?.toString().trim();
+        if (rawBrand is Map) {
+          final brand = Map<dynamic, dynamic>.from(rawBrand);
+          final name = brand['name']?.toString().trim();
           if (name != null && name.isNotEmpty) return name;
 
-          final slug = firstBrand['slug']?.toString().trim();
+          final slug = brand['slug']?.toString().trim();
           if (slug != null && slug.isNotEmpty) return slug;
         }
       }
@@ -431,6 +537,20 @@ class Product {
           'ipcom',
           'seagate',
           'mci',
+          'safire',
+          'ruijie',
+          'reyee',
+          'ubiquiti',
+          'fermax',
+          'golmar',
+          'hikmicro',
+          'akuvox',
+          'milesight',
+          'cambium',
+          'aritech',
+          'paradox',
+          'dsc',
+          'honeywell',
         ];
 
         for (final brand in knownBrands) {
@@ -448,41 +568,76 @@ class Product {
     if (value == null) return fallback;
     if (value is int) return value;
     if (value is num) return value.toInt();
-    return int.tryParse(value.toString()) ?? fallback;
+
+    final raw = value.toString().trim().replaceAll(',', '.');
+    if (raw.isEmpty) return fallback;
+
+    return int.tryParse(raw) ?? double.tryParse(raw)?.toInt() ?? fallback;
   }
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'price': price,
-    'regular_price': regularPrice,
-    'images': [
-      {'src': imageUrl},
-    ],
-    'sku': sku,
-    'on_sale': onSale,
-    'stock_quantity': stockQuantity,
-    'stock_status': stockStatus.isNotEmpty
-        ? stockStatus
-        : (isInstock ? 'instock' : 'outofstock'),
-    'is_purchasable': isPurchasable,
-    'purchasable': isPurchasable,
-    'price_html': priceHtml,
-    'short_description': shortDescription,
-    'description': description,
-    'attributes': attributes.map((a) => a.toJson()).toList(),
-    'categories': List.generate(categoryIds.length, (index) {
-      return {
-        'id': categoryIds[index],
-        'name': index < categoryNames.length ? categoryNames[index] : '',
-        'slug': index < categorySlugs.length ? categorySlugs[index] : '',
-      };
-    }),
-    if (stockLocations != null && stockLocations!.isNotEmpty)
-      'stock_locations': stockLocations!.map((item) => item.toJson()).toList(),
-  };
+  Map<String, dynamic> toJson() {
+    final metaData = <Map<String, dynamic>>[];
+
+    final locations = stockLocations;
+    if (locations != null && locations.isNotEmpty) {
+      for (final location in locations) {
+        final normalizedName = _normalizeAttributeName(location.name);
+
+        if (normalizedName == 'general' || normalizedName == 'stockgen') {
+          metaData.add({
+            'key': 'stock-gen',
+            'value': location.quantity,
+          });
+        } else if (normalizedName == 'murcia' ||
+            normalizedName == 'tienda' ||
+            normalizedName == 'stocktie') {
+          metaData.add({
+            'key': 'stock-tie',
+            'value': location.quantity,
+          });
+        }
+      }
+    }
+
+    return {
+      'id': id,
+      'name': name,
+      'price': price,
+      'regular_price': regularPrice,
+      'images': [
+        {'src': imageUrl},
+      ],
+      'sku': sku,
+      'stock_quantity': stockQuantity,
+      'on_sale': onSale,
+      'stock_status': stockStatus.isNotEmpty
+          ? stockStatus
+          : (isInstock ? 'instock' : 'outofstock'),
+      'is_purchasable': isPurchasable,
+      'purchasable': isPurchasable,
+      'price_html': priceHtml,
+      'short_description': shortDescription,
+      'description': description,
+      'attributes': attributes.map((attribute) => attribute.toJson()).toList(),
+      'categories': List.generate(categoryIds.length, (index) {
+        return {
+          'id': categoryIds[index],
+          'name': index < categoryNames.length ? categoryNames[index] : '',
+          'slug': index < categorySlugs.length ? categorySlugs[index] : '',
+        };
+      }),
+      if (stockLocations != null && stockLocations!.isNotEmpty)
+        'stock_locations': stockLocations!
+            .map((stockLocation) => stockLocation.toJson())
+            .toList(),
+      if (metaData.isNotEmpty) 'meta_data': metaData,
+    };
+  }
 }
 
+// =========================
+// STOCK LOCATION
+// =========================
 
 class StockLocation {
   final int id;
@@ -491,15 +646,31 @@ class StockLocation {
   final bool isInstock;
 
   const StockLocation({
-    required this.id,
+    this.id = 0,
     required this.name,
     required this.quantity,
-    required this.isInstock,
+    this.isInstock = false,
   });
 
   String get displayName {
     final cleanName = name.trim();
     return cleanName.isEmpty ? 'Almacén' : cleanName;
+  }
+
+  StockLocation copyWith({
+    int? id,
+    String? name,
+    int? quantity,
+    bool? isInstock,
+  }) {
+    final newQuantity = quantity ?? this.quantity;
+
+    return StockLocation(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      quantity: newQuantity,
+      isInstock: isInstock ?? this.isInstock || newQuantity > 0,
+    );
   }
 
   factory StockLocation.fromJson(Map<String, dynamic> json) {
@@ -522,6 +693,19 @@ class StockLocation {
         json['in_stock'] == true ||
         json['instock'] == true;
 
+    final rawName = (json['name'] ??
+        json['location_name'] ??
+        json['warehouse_name'] ??
+        json['location'] ??
+        json['warehouse'] ??
+        json['label'] ??
+        json['store'] ??
+        json['almacen'] ??
+        json['almacén'] ??
+        '')
+        .toString()
+        .trim();
+
     return StockLocation(
       id: _parseIntValue(
         json['id'] ??
@@ -529,16 +713,7 @@ class StockLocation {
             json['warehouse_id'] ??
             json['term_id'],
       ),
-      name: (json['name'] ??
-          json['location_name'] ??
-          json['warehouse_name'] ??
-          json['label'] ??
-          json['store'] ??
-          json['almacen'] ??
-          json['almacén'] ??
-          '')
-          .toString()
-          .trim(),
+      name: _friendlyLocationName(rawName),
       quantity: quantity,
       isInstock: quantity > 0 || explicitInstock || rawStatus == 'instock',
     );
@@ -548,10 +723,12 @@ class StockLocation {
     'id': id,
     'name': name,
     'quantity': quantity,
-    'stock_status': isInstock ? 'instock' : 'outofstock',
+    'stock_status': isInstock || quantity > 0 ? 'instock' : 'outofstock',
   };
 
   static List<StockLocation> parseList(Map<String, dynamic> json) {
+    final locations = <StockLocation>[];
+
     final possibleValues = <dynamic>[
       json['stock_locations'],
       json['stockLocations'],
@@ -566,7 +743,9 @@ class StockLocation {
 
     for (final value in possibleValues) {
       final parsed = _parseRawList(value);
-      if (parsed.isNotEmpty) return parsed;
+      for (final location in parsed) {
+        _upsertStockLocation(locations, location);
+      }
     }
 
     final metaData = json['meta_data'];
@@ -575,32 +754,75 @@ class StockLocation {
         if (rawMeta is! Map) continue;
 
         final meta = Map<dynamic, dynamic>.from(rawMeta);
-        final key = meta['key']?.toString().toLowerCase().trim() ?? '';
+        final key = meta['key']?.toString().trim() ?? '';
+        final normalizedKey = _normalizeLocationKey(key);
+        final value = meta['value'];
 
-        if (key.contains('stock_location') ||
-            key.contains('stock_locations') ||
-            key.contains('stock_by_location') ||
-            key.contains('almacen') ||
-            key.contains('almacén') ||
-            key.contains('warehouse')) {
-          final parsed = _parseRawList(meta['value']);
-          if (parsed.isNotEmpty) return parsed;
+        // Formato actual MundiCam desde WooCommerce meta_data.
+        if (normalizedKey == 'stockgen') {
+          _upsertStockLocation(
+            locations,
+            StockLocation(
+              name: 'General',
+              quantity: _parseIntValue(value),
+              isInstock: _parseIntValue(value) > 0,
+            ),
+          );
+          continue;
+        }
+
+        if (normalizedKey == 'stocktie') {
+          _upsertStockLocation(
+            locations,
+            StockLocation(
+              name: 'Murcia',
+              quantity: _parseIntValue(value),
+              isInstock: _parseIntValue(value) > 0,
+            ),
+          );
+          continue;
+        }
+
+        // Formatos futuros/genéricos de stock por almacén.
+        if (normalizedKey.contains('stocklocation') ||
+            normalizedKey.contains('stocklocations') ||
+            normalizedKey.contains('stockbylocation') ||
+            normalizedKey.contains('almacen') ||
+            normalizedKey.contains('warehouse')) {
+          final parsed = _parseRawList(value);
+          for (final location in parsed) {
+            _upsertStockLocation(locations, location);
+          }
         }
       }
     }
 
-    return const <StockLocation>[];
+    return locations;
   }
 
   static List<StockLocation> _parseRawList(dynamic value) {
     if (value == null) return const <StockLocation>[];
 
+    if (value is String) {
+      final raw = value.trim();
+      if (raw.isEmpty) return const <StockLocation>[];
+
+      try {
+        final decoded = jsonDecode(raw);
+        return _parseRawList(decoded);
+      } catch (_) {
+        return const <StockLocation>[];
+      }
+    }
+
     if (value is List) {
       return value
           .whereType<Map>()
-          .map((item) => StockLocation.fromJson(
-        Map<String, dynamic>.from(item),
-      ))
+          .map(
+            (item) => StockLocation.fromJson(
+          Map<String, dynamic>.from(item),
+        ),
+      )
           .where((item) => item.name.isNotEmpty || item.quantity > 0)
           .toList();
     }
@@ -620,23 +842,23 @@ class StockLocation {
       final result = <StockLocation>[];
 
       for (final entry in map.entries) {
+        final entryKey = entry.key.toString();
         final entryValue = entry.value;
 
         if (entryValue is Map) {
           final locationJson = Map<String, dynamic>.from(entryValue);
-          locationJson.putIfAbsent('name', () => entry.key.toString());
+          locationJson.putIfAbsent('name', () => _friendlyLocationName(entryKey));
           result.add(StockLocation.fromJson(locationJson));
           continue;
         }
 
         final quantity = _parseIntValue(entryValue);
-        if (quantity > 0) {
+        if (quantity >= 0) {
           result.add(
             StockLocation(
-              id: 0,
-              name: entry.key.toString(),
+              name: _friendlyLocationName(entryKey),
               quantity: quantity,
-              isInstock: true,
+              isInstock: quantity > 0,
             ),
           );
         }
@@ -648,6 +870,69 @@ class StockLocation {
     }
 
     return const <StockLocation>[];
+  }
+
+  static void _upsertStockLocation(
+      List<StockLocation> locations,
+      StockLocation location,
+      ) {
+    final normalizedName = _normalizeLocationKey(location.name);
+
+    final index = locations.indexWhere(
+          (item) => _normalizeLocationKey(item.name) == normalizedName,
+    );
+
+    if (index >= 0) {
+      locations[index] = location;
+    } else {
+      locations.add(location);
+    }
+  }
+
+  static String _friendlyLocationName(String value) {
+    final normalized = _normalizeLocationKey(value);
+
+    if (normalized == 'stockgen' || normalized == 'general') {
+      return 'General';
+    }
+
+    if (normalized == 'stocktie' ||
+        normalized == 'murcia' ||
+        normalized == 'tienda' ||
+        normalized == 'lorqui') {
+      return 'Murcia';
+    }
+
+    return value.trim();
+  }
+
+  static String _normalizeLocationKey(String value) {
+    return value
+        .toLowerCase()
+        .trim()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[\s\-_]+'), '')
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
   static int _parseIntValue(dynamic value, {int fallback = 0}) {
@@ -662,11 +947,18 @@ class StockLocation {
   }
 }
 
+// =========================
+// PRODUCT ATTRIBUTE
+// =========================
+
 class ProductAttribute {
   final String name;
   final List<String> options;
 
-  ProductAttribute({required this.name, required this.options});
+  ProductAttribute({
+    required this.name,
+    required this.options,
+  });
 
   factory ProductAttribute.fromJson(Map<String, dynamic> json) {
     final rawOptions = json['options'];
@@ -712,7 +1004,10 @@ class ProductAttribute {
     );
   }
 
-  Map<String, dynamic> toJson() => {'name': name, 'options': options};
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'options': options,
+  };
 }
 
 class _ParsedCategories {
