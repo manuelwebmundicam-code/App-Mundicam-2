@@ -65,33 +65,50 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           }
           return;
         }
-        _isAdmin = firestoreData?['role'] == 'admin';
+
+        final firestoreRole = firestoreData?['role']?.toString().trim().toLowerCase();
+        _isAdmin = firestoreRole == 'admin' ||
+            firestoreRole == 'administrator' ||
+            firestoreRole == 'administrador';
+
         debugPrint(' Firestore role: ${firestoreData?['role']}');
         debugPrint(' Firestore email: ${firestoreData?['email']}');
       }
 
       String? email = user.email?.trim().toLowerCase();
       if (email == null || email.isEmpty) {
-        email = (firestoreData?['email'] as String?)?.trim().toLowerCase();
+        email = _stringFromUserData(
+          firestoreData,
+          const [
+            'email',
+            'billing_email',
+            'user_email',
+            'customer_email',
+          ],
+        );
       }
       if ((email == null || email.isEmpty) && user.providerData.isNotEmpty) {
         email = user.providerData.first.email?.trim().toLowerCase();
       }
 
-      debugPrint(' Email final: $email');
+      final wordpressId = _extractWordPressId(
+        firestoreData: firestoreData,
+        firebaseUid: user.uid,
+      );
 
-      if (email == null || email.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _errorMessage = 'Email no disponible. Contacta con soporte.';
-            _loadingData = false;
-          });
-        }
-        return;
-      }
+      debugPrint(' Email final: ${email ?? '-'}');
+      debugPrint(' WordPress ID final: ${wordpressId ?? '-'}');
 
       final apiService = ApiService();
-      final wooCustomer = await apiService.getCustomerByEmail(email);
+      Map<String, dynamic>? wooCustomer;
+
+      if (email != null && email.isNotEmpty) {
+        wooCustomer = await apiService.getCustomerByEmail(email);
+      }
+
+      if (wooCustomer == null && wordpressId != null && wordpressId > 0) {
+        wooCustomer = await apiService.getCustomerById(wordpressId);
+      }
 
       if (wooCustomer != null) {
         debugPrint(
@@ -121,6 +138,91 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         });
       }
     }
+  }
+
+  String? _stringFromUserData(
+      Map<String, dynamic>? data,
+      List<String> keys,
+      ) {
+    if (data == null || data.isEmpty) return null;
+
+    for (final key in keys) {
+      final value = data[key]?.toString().trim();
+      if (value != null &&
+          value.isNotEmpty &&
+          value != '—' &&
+          value.toLowerCase() != 'null') {
+        return value.toLowerCase();
+      }
+    }
+
+    return null;
+  }
+
+  int? _extractWordPressId({
+    required Map<String, dynamic>? firestoreData,
+    required String firebaseUid,
+  }) {
+    final keys = [
+      'wordpress_id',
+      'wordpressId',
+      'woocommerce_id',
+      'woocommerceId',
+      'customer_id',
+      'customerId',
+      'wp_user_id',
+      'wpUserId',
+      'woo_customer_id',
+      'wooCustomerId',
+      'uid',
+    ];
+
+    if (firestoreData != null && firestoreData.isNotEmpty) {
+      for (final key in keys) {
+        final parsed = _parsePositiveInt(firestoreData[key]);
+        if (parsed != null && parsed > 0) return parsed;
+
+        final parsedFromText = _extractWpIdFromText(firestoreData[key]);
+        if (parsedFromText != null && parsedFromText > 0) {
+          return parsedFromText;
+        }
+      }
+    }
+
+    return _extractWpIdFromText(firebaseUid);
+  }
+
+  int? _parsePositiveInt(dynamic value) {
+    if (value == null) return null;
+
+    if (value is int && value > 0) return value;
+    if (value is num && value > 0) return value.toInt();
+
+    final raw = value.toString().trim();
+    if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
+
+    final parsed = int.tryParse(raw);
+    if (parsed != null && parsed > 0) return parsed;
+
+    return null;
+  }
+
+  int? _extractWpIdFromText(dynamic value) {
+    if (value == null) return null;
+
+    final raw = value.toString().trim();
+    if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
+
+    final direct = int.tryParse(raw);
+    if (direct != null && direct > 0) return direct;
+
+    final match = RegExp(r'wp[_-]?(\d+)', caseSensitive: false).firstMatch(raw);
+    if (match != null) {
+      final parsed = int.tryParse(match.group(1) ?? '');
+      if (parsed != null && parsed > 0) return parsed;
+    }
+
+    return null;
   }
 
   void _refreshProfile() {

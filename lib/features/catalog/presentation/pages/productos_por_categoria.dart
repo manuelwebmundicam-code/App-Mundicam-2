@@ -2,9 +2,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mundicam/core/cache/image_cache_service.dart';
 import 'package:mundicam/core/cache/product_cache_service.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
@@ -17,10 +17,7 @@ import 'package:mundicam/features/catalog/presentation/providers/category_provid
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
 import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.dart';
-import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
-import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
-import '../../../quotes/presentation/widgets/quote_selection_dialog.dart';
 
 
 final _canViewStockDetailsProvider = FutureProvider<bool>((ref) async {
@@ -28,96 +25,101 @@ final _canViewStockDetailsProvider = FutureProvider<bool>((ref) async {
   if (user == null) return false;
 
   try {
-    final userData = await _loadCurrentFirestoreUserData(user);
-    final wordpressId = _extractWordpressId(userData, user.uid);
-
+    final wordpressId = await _resolveWordPressIdForCurrentUser(user);
     if (wordpressId == null || wordpressId <= 0) {
-      if (kDebugMode) {
-        debugPrint(
-          '👤 Permiso stock: no se encontró wordpress_id para ${user.email ?? user.uid}',
-        );
-      }
       return false;
     }
 
     return ApiService().canCustomerViewStockDetails(wordpressId);
   } catch (e) {
     if (kDebugMode) {
-      debugPrint('❌ Error comprobando permiso de stock interno: $e');
+      debugPrint('Error resolviendo permiso de stock interno: $e');
     }
     return false;
   }
 });
 
-Future<Map<String, dynamic>?> _loadCurrentFirestoreUserData(User user) async {
+Future<int?> _resolveWordPressIdForCurrentUser(User user) async {
   final firestore = FirebaseFirestore.instance;
 
-  final doc = await firestore.collection('users').doc(user.uid).get();
-
-  if (doc.exists && doc.data() != null) {
-    return doc.data();
+  try {
+    final doc = await firestore.collection('users').doc(user.uid).get();
+    final fromDoc = _wordPressIdFromUserData(doc.data());
+    if (fromDoc != null && fromDoc > 0) {
+      return fromDoc;
+    }
+  } catch (e) {
+    if (kDebugMode) {
+      debugPrint('No se pudo leer users/${user.uid}: $e');
+    }
   }
 
   final email = user.email?.trim().toLowerCase();
-
   if (email != null && email.isNotEmpty) {
-    final query = await firestore
-        .collection('users')
-        .where('email', isEqualTo: email)
-        .limit(1)
-        .get();
+    try {
+      final query = await firestore
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
 
-    if (query.docs.isNotEmpty) {
-      return query.docs.first.data();
+      if (query.docs.isNotEmpty) {
+        final fromEmailDoc = _wordPressIdFromUserData(query.docs.first.data());
+        if (fromEmailDoc != null && fromEmailDoc > 0) {
+          return fromEmailDoc;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('No se pudo buscar usuario por email para stock: $e');
+      }
     }
+  }
+
+  return _wordPressIdFromDynamic(user.uid);
+}
+
+int? _wordPressIdFromUserData(Map<String, dynamic>? data) {
+  if (data == null || data.isEmpty) return null;
+
+  const keys = <String>[
+    'wordpress_id',
+    'wordpressId',
+    'woocommerce_id',
+    'woocommerceId',
+    'customer_id',
+    'customerId',
+    'wp_user_id',
+    'wpUserId',
+    'woo_customer_id',
+    'wooCustomerId',
+    'uid',
+  ];
+
+  for (final key in keys) {
+    final id = _wordPressIdFromDynamic(data[key]);
+    if (id != null && id > 0) return id;
   }
 
   return null;
 }
 
-int? _extractWordpressId(
-    Map<String, dynamic>? data,
-    String firebaseUid,
-    ) {
-  if (data != null && data.isNotEmpty) {
-    final wordpressId = _parsePositiveInt(data['wordpress_id']);
-    if (wordpressId != null) return wordpressId;
-
-    final woocommerceId = _parsePositiveInt(data['woocommerce_id']);
-    if (woocommerceId != null) return woocommerceId;
-
-    final uidFromData = data['uid']?.toString();
-    final idFromDataUid = _extractWpIdFromUid(uidFromData);
-    if (idFromDataUid != null) return idFromDataUid;
-  }
-
-  return _extractWpIdFromUid(firebaseUid);
-}
-
-int? _parsePositiveInt(dynamic value) {
+int? _wordPressIdFromDynamic(dynamic value) {
   if (value == null) return null;
 
   if (value is int && value > 0) return value;
   if (value is num && value > 0) return value.toInt();
 
-  final parsed = int.tryParse(value.toString().trim());
-  if (parsed != null && parsed > 0) return parsed;
+  final raw = value.toString().trim();
+  if (raw.isEmpty) return null;
 
-  return null;
-}
+  final direct = int.tryParse(raw);
+  if (direct != null && direct > 0) return direct;
 
-int? _extractWpIdFromUid(String? uid) {
-  if (uid == null || uid.trim().isEmpty) return null;
-
-  final cleanUid = uid.trim().toLowerCase();
-
-  if (cleanUid.startsWith('wp_')) {
-    return int.tryParse(cleanUid.replaceFirst('wp_', ''));
-  }
-
-  final match = RegExp(r'wp[_-]?(\d+)', caseSensitive: false).firstMatch(cleanUid);
+  final match = RegExp(r'wp[_-]?(\d+)', caseSensitive: false).firstMatch(raw);
   if (match != null) {
-    return int.tryParse(match.group(1) ?? '');
+    final parsed = int.tryParse(match.group(1) ?? '');
+    if (parsed != null && parsed > 0) return parsed;
   }
 
   return null;
@@ -2720,17 +2722,65 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     return '${buffer.toString()},$decimales €';
   }
 
+  String _descripcionTarjeta(Product product) {
+    final short = _limpiarDescripcionTarjeta(product.shortDescription);
+    if (short.isNotEmpty) return short;
+
+    final long = _limpiarDescripcionTarjeta(product.description);
+    if (long.isNotEmpty) return long;
+
+    return '';
+  }
+
+  String _limpiarDescripcionTarjeta(String value) {
+    final raw = value.trim();
+    if (raw.isEmpty) return '';
+
+    final normalizedRaw = raw.toLowerCase().trim();
+    if (normalizedRaw == 'sin descripción' ||
+        normalizedRaw == 'sin descripcion' ||
+        normalizedRaw == 'sin descripción detallada' ||
+        normalizedRaw == 'sin descripcion detallada') {
+      return '';
+    }
+
+    return raw
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&#8211;', '-')
+        .replaceAll('&#8243;', '"')
+        .replaceAll('&ndash;', '-')
+        .replaceAll('&mdash;', '-')
+        .replaceAll(RegExp(r'&[^;]+;'), ' ')
+        .split('\n')
+        .map((line) {
+      return line
+          .replaceAll(RegExp(r'^\s*[•\-*–—·]+\s*'), '')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+    })
+        .where((line) => line.isNotEmpty)
+        .take(3)
+        .join('\n')
+        .trim();
+  }
+
+
   bool get _bajoConsulta => widget.p.isUnderConsultation;
   bool get _tieneStock => widget.p.hasStock;
   int get _maxCantidadCompra => widget.p.maxPurchaseQty;
   int get _cantidadSegura {
-    if (!_tieneStock) return 0;
+    if (!widget.p.canAddToCart) return 0;
     if (_maxCantidadCompra <= 0) return cantidad;
     return cantidad.clamp(1, _maxCantidadCompra).toInt();
   }
   bool get _puedeComprar => widget.p.canAddToCart && _cantidadSegura > 0;
-  bool get _puedeAnadirPresupuesto =>
-      widget.p.canRequestQuote && _cantidadSegura > 0 && !_isAddingToQuote;
+  bool get _puedeAnadirPresupuesto => widget.p.canRequestQuote && !_isAddingToQuote;
   bool get _puedeCambiarCantidad => widget.p.canAddToCart;
 
   void _goToQuotesKeepingTabs() {
@@ -2755,6 +2805,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       data: (value) => value,
       orElse: () => false,
     );
+    final descripcionTarjeta = _descripcionTarjeta(widget.p);
 
     return RepaintBoundary(
       child: Container(
@@ -2811,7 +2862,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                               Expanded(
                                 child: Text(
                                   widget.p.name,
-                                  maxLines: 3,
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 14.5,
@@ -2832,16 +2883,17 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                               hasStock: _tieneStock,
                             ),
                           ],
-                          if (widget.p.shortDescription.trim().isNotEmpty) ...[
-                            const SizedBox(height: 8),
+                          if (descripcionTarjeta.isNotEmpty) ...[
+                            const SizedBox(height: 7),
                             Text(
-                              widget.p.shortDescription,
+                              descripcionTarjeta,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 12,
+                                fontSize: 10.8,
                                 color: Color(0xFF6B7280),
-                                height: 1.25,
+                                height: 1.23,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ],
@@ -2874,7 +2926,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         onPressed: _puedeComprar
                             ? () {
                           final qty = _cantidadSegura;
-                          if (qty <= 0) return;
                           ref
                               .read(cartProvider.notifier)
                               .addProduct(widget.p, qty);
@@ -3018,8 +3069,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
             ),
             _qtyBtn(
               Icons.add,
-              _puedeCambiarCantidad &&
-                  (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra),
+              _puedeCambiarCantidad && (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra),
                   () {
                 if (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra) {
                   setState(() => cantidad++);
@@ -3106,83 +3156,50 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // AÑADIR AL PRESUPUESTO CON QuoteSelectionDialog
+  // AÑADIR AL PRESUPUESTO
   // ═══════════════════════════════════════════════════════════════
 
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
-    if (product.id == 0) return;
+    if (product.id == 0 || !product.canRequestQuote) return;
 
-    if (!product.canRequestQuote) return;
-
-    final precio = _precioDouble(product);
     final qty = _cantidadSegura;
-
     if (qty <= 0) return;
 
-    // Mostrar el diálogo de selección de presupuesto
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => QuoteSelectionDialog(
-        productName: product.name,
-        productId: product.id,
-        price: precio,
-        quantity: qty,
-      ),
-    );
-
-    // Usuario canceló el diálogo
-    if (result == null || !mounted) return;
+    final email = FirebaseAuth.instance.currentUser?.email?.trim();
+    if (email == null || email.isEmpty) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se ha encontrado el email del usuario.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isAddingToQuote = true);
 
     try {
-      final action = result['action'] as String;
-      final notifier = ref.read(localQuotesProvider.notifier);
-      String mensaje = '';
+      final ok = await ApiService().crearPresupuesto(
+        email: email,
+        productId: product.id,
+        productName: product.name,
+        price: _precioDouble(product),
+        quantity: qty,
+      );
 
-      if (action == 'crear_y_anadir') {
-        // Crear nuevo presupuesto
-        final nombre = result['nombre'] as String;
-        final orderId = DateTime.now().millisecondsSinceEpoch.toString();
-        final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
+      if (!mounted) return;
 
-        await notifier.crearPresupuesto(orderId: orderId, nombre: nombreFinal);
-        await notifier.anadirItem(
-          orderId: orderId,
-          item: LocalQuoteItem(
-            productId: product.id,
-            productName: product.name,
-            quantity: qty,
-            price: precio,
-          ),
-        );
-        mensaje = '$qty x ${product.name} añadido a "$nombreFinal"';
-      } else if (action == 'anadir_existente') {
-        // Añadir a presupuesto existente
-        final orderId = result['orderId'] as String;
-        final nombre = result['nombre'] as String;
-
-        await notifier.anadirItem(
-          orderId: orderId,
-          item: LocalQuoteItem(
-            productId: product.id,
-            productName: product.name,
-            quantity: qty,
-            price: precio,
-          ),
-        );
-        mensaje = '$qty x ${product.name} añadido a "$nombre"';
-      }
-
-      if (mounted && mensaje.isNotEmpty) {
+      if (ok) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(mensaje),
+            content: Text('$qty x ${product.name} añadido al presupuesto'),
             backgroundColor: Colors.green.shade700,
-            behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
               label: 'VER',
               textColor: Colors.white,
@@ -3190,23 +3207,41 @@ class _ProductTileState extends ConsumerState<ProductTile> {
             ),
           ),
         );
-      }
-    } catch (e) {
-      debugPrint('❌ Error en _addToQuote: $e');
-      if (mounted) {
+      } else {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
+          const SnackBar(
+            content: Text('No se pudo añadir el producto al presupuesto.'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error en _addToQuote: $e');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isAddingToQuote = false);
+      if (mounted) {
+        setState(() => _isAddingToQuote = false);
+      }
     }
   }
+
 }
+
 
 
 class _StockDetailsText extends StatelessWidget {
@@ -3220,21 +3255,20 @@ class _StockDetailsText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cleanDetails = _stockTextFor(product);
+    final cleanDetails = product.stockDetailsText?.trim();
     if (cleanDetails == null || cleanDetails.isEmpty) {
       return const SizedBox.shrink();
     }
 
-    final Color textColor =
-    hasStock ? const Color(0xFF218047) : const Color(0xFFC62828);
+    const textColor = Color(0xFF1565C0);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FB),
+        color: const Color(0xFFF3F8FF),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE1E4EA)),
+        border: Border.all(color: const Color(0xFFBFD7F2)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3261,19 +3295,6 @@ class _StockDetailsText extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String? _stockTextFor(Product product) {
-    final stockDetails = product.stockDetailsText?.trim();
-    if (stockDetails != null && stockDetails.isNotEmpty) {
-      return stockDetails;
-    }
-
-    if (product.stockQuantity > 0) {
-      return 'General: ${product.stockQuantity}';
-    }
-
-    return null;
   }
 }
 
