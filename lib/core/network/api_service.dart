@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mundicam/features/home/data/models/banner.dart';
 import 'package:mundicam/features/training/data/models/cursos_model.dart';
@@ -184,6 +185,16 @@ class ApiService {
   String _consumerKey = '';
   String _consumerSecret = '';
   bool _initialized = false;
+  bool _sessionLoaded = false;
+  String _wpSessionCookie = '';
+  String _wpNonce = '';
+  String _wpCartToken = '';
+
+  static const String _wpSessionCookiePrefsKey =
+      'mundicam_wp_session_cookie';
+  static const String _wpNoncePrefsKey = 'mundicam_wp_nonce';
+  static const String _wpCartTokenPrefsKey = 'mundicam_wp_cart_token';
+
   List<String>? _cachedBrandNames;
   List<Map<String, dynamic>>? _cachedBrandTerms;
   final Map<String, _ContextProductsCacheEntry> _contextProductsCache = {};
@@ -265,6 +276,159 @@ class ApiService {
     if (!_initialized) {
       await _loadKeys();
     }
+
+    if (!_sessionLoaded) {
+      await _loadWordPressSession();
+    }
+  }
+
+  // ================================================================
+  // SESIÓN WORDPRESS / WOOCOMMERCE DEL CLIENTE
+  // ================================================================
+
+  String _normalizeCookieHeader(String value) {
+    final raw = value.trim();
+    if (raw.isEmpty) return '';
+
+    final cookies = <String>[];
+    final parts = raw.split(RegExp(r',\s*(?=[^;,]+=)'));
+
+    for (final part in parts) {
+      final firstSegment = part.split(';').first.trim();
+      if (firstSegment.isEmpty || !firstSegment.contains('=')) continue;
+
+      final name = firstSegment.split('=').first.trim().toLowerCase();
+      if (name == 'path' ||
+          name == 'expires' ||
+          name == 'max-age' ||
+          name == 'domain' ||
+          name == 'samesite') {
+        continue;
+      }
+
+      cookies.add(firstSegment);
+    }
+
+    return cookies.isEmpty ? raw : cookies.join('; ');
+  }
+
+  Future<void> _loadWordPressSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _wpSessionCookie = prefs.getString(_wpSessionCookiePrefsKey) ?? '';
+      _wpNonce = prefs.getString(_wpNoncePrefsKey) ?? '';
+      _wpCartToken = prefs.getString(_wpCartTokenPrefsKey) ?? '';
+      _sessionLoaded = true;
+
+      if (kDebugMode && _hasWordPressSession) {
+        debugPrint('✅ Sesión WordPress/WooCommerce cargada para Store API autenticada');
+      }
+    } catch (e) {
+      _sessionLoaded = true;
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo cargar la sesión WordPress: $e');
+      }
+    }
+  }
+
+  bool get _hasWordPressSession {
+    return _wpSessionCookie.trim().isNotEmpty ||
+        _wpNonce.trim().isNotEmpty ||
+        _wpCartToken.trim().isNotEmpty;
+  }
+
+  /// Permite a LoginPage/AuthWrapper comprobar si Firebase tiene además
+  /// una sesión WordPress/WooCommerce válida guardada.
+  Future<bool> hasStoredWordPressSession() async {
+    await _ensureInitialized();
+    return _hasWordPressSession;
+  }
+
+  Future<void> saveWordPressSession({
+    String? cookie,
+    String? nonce,
+    String? cartToken,
+  }) async {
+    final cleanCookie = _normalizeCookieHeader(cookie?.trim() ?? '');
+    final cleanNonce = nonce?.trim() ?? '';
+    final cleanCartToken = cartToken?.trim() ?? '';
+
+    if (cleanCookie.isEmpty && cleanNonce.isEmpty && cleanCartToken.isEmpty) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Login WordPress sin cookie/nonce/cart-token. La Store API seguirá como invitado.');
+      }
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+
+    if (cleanCookie.isNotEmpty) {
+      _wpSessionCookie = cleanCookie;
+      await prefs.setString(_wpSessionCookiePrefsKey, cleanCookie);
+    }
+
+    if (cleanNonce.isNotEmpty) {
+      _wpNonce = cleanNonce;
+      await prefs.setString(_wpNoncePrefsKey, cleanNonce);
+    }
+
+    if (cleanCartToken.isNotEmpty) {
+      _wpCartToken = cleanCartToken;
+      await prefs.setString(_wpCartTokenPrefsKey, cleanCartToken);
+    }
+
+    _sessionLoaded = true;
+
+    if (kDebugMode) {
+      debugPrint(
+        '✅ Sesión WordPress guardada: '
+            'cookie=${_wpSessionCookie.isNotEmpty} '
+            'nonce=${_wpNonce.isNotEmpty} '
+            'cartToken=${_wpCartToken.isNotEmpty}',
+      );
+    }
+  }
+
+  Future<void> clearWordPressSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_wpSessionCookiePrefsKey);
+    await prefs.remove(_wpNoncePrefsKey);
+    await prefs.remove(_wpCartTokenPrefsKey);
+
+    _wpSessionCookie = '';
+    _wpNonce = '';
+    _wpCartToken = '';
+    _sessionLoaded = true;
+
+    if (kDebugMode) {
+      debugPrint('✅ Sesión WordPress/WooCommerce limpiada');
+    }
+  }
+
+  void _captureStoreApiAuthFromResponse(Response response) {
+    final setCookieValues = response.headers.map['set-cookie'] ?? const <String>[];
+    final setCookie = setCookieValues
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .join(', ');
+
+    final nonce = response.headers.value('nonce') ??
+        response.headers.value('x-wc-store-api-nonce');
+
+    final cartToken = response.headers.value('cart-token') ??
+        response.headers.value('x-wc-store-api-cart-token');
+
+    if (setCookie.trim().isEmpty &&
+        (nonce == null || nonce.trim().isEmpty) &&
+        (cartToken == null || cartToken.trim().isEmpty)) {
+      return;
+    }
+
+    saveWordPressSession(
+      cookie: setCookie.trim().isEmpty ? null : setCookie,
+      nonce: nonce,
+      cartToken: cartToken,
+    );
   }
 
   // ================================================================
@@ -280,6 +444,28 @@ class ApiService {
   }
 
   Options get _wooOptions => Options(headers: {'Authorization': _basicAuth});
+
+  Options get _storeApiOptions {
+    final headers = <String, dynamic>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    };
+
+    if (_wpSessionCookie.trim().isNotEmpty) {
+      headers['Cookie'] = _wpSessionCookie.trim();
+    }
+
+    if (_wpNonce.trim().isNotEmpty) {
+      headers['Nonce'] = _wpNonce.trim();
+      headers['X-WC-Store-API-Nonce'] = _wpNonce.trim();
+    }
+
+    if (_wpCartToken.trim().isNotEmpty) {
+      headers['Cart-Token'] = _wpCartToken.trim();
+    }
+
+    return Options(headers: headers);
+  }
 
   // ================================================================
   // HELPERS GENERALES / LINE ITEMS
@@ -1474,6 +1660,7 @@ class ApiService {
           'per_page': 100,
           'hide_empty': hideEmpty,
         },
+        options: _storeApiOptions,
       );
 
       final marcas = _normalizeBrandTerms(
@@ -1623,6 +1810,288 @@ class ApiService {
         .join('&');
     return 'page:$page|perPage:$perPage|$queryPart';
   }
+  Map<String, dynamic> _storeApiQueryFromWooProductsQuery(
+      Map<String, dynamic> queryParams, {
+        required int page,
+        required int perPage,
+      }) {
+    final query = <String, dynamic>{
+      'per_page': perPage,
+      'page': page,
+    };
+
+    final search = queryParams['search']?.toString().trim();
+    if (search != null && search.isNotEmpty) {
+      query['search'] = search;
+    }
+
+    final category = queryParams['category']?.toString().trim();
+    if (category != null && category.isNotEmpty) {
+      query['category'] = category;
+      query['category_operator'] = queryParams['category_operator'] ?? 'in';
+    }
+
+    final orderBy = queryParams['orderby']?.toString().trim();
+    final order = queryParams['order']?.toString().trim();
+
+    if (orderBy != null && orderBy.isNotEmpty) {
+      query['orderby'] = orderBy;
+    }
+
+    if (order != null && order.isNotEmpty) {
+      query['order'] = order;
+    }
+
+    // Compatibilidad básica con filtros por atributo en Store API.
+    // Si el endpoint público no soporta algún filtro, no debe bloquear al cliente:
+    // el resultado se valida después en las capas locales cuando corresponde.
+    final attribute = queryParams['attribute']?.toString().trim();
+    final attributeTerm = queryParams['attribute_term']?.toString().trim();
+    if (attribute != null &&
+        attribute.isNotEmpty &&
+        attributeTerm != null &&
+        attributeTerm.isNotEmpty) {
+      query['attributes[0][attribute]'] = attribute;
+      query['attributes[0][term_id]'] = attributeTerm;
+    }
+
+    final brand = queryParams['brand']?.toString().trim();
+    if (brand != null && brand.isNotEmpty) {
+      query['brand'] = brand;
+      query['brand_operator'] = queryParams['brand_operator'] ?? 'in';
+    }
+
+    return query;
+  }
+
+  String _storeApiPriceToWooPrice(dynamic value, {int minorUnit = 2}) {
+    if (value == null) return '0.00';
+
+    final raw = value.toString().trim().replaceAll(',', '.');
+    if (raw.isEmpty) return '0.00';
+
+    final parsed = double.tryParse(raw);
+    if (parsed == null) return raw;
+
+    if (minorUnit <= 0) {
+      return parsed.toStringAsFixed(0);
+    }
+
+    final divisor = List<int>.filled(minorUnit, 10).fold<double>(
+      1,
+          (total, item) => total * item,
+    );
+
+    return (parsed / divisor).toStringAsFixed(2);
+  }
+
+  Map<String, dynamic> _normalizeStoreProductForProductModel(
+      Map<String, dynamic> raw,
+      ) {
+    final json = Map<String, dynamic>.from(raw);
+    final prices = json['prices'];
+
+    if (prices is Map) {
+      final priceMap = Map<dynamic, dynamic>.from(prices);
+      final minorUnit = _parseIntValue(
+        priceMap['currency_minor_unit'],
+        fallback: 2,
+      );
+
+      json['price'] = _storeApiPriceToWooPrice(
+        priceMap['price'],
+        minorUnit: minorUnit,
+      );
+      json['regular_price'] = _storeApiPriceToWooPrice(
+        priceMap['regular_price'] ?? priceMap['price'],
+        minorUnit: minorUnit,
+      );
+    }
+
+    final rawStockStatus = json['stock_status']?.toString().trim() ?? '';
+    final rawIsInStock = json['is_in_stock'];
+    final parsedIsInStock = rawIsInStock == true ||
+        rawIsInStock?.toString().toLowerCase().trim() == 'true' ||
+        rawIsInStock?.toString().trim() == '1';
+    final parsedOutOfStock = rawIsInStock == false ||
+        rawIsInStock?.toString().toLowerCase().trim() == 'false' ||
+        rawIsInStock?.toString().trim() == '0';
+
+    // En cliente normal WooCommerce REST v3 puede devolver 403 y usamos Store API.
+    // Algunas instalaciones B2B no exponen todos los campos comerciales en Store API.
+    // Si Store API NO declara explícitamente sin stock, el producto debe seguir siendo
+    // operable para el cliente. El stock exacto General/Murcia se oculta por rol en UI.
+    if (rawStockStatus.isNotEmpty) {
+      json['stock_status'] = rawStockStatus;
+    } else if (parsedOutOfStock) {
+      json['stock_status'] = 'outofstock';
+    } else if (parsedIsInStock) {
+      json['stock_status'] = 'instock';
+    } else {
+      json['stock_status'] = 'instock';
+    }
+
+    json['is_in_stock'] = json['stock_status'] == 'instock' ||
+        json['stock_status'] == 'onbackorder';
+
+    // En la app B2B, el cliente identificado no debe comportarse como invitado.
+    // Store API puede devolver purchasable=false por reglas de Woo/B2B aunque la app
+    // deba permitir añadir al carrito/presupuesto. La clase Product solo bloqueará
+    // si el texto comercial indica explícitamente “Bajo consulta”.
+    json['is_purchasable'] = true;
+    json['purchasable'] = true;
+
+    return json;
+  }
+
+
+  // IMPORTANTE: este fallback de Store API se mantiene solo por compatibilidad
+  // con consultas no comerciales. _requestCatalogProducts NO debe usarlo para
+  // catálogo comprable, porque Store API pública puede devolver precios 0 en B2B.
+  Future<CatalogProductsResult> _requestStoreApiProductsFallback(
+      Map<String, dynamic> queryParams, {
+        required int page,
+        required int perPage,
+      }) async {
+    final storeQuery = _storeApiQueryFromWooProductsQuery(
+      queryParams,
+      page: page,
+      perPage: perPage,
+    );
+
+    Response response;
+    try {
+      response = await _dio.get(
+        '/wp-json/wc/store/v1/products',
+        queryParameters: storeQuery,
+        options: _storeApiOptions,
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+
+      if (statusCode == 400 || statusCode == 401 || statusCode == 403) {
+        final safeQuery = <String, dynamic>{
+          'per_page': perPage,
+          'page': page,
+        };
+
+        final search = queryParams['search']?.toString().trim();
+        if (search != null && search.isNotEmpty) {
+          safeQuery['search'] = search;
+        }
+
+        final category = queryParams['category']?.toString().trim();
+        if (category != null && category.isNotEmpty) {
+          safeQuery['category'] = category;
+          safeQuery['category_operator'] = 'in';
+        }
+
+        final orderBy = queryParams['orderby']?.toString().trim();
+        final order = queryParams['order']?.toString().trim();
+        if (orderBy != null && orderBy.isNotEmpty) safeQuery['orderby'] = orderBy;
+        if (order != null && order.isNotEmpty) safeQuery['order'] = order;
+
+        if (kDebugMode) {
+          debugPrint(
+            '⚠️ Store API no aceptó el filtro avanzado de productos '
+                '(status=$statusCode). Reintentando consulta pública básica.',
+          );
+        }
+
+        response = await _dio.get(
+          '/wp-json/wc/store/v1/products',
+          queryParameters: safeQuery,
+          options: _storeApiOptions,
+        );
+      } else {
+        rethrow;
+      }
+    }
+
+    _captureStoreApiAuthFromResponse(response);
+
+    final List data = response.data is List ? response.data as List : [];
+    final productos = await _mapProductsWithBrand(
+      data
+          .whereType<Map>()
+          .map((item) => _normalizeStoreProductForProductModel(
+        Map<String, dynamic>.from(item),
+      ))
+          .toList(),
+    );
+
+    final hasAnyRealPrice = productos.any((product) => _productPrice(product) > 0);
+    if (data.isNotEmpty && productos.isNotEmpty && !hasAnyRealPrice) {
+      if (kDebugMode) {
+        debugPrint(
+          '🔒 Store API autenticada no devuelve precios reales. '
+              'No se permite catálogo comprable a 0 €.',
+        );
+      }
+
+      throw DioException(
+        requestOptions: response.requestOptions,
+        response: response,
+        type: DioExceptionType.badResponse,
+        error: 'Store API sin precios reales para este cliente.',
+        message: 'La sesión WordPress no está aplicando precios reales de cliente.',
+      );
+    }
+
+    _sortProductsByRequestedOrder(
+      productos,
+      _orderByFromProductQueryParams(queryParams),
+    );
+
+    final totalPages = _parseHeaderInt(
+      response.headers,
+      'x-wp-totalpages',
+      productos.length < perPage ? page : page + 1,
+    );
+
+    final totalItems = _parseHeaderInt(
+      response.headers,
+      'x-wp-total',
+      productos.length,
+    );
+
+    if (kDebugMode) {
+      debugPrint(
+        '🌐 Productos cargados por Store API autenticada: '
+            'page=$page total=$totalItems items=${productos.length}',
+      );
+    }
+
+    return CatalogProductsResult(
+      products: productos,
+      currentPage: page,
+      totalPages: totalPages <= 0 ? 1 : totalPages,
+      totalItems: totalItems,
+    );
+  }
+
+  void _cacheCatalogProductsResult(
+      String cacheKey,
+      CatalogProductsResult result,
+      ) {
+    _requestProductsCache[cacheKey] = _RequestProductsCacheEntry(
+      result: result,
+      createdAt: DateTime.now(),
+    );
+
+    if (_requestProductsCache.length > _maxRequestProductsCacheEntries) {
+      final entries = _requestProductsCache.entries.toList()
+        ..sort((a, b) => a.value.createdAt.compareTo(b.value.createdAt));
+
+      final removeCount =
+          _requestProductsCache.length - _maxRequestProductsCacheEntries;
+
+      for (final entry in entries.take(removeCount)) {
+        _requestProductsCache.remove(entry.key);
+      }
+    }
+  }
+
   Future<CatalogProductsResult> _requestCatalogProducts(
       Map<String, dynamic> queryParams, {
         required int page,
@@ -1642,62 +2111,112 @@ class ApiService {
       return cached.result;
     }
 
-    final response = await _dio.get(
-      '/wp-json/wc/v3/products',
-      queryParameters: queryParams,
-      options: _wooOptions,
-    );
+    // Primero se intenta WooCommerce REST v3 para mantener intacto el flujo
+    // de admin/comercial y no perder campos internos como stock-gen/stock-tie.
+    // Si el cliente normal recibe 401/403, se usa Store API autenticada con
+    // cookies + nonce de la sesión WordPress creada en firebase-login.
+    try {
+      final response = await _dio.get(
+        '/wp-json/wc/v3/products',
+        queryParameters: queryParams,
+        options: _wooOptions,
+      );
 
-    final List data = response.data is List ? response.data as List : [];
-    final productos = await _mapProductsWithBrand(data);
-    _sortProductsByRequestedOrder(
-      productos,
-      _orderByFromProductQueryParams(queryParams),
-    );
+      final List data = response.data is List ? response.data as List : [];
+      final productos = await _mapProductsWithBrand(data);
+      _sortProductsByRequestedOrder(
+        productos,
+        _orderByFromProductQueryParams(queryParams),
+      );
 
-    final totalPages = _parseHeaderInt(
-      response.headers,
-      'x-wp-totalpages',
-      productos.length < perPage ? page : page + 1,
-    );
+      final totalPages = _parseHeaderInt(
+        response.headers,
+        'x-wp-totalpages',
+        productos.length < perPage ? page : page + 1,
+      );
 
-    final totalItems = _parseHeaderInt(
-      response.headers,
-      'x-wp-total',
-      productos.length,
-    );
+      final totalItems = _parseHeaderInt(
+        response.headers,
+        'x-wp-total',
+        productos.length,
+      );
 
-    final result = CatalogProductsResult(
-      products: productos,
-      currentPage: page,
-      totalPages: totalPages <= 0 ? 1 : totalPages,
-      totalItems: totalItems,
-    );
+      final result = CatalogProductsResult(
+        products: productos,
+        currentPage: page,
+        totalPages: totalPages <= 0 ? 1 : totalPages,
+        totalItems: totalItems,
+      );
 
-    _requestProductsCache[cacheKey] = _RequestProductsCacheEntry(
-      result: result,
-      createdAt: DateTime.now(),
-    );
+      _cacheCatalogProductsResult(cacheKey, result);
 
-    if (_requestProductsCache.length > _maxRequestProductsCacheEntries) {
-      final entries = _requestProductsCache.entries.toList()
-        ..sort((a, b) => a.value.createdAt.compareTo(b.value.createdAt));
-
-      final removeCount =
-          _requestProductsCache.length - _maxRequestProductsCacheEntries;
-
-      for (final entry in entries.take(removeCount)) {
-        _requestProductsCache.remove(entry.key);
+      if (kDebugMode) {
+        debugPrint('🌐 Request productos API privada: $cacheKey');
       }
-    }
 
-    if (kDebugMode) {
-      debugPrint('🌐 Request productos API: $cacheKey');
-    }
+      return result;
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
 
-    return result;
+      if (statusCode == 401 || statusCode == 403) {
+        await _loadWordPressSession();
+
+        if (_hasWordPressSession) {
+          try {
+            if (kDebugMode) {
+              debugPrint(
+                '🔐 WC v3 bloqueado (status=$statusCode). '
+                    'Probando Store API autenticada con sesión WordPress/WooCommerce.',
+              );
+            }
+
+            final result = await _requestStoreApiProductsFallback(
+              queryParams,
+              page: page,
+              perPage: perPage,
+            );
+
+            _cacheCatalogProductsResult(cacheKey, result);
+            return result;
+          } catch (fallbackError) {
+            if (kDebugMode) {
+              debugPrint(
+                '🔒 Store API autenticada no pudo devolver catálogo con precio real: '
+                    '$fallbackError',
+              );
+            }
+
+            throw DioException(
+              requestOptions: e.requestOptions,
+              response: e.response,
+              type: e.type,
+              error: fallbackError,
+              message:
+              'La Store API autenticada no ha devuelto productos con precio real.',
+            );
+          }
+        }
+
+        if (kDebugMode) {
+          debugPrint(
+            '🔒 Productos WC v3 bloqueados (status=$statusCode). '
+                'No se usa Store API pública como invitado para evitar precios 0.',
+          );
+        }
+
+        throw DioException(
+          requestOptions: e.requestOptions,
+          response: e.response,
+          type: e.type,
+          error: 'No se pueden cargar productos con precio real desde WooCommerce.',
+          message:
+          'Falta sesión WordPress/WooCommerce válida. Haz login limpio para guardar cookies y nonce.',
+        );
+      }
+
+      rethrow;
+    }
   }
-
 
   bool _catalogResultMatchesBrand(
       CatalogProductsResult result,
@@ -2138,8 +2657,28 @@ class ApiService {
       }
 
       return null;
+    } on DioException catch (e) {
+      // Esta llamada se usa para decidir si se muestra el stock interno
+      // General/Murcia. Si WooCommerce no permite consultar el cliente,
+      // NO se debe bloquear la app: se oculta el stock exacto y listo.
+      if (e.response?.statusCode == 403) {
+        if (kDebugMode) {
+          debugPrint(
+            '🔒 Cliente WP $id sin permiso para leer datos de cliente. '
+                'Se oculta stock interno y la app continúa.',
+          );
+        }
+        return null;
+      }
+
+      if (kDebugMode) {
+        debugPrint('Error en getCustomerById: $e');
+      }
+      return null;
     } catch (e) {
-      debugPrint('Error en getCustomerById: $e');
+      if (kDebugMode) {
+        debugPrint('Error en getCustomerById: $e');
+      }
       return null;
     }
   }
@@ -2261,7 +2800,10 @@ class ApiService {
   Future<String?> getCustomerRoleById(int wordpressId) async {
     if (wordpressId <= 0) return null;
 
-    final customer = await getCustomerById(wordpressId);
+    final customer = await getCustomerById(wordpressId).timeout(
+      const Duration(seconds: 3),
+      onTimeout: () => null,
+    );
     final roleValue = _extractCustomerRoleValue(customer);
 
     return _roleTextFromDynamic(roleValue);
@@ -2271,7 +2813,21 @@ class ApiService {
     if (wordpressId <= 0) return false;
 
     try {
-      final customer = await getCustomerById(wordpressId);
+      final customer = await getCustomerById(wordpressId).timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => null,
+      );
+
+      if (customer == null || customer.isEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '👤 Permiso stock usuario WP $wordpressId | '
+                'sin datos de rol | canView=false',
+          );
+        }
+        return false;
+      }
+
       final roleValue = _extractCustomerRoleValue(customer);
       final canView = _roleCanViewStockDetails(roleValue);
 
@@ -2285,9 +2841,11 @@ class ApiService {
 
       return canView;
     } catch (e) {
-      debugPrint(
-        'Error comprobando permiso de stock para WP $wordpressId: $e',
-      );
+      if (kDebugMode) {
+        debugPrint(
+          'Error comprobando permiso de stock para WP $wordpressId: $e',
+        );
+      }
       return false;
     }
   }
@@ -2723,8 +3281,22 @@ class ApiService {
       }
 
       return [];
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 403) {
+        if (kDebugMode) {
+          debugPrint('🔒 Pedidos remotos no disponibles para este cliente. Se continúa con lista vacía.');
+        }
+        return [];
+      }
+
+      if (kDebugMode) {
+        debugPrint('Error obteniendo pedidos: $e');
+      }
+      return [];
     } catch (e) {
-      debugPrint('Error obteniendo pedidos: $e');
+      if (kDebugMode) {
+        debugPrint('Error obteniendo pedidos: $e');
+      }
       return [];
     }
   }
@@ -3106,6 +3678,68 @@ class ApiService {
   // CATEGORÍAS
   // ================================================================
 
+  List<CategoryModel> _postProcessCategories(
+      List<CategoryModel> categorias, {
+        required bool soloConProductos,
+        required bool soloCategoriasPadre,
+      }) {
+    var resultado = categorias;
+
+    if (soloConProductos) {
+      resultado = _filtrarCategoriasVisibles(resultado);
+    }
+
+    if (soloCategoriasPadre) {
+      resultado = resultado.where((c) => c.parent == 0).toList();
+    }
+
+    return resultado;
+  }
+
+  Future<List<CategoryModel>> _getCategoriasDesdeStoreApi({
+    bool soloConProductos = true,
+    bool soloCategoriasPadre = true,
+  }) async {
+    int page = 1;
+    int totalPages = 1;
+    final todas = <CategoryModel>[];
+
+    do {
+      final response = await _dio.get(
+        '/wp-json/wc/store/v1/products/categories',
+        queryParameters: {
+          'per_page': 100,
+          'page': page,
+          'orderby': 'name',
+          'order': 'asc',
+        },
+        options: _storeApiOptions,
+      );
+
+      final data = response.data is List ? response.data as List : <dynamic>[];
+      todas.addAll(
+        data.whereType<Map>().map(
+              (item) => CategoryModel.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        ),
+      );
+
+      totalPages = _parseHeaderInt(response.headers, 'x-wp-totalpages', 1);
+      page++;
+    } while (page <= totalPages);
+
+    if (kDebugMode) {
+      debugPrint('🌐 Categorías cargadas por Store API pública: ${todas.length}');
+    }
+
+    return _postProcessCategories(
+      todas,
+      soloConProductos: soloConProductos,
+      soloCategoriasPadre: soloCategoriasPadre,
+    );
+  }
+
   Future<List<CategoryModel>> getCategorias({
     bool soloConProductos = true,
     bool soloCategoriasPadre = true,
@@ -3138,18 +3772,27 @@ class ApiService {
         page++;
       } while (page <= totalPages);
 
-      List<CategoryModel> resultado = todas;
-
-      if (soloConProductos) {
-        resultado = _filtrarCategoriasVisibles(resultado);
-      }
-
-      if (soloCategoriasPadre) {
-        resultado = resultado.where((c) => c.parent == 0).toList();
-      }
-
-      return resultado;
+      return _postProcessCategories(
+        todas,
+        soloConProductos: soloConProductos,
+        soloCategoriasPadre: soloCategoriasPadre,
+      );
     } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+
+      if (statusCode == 401 || statusCode == 403) {
+        if (kDebugMode) {
+          debugPrint(
+            '🔒 Categorías WC v3 no disponibles para este usuario '
+                '(status=$statusCode). Se usa Store API pública.',
+          );
+        }
+        return _getCategoriasDesdeStoreApi(
+          soloConProductos: soloConProductos,
+          soloCategoriasPadre: soloCategoriasPadre,
+        );
+      }
+
       throw Exception(_mapDioError(e));
     }
   }
@@ -3170,6 +3813,33 @@ class ApiService {
       return (response.data as List)
           .map((json) => CategoryModel.fromJson(json))
           .toList();
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      if (statusCode == 401 || statusCode == 403) {
+        try {
+          final response = await _dio.get(
+            '/wp-json/wc/store/v1/products/categories',
+            queryParameters: {
+              'parent': parentId,
+              'per_page': 100,
+              'hide_empty': false,
+            },
+            options: _storeApiOptions,
+          );
+          final data = response.data is List ? response.data as List : <dynamic>[];
+          return data
+              .whereType<Map>()
+              .map(
+                (json) => CategoryModel.fromJson(
+              Map<String, dynamic>.from(json),
+            ),
+          )
+              .toList();
+        } catch (_) {
+          return [];
+        }
+      }
+      return [];
     } catch (e) {
       return [];
     }
@@ -3391,6 +4061,7 @@ class ApiService {
           .get(
         '/wp-json/wc/store/v1/products/collection-data',
         queryParameters: query,
+        options: _storeApiOptions,
       )
           .timeout(const Duration(seconds: 5));
 
@@ -3429,6 +4100,7 @@ class ApiService {
           .get(
         '/wp-json/wc/store/v1/products/collection-data',
         queryParameters: query,
+        options: _storeApiOptions,
       )
           .timeout(const Duration(seconds: 5));
 
@@ -3933,6 +4605,7 @@ class ApiService {
     final response = await _dio.get(
       '/wp-json/wc/store/v1/products/collection-data',
       queryParameters: queryParams,
+      options: _storeApiOptions,
     );
 
     final responseData = response.data is Map
@@ -4190,8 +4863,28 @@ class ApiService {
         ),
       )
           .toList();
+    } on DioException catch (e) {
+      // Algunos clientes normales no tienen permiso en WooCommerce para
+      // consultar pedidos checkout-draft por REST. Esto NO debe bloquear
+      // catálogo, búsqueda, carrito ni presupuestos locales.
+      if (e.response?.statusCode == 403) {
+        if (kDebugMode) {
+          debugPrint(
+            '🔒 Presupuestos remotos no disponibles para ${email.trim().toLowerCase()}. '
+                'Se continúa con lista vacía.',
+          );
+        }
+        return [];
+      }
+
+      if (kDebugMode) {
+        debugPrint('❌ Error getPresupuestosPorEmail: $e');
+      }
+      return [];
     } catch (e) {
-      debugPrint('❌ Error getPresupuestosPorEmail: $e');
+      if (kDebugMode) {
+        debugPrint('❌ Error getPresupuestosPorEmail: $e');
+      }
       return [];
     }
   }
@@ -4203,17 +4896,81 @@ class ApiService {
 
   Future<Product?> getProductoById(int id) async {
     await _ensureInitialized();
+
+    if (id <= 0) return null;
+
     try {
       final response = await _dio.get(
         '/wp-json/wc/v3/products/$id',
         options: _wooOptions,
       );
+
       if (response.statusCode == 200) {
         return _mapSingleProductWithBrand(response.data);
       }
+
+      return null;
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+
+      if (statusCode == 401 || statusCode == 403) {
+        await _loadWordPressSession();
+
+        if (_hasWordPressSession) {
+          try {
+            if (kDebugMode) {
+              debugPrint(
+                '🔐 Producto $id bloqueado por WC v3 (status=$statusCode). '
+                    'Probando detalle por Store API autenticada.',
+              );
+            }
+
+            final response = await _dio.get(
+              '/wp-json/wc/store/v1/products/$id',
+              options: _storeApiOptions,
+            );
+
+            _captureStoreApiAuthFromResponse(response);
+
+            if (response.statusCode == 200 && response.data is Map) {
+              final json = _normalizeStoreProductForProductModel(
+                Map<String, dynamic>.from(response.data as Map),
+              );
+
+              final product = await _mapSingleProductWithBrand(json);
+
+              if (product != null && _productPrice(product) <= 0) {
+                if (kDebugMode) {
+                  debugPrint(
+                    '🔒 Store API autenticada no devuelve precio real para producto $id.',
+                  );
+                }
+                return null;
+              }
+
+              return product;
+            }
+          } catch (fallbackError) {
+            if (kDebugMode) {
+              debugPrint(
+                '🔒 No se pudo cargar producto $id por Store API autenticada: '
+                    '$fallbackError',
+              );
+            }
+            return null;
+          }
+        }
+      }
+
+      if (kDebugMode) {
+        debugPrint('Error al obtener producto $id: $e');
+      }
+
       return null;
     } catch (e) {
-      debugPrint('Error al obtener producto $id: $e');
+      if (kDebugMode) {
+        debugPrint('Error al obtener producto $id: $e');
+      }
       return null;
     }
   }

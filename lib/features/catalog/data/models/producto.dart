@@ -161,8 +161,35 @@ class Product {
       return true;
     }
 
+    final normalizedStatus = stockStatus.toLowerCase().trim();
+    if (normalizedStatus == 'outofstock') {
+      return false;
+    }
+
+    if (normalizedStatus == 'instock' || normalizedStatus == 'onbackorder') {
+      return true;
+    }
+
     return isInstock;
   }
+
+  double get priceValue {
+    final clean = price
+        .replaceAll('€', '')
+        .replaceAll(RegExp(r'[^0-9,.-]'), '')
+        .trim();
+
+    if (clean.isEmpty) return 0.0;
+
+    if (clean.contains(',')) {
+      final european = clean.replaceAll('.', '').replaceAll(',', '.');
+      return double.tryParse(european) ?? 0.0;
+    }
+
+    return double.tryParse(clean) ?? 0.0;
+  }
+
+  bool get hasValidPrice => priceValue > 0;
 
   // =========================
   // CONTROL COMERCIAL
@@ -170,31 +197,28 @@ class Product {
 
   /// Producto visible, pero no accionable comercialmente.
   ///
-  /// No usamos solo precio 0 porque en una app B2B puede haber precios ocultos
-  /// por permisos. La fuente principal es purchasable/is_purchasable.
+  /// Regla MundiCam:
+  /// - Si viene de WooCommerce REST v3 con precio real, el cliente puede comprar.
+  /// - Si el precio es 0 o vacío, NO se debe permitir compra a 0 €.
+  /// - El desglose General/Murcia se controla por rol en UI, no aquí.
   bool get isUnderConsultation {
-    if (!isPurchasable) return true;
-
     final commercialText = _normalizeCommercialText([
       priceHtml,
-      name,
       ...categoryNames,
       ...categorySlugs,
     ].join(' '));
 
     return commercialText.contains('bajoconsulta') ||
         commercialText.contains('consultarprecio') ||
-        commercialText.contains('solicitarprecio') ||
-        commercialText.contains('nopurchasable') ||
-        commercialText.contains('nocomprable');
+        commercialText.contains('solicitarprecio');
   }
 
-  bool get canAddToCart => !isUnderConsultation && hasStock;
+  bool get canAddToCart => hasValidPrice && !isUnderConsultation && hasStock;
 
-  bool get canRequestQuote => !isUnderConsultation && hasStock;
+  bool get canRequestQuote => hasValidPrice && !isUnderConsultation && hasStock;
 
   String get commercialStatusLabel {
-    if (isUnderConsultation) return 'Bajo consulta';
+    if (isUnderConsultation || !hasValidPrice) return 'Bajo consulta';
     if (hasStock) return 'En stock';
     return 'Sin stock';
   }
@@ -214,11 +238,7 @@ class Product {
       return stockQuantity;
     }
 
-    if (isInstock) {
-      return 999;
-    }
-
-    return 0;
+    return 999;
   }
 
   // =========================
@@ -669,7 +689,7 @@ class StockLocation {
       id: id ?? this.id,
       name: name ?? this.name,
       quantity: newQuantity,
-      isInstock: isInstock ?? this.isInstock || newQuantity > 0,
+      isInstock: isInstock ?? (this.isInstock || newQuantity > 0),
     );
   }
 
