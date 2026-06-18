@@ -244,7 +244,8 @@ class Product {
 
   bool get canAddToCart => hasValidPrice && !isUnderConsultation && hasStock;
 
-  bool get canRequestQuote => hasValidPrice && !isUnderConsultation && hasStock;
+  // Se puede presupuestar siempre que haya stock, incluso si el precio es 0 o Bajo consulta.
+  bool get canRequestQuote => hasStock;
 
   String get commercialStatusLabel {
     if (isUnderConsultation || !hasValidPrice) return 'Bajo consulta';

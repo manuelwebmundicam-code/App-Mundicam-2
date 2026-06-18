@@ -202,11 +202,23 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       // La primera vez WooCommerce tiene que cargar términos de varios atributos
       // y puede tardar más que en un refresh posterior. Si cortamos a los pocos
       // segundos, aparece el mensaje de error aunque la API termine respondiendo.
-      final groups = await _apiService.getCatalogFiltersForCategory(
+      var groups = await _apiService.getCatalogFiltersForCategory(
         categoryId: widget.parentCategoryId,
         search: effectiveSearch,
         forceRefresh: forceRefresh,
       );
+
+      if (groups.isEmpty && widget.productosEnPantalla.isNotEmpty) {
+        groups = _apiService.buildLocalCatalogFiltersFromProducts(
+          widget.productosEnPantalla,
+        );
+
+        if (kDebugMode) {
+          debugPrint(
+            '📊 Filtros generados desde productos en pantalla: ${groups.length} grupos',
+          );
+        }
+      }
 
       final subcategories = await _loadSubcategoriesFast();
 
@@ -234,12 +246,30 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       }
     } catch (e) {
       if (!mounted || requestToken != _loadToken) return;
+
+      final fallbackGroups = widget.productosEnPantalla.isNotEmpty
+          ? _apiService.buildLocalCatalogFiltersFromProducts(
+        widget.productosEnPantalla,
+      )
+          : <CatalogFilterGroup>[];
+
+      final subcategories = await _loadSubcategoriesFast();
+
+      if (!mounted || requestToken != _loadToken) return;
       setState(() {
+        _availableFilterGroups = fallbackGroups;
+        _availableSubcategories = subcategories;
         _loading = false;
-        _error = 'No se pudieron cargar los filtros.';
+        _error = fallbackGroups.isEmpty
+            ? 'No se pudieron cargar los filtros.'
+            : null;
       });
+
       if (kDebugMode) {
-        debugPrint('❌ Error loading web filters: $e');
+        debugPrint(
+          '⚠️ Filtros endpoint no disponibles. '
+              'Fallback local=${fallbackGroups.length} grupos. Error: $e',
+        );
       }
     }
   }

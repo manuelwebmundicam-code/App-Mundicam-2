@@ -17,6 +17,9 @@ import 'package:mundicam/features/catalog/presentation/providers/category_provid
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
 import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.dart';
+import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 
@@ -188,6 +191,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       }
 
       _prewarmCategorySearchCache();
+      _prewarmCategoryFiltersCache();
     });
   }
 
@@ -304,6 +308,25 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         } catch (_) {
           // Precarga silenciosa: nunca debe afectar al usuario.
         }
+      }
+    });
+  }
+
+  void _prewarmCategoryFiltersCache() {
+    if (widget.categoryId <= 0) return;
+
+    Future<void>.delayed(const Duration(milliseconds: 550), () async {
+      if (!mounted) return;
+
+      try {
+        await ApiService()
+            .getCatalogFiltersForCategory(
+          categoryId: widget.categoryId,
+          forceRefresh: false,
+        )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // La precarga de filtros nunca debe bloquear ni mostrar error.
       }
     });
   }
@@ -2997,10 +3020,8 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     size: 17,
                   ),
                   label: Text(
-                    _bajoConsulta
-                        ? 'NO PRESUPUESTAR'
-                        : !_tieneStock
-                        ? 'NO PRESUPUESTAR'
+                    !_tieneStock
+                        ? 'SIN STOCK'
                         : _isAddingToQuote
                         ? 'AÑADIENDO...'
                         : 'AÑADIR AL PRESUPUESTO',
@@ -3161,45 +3182,93 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
-    if (product.id == 0 || !product.canRequestQuote) return;
+    if (product.id == 0) return;
 
-    final qty = _cantidadSegura;
-    if (qty <= 0) return;
-
-    final email = FirebaseAuth.instance.currentUser?.email?.trim();
-    if (email == null || email.isEmpty) {
+    if (!product.hasStock) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se ha encontrado el email del usuario.'),
-          backgroundColor: Colors.red,
+        SnackBar(
+          content: Text(
+            'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
+          ),
+          backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
         ),
       );
       return;
     }
 
+    final precio = _precioDouble(product);
+    final qty = _cantidadSegura;
+
+    if (qty <= 0) return;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => QuoteSelectionDialog(
+        productName: product.name,
+        productId: product.id,
+        price: precio,
+        quantity: qty,
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
     setState(() => _isAddingToQuote = true);
 
     try {
-      final ok = await ApiService().crearPresupuesto(
-        email: email,
-        productId: product.id,
-        productName: product.name,
-        price: _precioDouble(product),
-        quantity: qty,
-      );
+      final action = result['action']?.toString() ?? '';
+      final notifier = ref.read(localQuotesProvider.notifier);
+      String mensaje = '';
 
-      if (!mounted) return;
+      if (action == 'crear_y_anadir') {
+        final nombre = result['nombre']?.toString().trim() ?? '';
+        final orderId = DateTime.now().millisecondsSinceEpoch.toString();
+        final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
 
-      if (ok) {
+        await notifier.crearPresupuesto(orderId: orderId, nombre: nombreFinal);
+        await notifier.anadirItem(
+          orderId: orderId,
+          item: LocalQuoteItem(
+            productId: product.id,
+            productName: product.name,
+            quantity: qty,
+            price: precio,
+          ),
+        );
+
+        mensaje = '$qty x ${product.name} añadido a "$nombreFinal"';
+      } else if (action == 'anadir_existente') {
+        final orderId = result['orderId']?.toString() ?? '';
+        final nombre = result['nombre']?.toString() ?? 'Presupuesto';
+
+        if (orderId.isEmpty) {
+          throw Exception('No se pudo identificar el presupuesto seleccionado.');
+        }
+
+        await notifier.anadirItem(
+          orderId: orderId,
+          item: LocalQuoteItem(
+            productId: product.id,
+            productName: product.name,
+            quantity: qty,
+            price: precio,
+          ),
+        );
+
+        mensaje = '$qty x ${product.name} añadido a "$nombre"';
+      }
+
+      if (mounted && mensaje.isNotEmpty) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$qty x ${product.name} añadido al presupuesto'),
+            content: Text(mensaje),
             backgroundColor: Colors.green.shade700,
-            duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
             action: SnackBarAction(
               label: 'VER',
               textColor: Colors.white,
@@ -3207,36 +3276,21 @@ class _ProductTileState extends ConsumerState<ProductTile> {
             ),
           ),
         );
-      } else {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No se pudo añadir el producto al presupuesto.'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
       }
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error en _addToQuote: $e');
-      }
-
+      debugPrint('❌ Error en _addToQuote: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text('Error al añadir al presupuesto: $e'),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isAddingToQuote = false);
-      }
+      if (mounted) setState(() => _isAddingToQuote = false);
     }
   }
 
