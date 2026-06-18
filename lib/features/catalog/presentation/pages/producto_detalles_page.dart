@@ -245,16 +245,21 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         .replaceAll(RegExp(r'<[^>]*>'), '')
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&ndash;', '-')
+        .replaceAll('&mdash;', '-')
+        .replaceAll(RegExp(r'&[^;]+;'), ' ')
         .replaceAll(RegExp(r'\n{3,}'), '\n\n')
         .trim();
   }
 
   double _precioDouble(Product p) {
-    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
+    return p.priceValue;
   }
 
   double _precioRegularDouble(Product p) {
-    return double.tryParse(p.regularPrice.replaceAll(',', '.').trim()) ?? 0;
+    return p.regularPriceValue;
   }
 
   String _formatearPrecio(double v) {

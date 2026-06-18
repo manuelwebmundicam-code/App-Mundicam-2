@@ -88,6 +88,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
                 return _CategoryTile(
                   cat: cat,
                   icon: _getIconForCategory(cat.name),
+                  assetPath: _getAssetForCategory(cat.name),
                   subtitle: _getSubtitleForCategory(cat.name),
                   onGoCart: widget.onGoCart,
                   onGoQuotes: widget.onGoQuotes,
@@ -356,6 +357,67 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
     );
   }
 
+  String? _getAssetForCategory(String name) {
+    final n = name
+        .toLowerCase()
+        .trim()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n');
+
+    // Solo assets locales. No usamos imágenes de WordPress/API.
+    if (n.contains('video') || n.contains('cctv') || n.contains('camara')) {
+      return 'assets/categorias/CCTV.png';
+    }
+
+    if (n.contains('intrusion') ||
+        n.contains('alarma') ||
+        n.contains('alarmas')) {
+      return 'assets/categorias/INTRUSION.png';
+    }
+
+    if (n.contains('acceso') ||
+        n.contains('accesos') ||
+        n.contains('control acceso')) {
+      return 'assets/categorias/ACCESOS.png';
+    }
+
+    if (n.contains('incendio') ||
+        n.contains('fuego') ||
+        n.contains('deteccion')) {
+      return 'assets/categorias/CONTRA INCENDIOS.png';
+    }
+
+    if (n.contains('networking') ||
+        n.contains('net') ||
+        n.contains('red') ||
+        n.contains('wifi') ||
+        n.contains('switch') ||
+        n.contains('router')) {
+      return 'assets/categorias/NETWORKING.png';
+    }
+
+    return null;
+  }
+
   IconData _getIconForCategory(String name) {
     final n = name
         .toLowerCase()
@@ -459,6 +521,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 class _CategoryTile extends StatelessWidget {
   final dynamic cat;
   final IconData icon;
+  final String? assetPath;
   final String subtitle;
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
@@ -466,6 +529,7 @@ class _CategoryTile extends StatelessWidget {
   const _CategoryTile({
     required this.cat,
     required this.icon,
+    this.assetPath,
     required this.subtitle,
     this.onGoCart,
     this.onGoQuotes,
@@ -519,10 +583,23 @@ class _CategoryTile extends StatelessWidget {
                     color: Color(0xFFF8EAEA),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(
+                  child: assetPath == null
+                      ? Icon(
                     icon,
                     size: 25,
                     color: AppColors.primary,
+                  )
+                      : Padding(
+                    padding: const EdgeInsets.all(7),
+                    child: Image.asset(
+                      assetPath!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Icon(
+                        icon,
+                        size: 25,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 10),

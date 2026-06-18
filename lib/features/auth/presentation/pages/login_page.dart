@@ -34,7 +34,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isAutoLogin = false;
 
   static const String _loginEndpoint =
-      'https://mundicam.com/wp-json/mundicam/v1/firebase-login';
+      'https://www.mundicam.com/wp-json/mundicam-app/v1/login';
 
   static const String _registroUrl =
       'https://www.mundicam.com/altaweb-mundicam-security-distribution/';
@@ -84,7 +84,7 @@ class _LoginPageState extends State<LoginPage> {
     if (hasWpSession) {
       if (kDebugMode) {
         debugPrint(
-          '✅ Firebase y sesión WordPress/WooCommerce detectadas. Entrando a la app.',
+          '✅ Firebase y sesión MundiCam App API detectadas. Entrando a la app.',
         );
       }
 
@@ -95,11 +95,11 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // Si Firebase está logueado pero no hay sesión WooCommerce, se fuerza login limpio.
+    // Si Firebase está logueado pero no hay sesión MundiCam App API, se fuerza login limpio.
     // Esto evita entrar como invitado y cargar productos sin precios reales.
     if (kDebugMode) {
       debugPrint(
-        '⚠️ Firebase tenía sesión activa, pero no había sesión WordPress/WooCommerce. '
+        '⚠️ Firebase tenía sesión activa, pero no había sesión MundiCam App API. '
             'Se fuerza login limpio.',
       );
     }
@@ -284,13 +284,22 @@ class _LoginPageState extends State<LoginPage> {
       userMap['nonce'],
     ]);
 
+    // En la API puente nueva, app_token es el token Bearer principal.
+    // Lo guardamos reutilizando el campo cartToken para mantener compatibilidad
+    // con ApiService y con las preferencias existentes.
     final cartToken = _firstNonEmptyString([
+      body['app_token'],
+      body['token'],
       body['cart_token'],
       body['cartToken'],
       body['wc_cart_token'],
       body['store_api_cart_token'],
+      sessionMap['app_token'],
+      sessionMap['token'],
       sessionMap['cart_token'],
       sessionMap['cartToken'],
+      wooMap['app_token'],
+      wooMap['token'],
       wooMap['cart_token'],
       wooMap['cartToken'],
     ]);
@@ -454,7 +463,7 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // 5. Verificar que después del login existe sesión WordPress/WooCommerce.
+      // 5. Verificar que después del login existe sesión MundiCam App API.
       final hasWpSession = await _hasStoredWordPressSession();
 
       if (!hasWpSession) {
@@ -462,8 +471,8 @@ class _LoginPageState extends State<LoginPage> {
         await ApiService().clearWordPressSession();
 
         throw Exception(
-          'El login se ha validado, pero WooCommerce no ha devuelto sesión. '
-              'Revisa cookies Set-Cookie y store_api_nonce del endpoint.',
+          'El login se ha validado, pero MundiCam App API no ha devuelto token de sesión. '
+              'Revisa que el endpoint devuelva app_token/cart_token.',
         );
       }
 

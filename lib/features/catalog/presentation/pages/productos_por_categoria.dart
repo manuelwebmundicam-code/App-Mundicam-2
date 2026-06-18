@@ -2704,7 +2704,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   bool _isAddingToQuote = false;
 
   double _precioDouble(Product p) {
-    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
+    return p.priceValue;
   }
 
   String _formatearPrecioCompleto(double precio) {

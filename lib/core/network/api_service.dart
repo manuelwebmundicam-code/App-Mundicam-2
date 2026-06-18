@@ -189,11 +189,14 @@ class ApiService {
   String _wpSessionCookie = '';
   String _wpNonce = '';
   String _wpCartToken = '';
+  String _appToken = '';
 
   static const String _wpSessionCookiePrefsKey =
       'mundicam_wp_session_cookie';
   static const String _wpNoncePrefsKey = 'mundicam_wp_nonce';
   static const String _wpCartTokenPrefsKey = 'mundicam_wp_cart_token';
+  static const String _appTokenPrefsKey = 'mundicam_app_token';
+  static const String _appBasePath = '/wp-json/mundicam-app/v1';
 
   List<String>? _cachedBrandNames;
   List<Map<String, dynamic>>? _cachedBrandTerms;
@@ -318,10 +321,11 @@ class ApiService {
       _wpSessionCookie = prefs.getString(_wpSessionCookiePrefsKey) ?? '';
       _wpNonce = prefs.getString(_wpNoncePrefsKey) ?? '';
       _wpCartToken = prefs.getString(_wpCartTokenPrefsKey) ?? '';
+      _appToken = prefs.getString(_appTokenPrefsKey) ?? _wpCartToken;
       _sessionLoaded = true;
 
       if (kDebugMode && _hasWordPressSession) {
-        debugPrint('✅ Sesión WordPress/WooCommerce cargada para Store API autenticada');
+        debugPrint('✅ Sesión MundiCam App API cargada');
       }
     } catch (e) {
       _sessionLoaded = true;
@@ -332,10 +336,13 @@ class ApiService {
   }
 
   bool get _hasWordPressSession {
-    return _wpSessionCookie.trim().isNotEmpty ||
+    return _appToken.trim().isNotEmpty ||
+        _wpSessionCookie.trim().isNotEmpty ||
         _wpNonce.trim().isNotEmpty ||
         _wpCartToken.trim().isNotEmpty;
   }
+
+  bool get _hasAppToken => _appToken.trim().isNotEmpty;
 
   /// Permite a LoginPage/AuthWrapper comprobar si Firebase tiene además
   /// una sesión WordPress/WooCommerce válida guardada.
@@ -355,7 +362,7 @@ class ApiService {
 
     if (cleanCookie.isEmpty && cleanNonce.isEmpty && cleanCartToken.isEmpty) {
       if (kDebugMode) {
-        debugPrint('⚠️ Login WordPress sin cookie/nonce/cart-token. La Store API seguirá como invitado.');
+        debugPrint('⚠️ Login sin app_token/cookie/nonce/cart-token. La API privada no podrá autenticarse.');
       }
       return;
     }
@@ -374,17 +381,19 @@ class ApiService {
 
     if (cleanCartToken.isNotEmpty) {
       _wpCartToken = cleanCartToken;
+      _appToken = cleanCartToken;
       await prefs.setString(_wpCartTokenPrefsKey, cleanCartToken);
+      await prefs.setString(_appTokenPrefsKey, cleanCartToken);
     }
 
     _sessionLoaded = true;
 
     if (kDebugMode) {
       debugPrint(
-        '✅ Sesión WordPress guardada: '
+        '✅ Sesión MundiCam App API guardada: '
             'cookie=${_wpSessionCookie.isNotEmpty} '
             'nonce=${_wpNonce.isNotEmpty} '
-            'cartToken=${_wpCartToken.isNotEmpty}',
+            'appToken=${_appToken.isNotEmpty}',
       );
     }
   }
@@ -394,14 +403,16 @@ class ApiService {
     await prefs.remove(_wpSessionCookiePrefsKey);
     await prefs.remove(_wpNoncePrefsKey);
     await prefs.remove(_wpCartTokenPrefsKey);
+    await prefs.remove(_appTokenPrefsKey);
 
     _wpSessionCookie = '';
     _wpNonce = '';
     _wpCartToken = '';
+    _appToken = '';
     _sessionLoaded = true;
 
     if (kDebugMode) {
-      debugPrint('✅ Sesión WordPress/WooCommerce limpiada');
+      debugPrint('✅ Sesión MundiCam App API limpiada');
     }
   }
 
@@ -465,6 +476,111 @@ class ApiService {
     }
 
     return Options(headers: headers);
+  }
+
+
+  Options get _appOptions {
+    final headers = <String, dynamic>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    };
+
+    final token = _appToken.trim().isNotEmpty
+        ? _appToken.trim()
+        : _wpCartToken.trim();
+
+    if (token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+      headers['X-MundiCam-App-Token'] = token;
+    }
+
+    return Options(headers: headers);
+  }
+
+  Future<Response<dynamic>> _appGet(
+      String path, {
+        Map<String, dynamic>? queryParameters,
+      }) async {
+    await _ensureInitialized();
+
+    if (!_hasAppToken && _wpCartToken.trim().isEmpty) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '$_appBasePath$path'),
+        type: DioExceptionType.badResponse,
+        error: 'Falta token de MundiCam App API.',
+        message: 'Sesión de app no válida. Vuelve a iniciar sesión.',
+      );
+    }
+
+    return _dio.get(
+      '$_appBasePath$path',
+      queryParameters: queryParameters,
+      options: _appOptions,
+    );
+  }
+
+  Future<Response<dynamic>> _appPost(
+      String path, {
+        Map<String, dynamic>? data,
+      }) async {
+    await _ensureInitialized();
+
+    if (!_hasAppToken && _wpCartToken.trim().isEmpty) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '$_appBasePath$path'),
+        type: DioExceptionType.badResponse,
+        error: 'Falta token de MundiCam App API.',
+        message: 'Sesión de app no válida. Vuelve a iniciar sesión.',
+      );
+    }
+
+    return _dio.post(
+      '$_appBasePath$path',
+      data: data,
+      options: _appOptions,
+    );
+  }
+
+  List<dynamic> _extractAppList(dynamic data, List<String> keys) {
+    if (data is List) return data;
+    if (data is Map) {
+      for (final key in keys) {
+        final value = data[key];
+        if (value is List) return value;
+      }
+    }
+    return const <dynamic>[];
+  }
+
+  Map<String, dynamic>? _extractAppMap(dynamic data, List<String> keys) {
+    if (data is Map) {
+      for (final key in keys) {
+        final value = data[key];
+        if (value is Map) return Map<String, dynamic>.from(value);
+      }
+      return Map<String, dynamic>.from(data);
+    }
+    return null;
+  }
+
+  int _parseAppTotalPages(dynamic data, {int fallback = 1}) {
+    if (data is Map) {
+      return _parseIntValue(
+        data['total_pages'] ?? data['totalPages'],
+        fallback: fallback,
+      );
+    }
+    return fallback;
+  }
+
+  int _parseAppTotalItems(dynamic data, {int fallback = 0}) {
+    if (data is Map) {
+      return _parseIntValue(
+        data['total'] ?? data['total_items'] ?? data['totalItems'],
+        fallback: fallback,
+      );
+    }
+    return fallback;
   }
 
   // ================================================================
@@ -2616,18 +2732,32 @@ class ApiService {
   // ================================================================
 
   Future<Map<String, dynamic>?> getCustomerByEmail(String email) async {
-    await _ensureInitialized();
     try {
-      final response = await _dio.get(
+      final response = await _appGet('/me');
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+      final user = data['user'] is Map
+          ? Map<String, dynamic>.from(data['user'] as Map)
+          : <String, dynamic>{};
+
+      final requestedEmail = email.trim().toLowerCase();
+      final currentEmail = user['email']?.toString().trim().toLowerCase() ?? '';
+
+      if (requestedEmail.isEmpty || requestedEmail == currentEmail) {
+        return user;
+      }
+
+      final responseWoo = await _dio.get(
         '/wp-json/wc/v3/customers',
         queryParameters: {'email': email, 'role': 'all'},
         options: _wooOptions,
       );
 
-      if (response.statusCode == 200 &&
-          response.data is List &&
-          (response.data as List).isNotEmpty) {
-        final firstCustomer = (response.data as List).first;
+      if (responseWoo.statusCode == 200 &&
+          responseWoo.data is List &&
+          (responseWoo.data as List).isNotEmpty) {
+        final firstCustomer = (responseWoo.data as List).first;
 
         if (firstCustomer is Map) {
           return Map<String, dynamic>.from(firstCustomer);
@@ -2636,52 +2766,50 @@ class ApiService {
 
       return null;
     } catch (e) {
-      debugPrint('Error en getCustomerByEmail: $e');
+      debugPrint('Error en getCustomerByEmail App API: $e');
       return null;
     }
   }
 
-  Future<Map<String, dynamic>?> getCustomerById(int id) async {
-    await _ensureInitialized();
 
+  Future<Map<String, dynamic>?> getCustomerById(int id) async {
     if (id <= 0) return null;
 
     try {
-      final response = await _dio.get(
+      final response = await _appGet('/me');
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+      final user = data['user'] is Map
+          ? Map<String, dynamic>.from(data['user'] as Map)
+          : <String, dynamic>{};
+
+      final currentId = _parseIntValue(
+        user['id'] ?? user['wordpress_id'] ?? user['woocommerce_id'],
+      );
+
+      if (currentId == id) {
+        return user;
+      }
+
+      final responseWoo = await _dio.get(
         '/wp-json/wc/v3/customers/$id',
         options: _wooOptions,
       );
 
-      if (response.statusCode == 200 && response.data is Map) {
-        return Map<String, dynamic>.from(response.data as Map);
+      if (responseWoo.statusCode == 200 && responseWoo.data is Map) {
+        return Map<String, dynamic>.from(responseWoo.data as Map);
       }
 
-      return null;
-    } on DioException catch (e) {
-      // Esta llamada se usa para decidir si se muestra el stock interno
-      // General/Murcia. Si WooCommerce no permite consultar el cliente,
-      // NO se debe bloquear la app: se oculta el stock exacto y listo.
-      if (e.response?.statusCode == 403) {
-        if (kDebugMode) {
-          debugPrint(
-            '🔒 Cliente WP $id sin permiso para leer datos de cliente. '
-                'Se oculta stock interno y la app continúa.',
-          );
-        }
-        return null;
-      }
-
-      if (kDebugMode) {
-        debugPrint('Error en getCustomerById: $e');
-      }
       return null;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('Error en getCustomerById: $e');
+        debugPrint('Error en getCustomerById App API: $e');
       }
       return null;
     }
   }
+
 
   // ================================================================
   // PERMISOS USUARIO / STOCK INTERNO
@@ -2810,45 +2938,37 @@ class ApiService {
   }
 
   Future<bool> canCustomerViewStockDetails(int wordpressId) async {
-    if (wordpressId <= 0) return false;
-
     try {
-      final customer = await getCustomerById(wordpressId).timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => null,
-      );
+      final response = await _appGet('/me');
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
 
-      if (customer == null || customer.isEmpty) {
-        if (kDebugMode) {
-          debugPrint(
-            '👤 Permiso stock usuario WP $wordpressId | '
-                'sin datos de rol | canView=false',
-          );
-        }
-        return false;
-      }
+      final permissions = data['permissions'] is Map
+          ? Map<String, dynamic>.from(data['permissions'] as Map)
+          : <String, dynamic>{};
 
-      final roleValue = _extractCustomerRoleValue(customer);
-      final canView = _roleCanViewStockDetails(roleValue);
+      final canView = permissions['can_view_stock_details'] == true ||
+          permissions['can_view_stock'] == true ||
+          data['can_view_stock'] == true;
 
       if (kDebugMode) {
+        final user = data['user'] is Map ? data['user'] as Map : const {};
         debugPrint(
-          '👤 Permiso stock usuario WP $wordpressId | '
-              'role=${_roleTextFromDynamic(roleValue) ?? '-'} | '
-              'canView=$canView',
+          '👤 Permiso stock App API usuario WP ${user['id'] ?? wordpressId} | '
+              'role=${user['role'] ?? user['roles'] ?? '-'} | canView=$canView',
         );
       }
 
       return canView;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint(
-          'Error comprobando permiso de stock para WP $wordpressId: $e',
-        );
+        debugPrint('Error comprobando permiso de stock App API: $e');
       }
       return false;
     }
   }
+
 
   Future<bool> canUserViewStockDetails(int wordpressId) {
     return canCustomerViewStockDetails(wordpressId);
@@ -2873,287 +2993,85 @@ class ApiService {
     Map<String, int>? attributeTermIds,
     Map<String, String>? attributeLabels,
   }) async {
-    await _ensureInitialized();
-
     try {
-      final Map<String, dynamic> baseQueryParams = {
-        'per_page': perPage,
-        'page': page,
-        'status': 'publish',
+      final query = <String, dynamic>{
+        'page': page <= 0 ? 1 : page,
+        'per_page': perPage <= 0 ? 30 : perPage,
       };
 
       if (categoryId != null && categoryId > 0) {
-        baseQueryParams['category'] = categoryId.toString();
+        query['category'] = categoryId;
       }
 
       final cleanSearch = search?.trim();
-      final cleanBrandName = brandName?.trim();
-      final effectiveSearch = _effectiveCatalogSearchTerm(cleanSearch);
-
-      if (effectiveSearch != null && effectiveSearch.isNotEmpty) {
-        baseQueryParams['search'] = effectiveSearch;
+      if (cleanSearch != null && cleanSearch.isNotEmpty) {
+        query['search'] = cleanSearch;
       }
 
-      final selectedAttributeTermIds = Map<String, int>.from(
+      if (brandId != null && brandId > 0) {
+        query['brand_id'] = brandId;
+      } else {
+        final cleanBrand = brandName?.trim();
+        if (cleanBrand != null && cleanBrand.isNotEmpty) {
+          query['brand'] = cleanBrand;
+        }
+      }
+
+      if (orderBy != null && orderBy.trim().isNotEmpty) {
+        query['orderby'] = orderBy.trim();
+      }
+
+      final cleanAttributeTerms = Map<String, int>.from(
         attributeTermIds ?? const <String, int>{},
-      )..removeWhere((taxonomy, termId) {
-        return taxonomy.trim().isEmpty || termId <= 0;
-      });
+      )..removeWhere((key, value) => key.trim().isEmpty || value <= 0);
 
-      int? effectiveBrandId = brandId;
-
-      if ((effectiveBrandId == null || effectiveBrandId <= 0) &&
-          cleanBrandName != null &&
-          cleanBrandName.isNotEmpty) {
-        effectiveBrandId = await getMarcaIdPorNombre(cleanBrandName).timeout(
-          const Duration(seconds: 3),
-          onTimeout: () => null,
-        );
+      if (cleanAttributeTerms.isNotEmpty) {
+        query['attribute_terms'] = jsonEncode(cleanAttributeTerms);
       }
 
-      // Compatibilidad nueva: Fabricante en la web MundiCam = pa_marcas.
-      if ((effectiveBrandId == null || effectiveBrandId <= 0) &&
-          selectedAttributeTermIds.containsKey('pa_marcas')) {
-        effectiveBrandId = selectedAttributeTermIds['pa_marcas'];
-      }
-
-      // Compatibilidad anterior: marca = pa_marca.
-      if ((effectiveBrandId == null || effectiveBrandId <= 0) &&
-          selectedAttributeTermIds.containsKey('pa_marca')) {
-        effectiveBrandId = selectedAttributeTermIds['pa_marca'];
-      }
-
-      final extraAttributeTermIds = Map<String, int>.from(
-        selectedAttributeTermIds,
-      )
-        ..remove('pa_marcas')
-        ..remove('pa_marca');
-
-      final effectiveBrandName = (cleanBrandName != null &&
-          cleanBrandName.isNotEmpty)
-          ? cleanBrandName
-          : await getMarcaNombrePorId(effectiveBrandId).timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => null,
+      final response = await _appGet('/products', queryParameters: query);
+      final rawProducts = _extractAppList(
+        response.data,
+        const ['products', 'data', 'items'],
       );
 
-      // Si hay varios filtros de atributos, WooCommerce REST v3 suele cruzarlos mal
-      // o solo aplica uno. Para el comportamiento tipo web cargamos el contexto y
-      // filtramos localmente por etiquetas reales.
-      if (extraAttributeTermIds.isNotEmpty) {
-        if (extraAttributeTermIds.length == 1 &&
-            (effectiveBrandId == null || effectiveBrandId <= 0)) {
-          final singleAttribute = extraAttributeTermIds.entries.first;
-          final queryParams = Map<String, dynamic>.from(baseQueryParams)
-            ..['attribute'] = singleAttribute.key
-            ..['attribute_term'] = singleAttribute.value.toString();
+      final products = rawProducts
+          .whereType<Map>()
+          .map((item) => Product.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
 
-          _applyProductOrderParams(queryParams, orderBy);
+      _sortProductsByRequestedOrder(products, orderBy);
 
-          final result = await _requestCatalogProducts(
-            queryParams,
-            page: page,
-            perPage: perPage,
-          );
-
-          return _sortCatalogResultPage(result, orderBy);
-        }
-
-        return _getAttributeFilteredCatalogResult(
-          categoryId: categoryId,
-          brandName: effectiveBrandName,
-          search: cleanSearch,
-          orderBy: orderBy,
-          page: page,
-          perPage: perPage,
-          attributeTermIds: extraAttributeTermIds,
-          attributeLabels: attributeLabels,
-        );
-      }
-
-      if (effectiveBrandId == null || effectiveBrandId <= 0) {
-        if (cleanBrandName != null && cleanBrandName.isNotEmpty) {
-          return _getLocalBrandFilteredCatalogResult(
-            categoryId: categoryId,
-            brandName: cleanBrandName,
-            search: cleanSearch,
-            orderBy: orderBy,
-            page: page,
-            perPage: perPage,
-          );
-        }
-
-        if (_isAccessorySearch(cleanSearch)) {
-          return _getAccessorySearchCatalogResult(
-            categoryId: categoryId,
-            search: cleanSearch!,
-            page: page,
-            perPage: perPage,
-            orderBy: orderBy,
-          );
-        }
-
-        final queryParams = Map<String, dynamic>.from(baseQueryParams);
-        _applyProductOrderParams(queryParams, orderBy);
-
-        final result = await _requestCatalogProducts(
-          queryParams,
-          page: page,
-          perPage: perPage,
-        );
-
-        if (_shouldUseExpandedTechnicalSearch(cleanSearch) &&
-            result.totalItems <= 0 &&
-            cleanSearch != null &&
-            cleanSearch.isNotEmpty) {
-          return _getExpandedTechnicalSearchCatalogResult(
-            categoryId: categoryId,
-            brandId: effectiveBrandId,
-            search: cleanSearch,
-            page: page,
-            perPage: perPage,
-            orderBy: orderBy,
-          );
-        }
-
-        if (kDebugMode) {
-          debugPrint(
-            '📦 Catálogo filtrado: category=$categoryId '
-                'search="$cleanSearch" page=$page/${result.totalPages} '
-                'total=${result.totalItems} items=${result.products.length}',
-          );
-        }
-
-        return _sortCatalogResultPage(result, orderBy);
-      }
-
-      if (effectiveBrandName != null &&
-          effectiveBrandName.trim().isNotEmpty &&
-          _isExplicitCatalogOrder(orderBy)) {
-        // Ordenaciones por precio/fecha deben ser coherentes en todas las páginas.
-        // El filtro local evita páginas vacías por validación posterior.
-        return _getLocalBrandFilteredCatalogResult(
-          categoryId: categoryId,
-          brandName: effectiveBrandName,
-          search: cleanSearch,
-          orderBy: orderBy,
-          page: page,
-          perPage: perPage,
-        );
-      }
-
-      // 1) Ruta principal MundiCam actual: fabricante como atributo pa_marcas.
-      final paMarcasQueryParams = Map<String, dynamic>.from(baseQueryParams)
-        ..['attribute'] = 'pa_marcas'
-        ..['attribute_term'] = effectiveBrandId.toString();
-      _applyProductOrderParams(paMarcasQueryParams, orderBy);
-
-      final paMarcasResult = await _requestCatalogProducts(
-        paMarcasQueryParams,
-        page: page,
-        perPage: perPage,
+      final totalItems = _parseAppTotalItems(
+        response.data,
+        fallback: products.length,
+      );
+      final totalPages = _parseAppTotalPages(
+        response.data,
+        fallback: products.length < perPage ? page : page + 1,
       );
 
-      if (_catalogResultMatchesBrand(paMarcasResult, effectiveBrandName)) {
-        final verified = _filterCatalogResultByBrand(
-          paMarcasResult,
-          effectiveBrandName,
-          orderBy: orderBy,
+      if (kDebugMode) {
+        debugPrint(
+          '✅ Productos App API: category=$categoryId brandId=$brandId '
+              'brand="$brandName" search="$search" page=$page '
+              'items=${products.length} total=$totalItems',
         );
-
-        if (verified.products.isNotEmpty || verified.totalItems > 0) {
-          if (kDebugMode) {
-            debugPrint(
-              '📦 Catálogo por pa_marcas: category=$categoryId '
-                  'brandId=$effectiveBrandId brand="$effectiveBrandName" '
-                  'search="$cleanSearch" items=${verified.products.length}',
-            );
-          }
-          return verified;
-        }
       }
 
-      // 2) Fallback de WooCommerce Brands / Store API: brand=ID.
-      final brandQueryParams = Map<String, dynamic>.from(baseQueryParams)
-        ..['brand'] = effectiveBrandId.toString()
-        ..['brand_operator'] = 'in';
-      _applyProductOrderParams(brandQueryParams, orderBy);
-
-      final brandResult = await _requestCatalogProducts(
-        brandQueryParams,
-        page: page,
-        perPage: perPage,
+      return CatalogProductsResult(
+        products: products,
+        currentPage: page,
+        totalPages: totalPages <= 0 ? 1 : totalPages,
+        totalItems: totalItems,
       );
-
-      if (_catalogResultMatchesBrand(brandResult, effectiveBrandName)) {
-        final verified = _filterCatalogResultByBrand(
-          brandResult,
-          effectiveBrandName,
-          orderBy: orderBy,
-        );
-
-        if (verified.products.isNotEmpty || verified.totalItems > 0) {
-          if (kDebugMode) {
-            debugPrint(
-              '📦 Catálogo por brand=ID: category=$categoryId '
-                  'brandId=$effectiveBrandId brand="$effectiveBrandName" '
-                  'search="$cleanSearch" items=${verified.products.length}',
-            );
-          }
-          return verified;
-        }
-      }
-
-      // 3) Fallback de la versión anterior: marca como atributo pa_marca.
-      final paMarcaQueryParams = Map<String, dynamic>.from(baseQueryParams)
-        ..['attribute'] = 'pa_marca'
-        ..['attribute_term'] = effectiveBrandId.toString();
-      _applyProductOrderParams(paMarcaQueryParams, orderBy);
-
-      final paMarcaResult = await _requestCatalogProducts(
-        paMarcaQueryParams,
-        page: page,
-        perPage: perPage,
-      );
-
-      if (_catalogResultMatchesBrand(paMarcaResult, effectiveBrandName)) {
-        final verified = _filterCatalogResultByBrand(
-          paMarcaResult,
-          effectiveBrandName,
-          orderBy: orderBy,
-        );
-
-        if (verified.products.isNotEmpty || verified.totalItems > 0) {
-          if (kDebugMode) {
-            debugPrint(
-              '📦 Catálogo por pa_marca legacy: category=$categoryId '
-                  'brandId=$effectiveBrandId brand="$effectiveBrandName" '
-                  'search="$cleanSearch" items=${verified.products.length}',
-            );
-          }
-          return verified;
-        }
-      }
-
-      // 4) Último recurso: contexto + validación local por marca.
-      if (effectiveBrandName != null && effectiveBrandName.trim().isNotEmpty) {
-        return _getLocalBrandFilteredCatalogResult(
-          categoryId: categoryId,
-          brandName: effectiveBrandName,
-          search: cleanSearch,
-          orderBy: orderBy,
-          page: page,
-          perPage: perPage,
-        );
-      }
-
-      return _sortCatalogResultPage(paMarcasResult, orderBy);
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
     } catch (e) {
-      throw Exception('Error cargando productos: $e');
+      throw Exception('Error cargando productos desde MundiCam App API: $e');
     }
   }
+
 
   Future<List<Product>> getProductos({
     int? categoryId,
@@ -3235,71 +3153,38 @@ class ApiService {
   // PEDIDOS
   // ================================================================
   Future<List<OrderMundicam>> getOrders(String customerEmail) async {
-    await _ensureInitialized();
-
     try {
-      final email = customerEmail.trim().toLowerCase();
-
-      int? customerId;
-      final customer = await getCustomerByEmail(email);
-
-      if (customer != null) {
-        customerId = _parseIntValue(customer['id']);
-      }
-
-      final queryParams = <String, dynamic>{
-        'per_page': 50,
-        'orderby': 'date',
-        'order': 'desc',
-      };
-
-      if (customerId != null && customerId > 0) {
-        queryParams['customer'] = customerId;
-      } else {
-        queryParams['search'] = email;
-      }
-
-      final response = await _dio.get(
-        '/wp-json/wc/v3/orders',
-        queryParameters: queryParams,
-        options: _wooOptions,
+      final response = await _appGet(
+        '/orders',
+        queryParameters: {
+          'page': 1,
+          'per_page': 50,
+        },
       );
 
-      if (response.statusCode == 200 && response.data is List) {
-        final orders = (response.data as List)
-            .whereType<Map>()
-            .map(
-              (order) => OrderMundicam.fromJson(
-            Map<String, dynamic>.from(order),
-          ),
-        )
-            .toList();
+      final rawOrders = _extractAppList(
+        response.data,
+        const ['orders', 'data', 'items'],
+      );
 
-        debugPrint('📦 Pedidos cargados: ${orders.length}');
-
-        return orders;
-      }
-
-      return [];
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 403) {
-        if (kDebugMode) {
-          debugPrint('🔒 Pedidos remotos no disponibles para este cliente. Se continúa con lista vacía.');
-        }
-        return [];
-      }
+      final orders = rawOrders
+          .whereType<Map>()
+          .map((item) => OrderMundicam.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
 
       if (kDebugMode) {
-        debugPrint('Error obteniendo pedidos: $e');
+        debugPrint('📦 Pedidos App API cargados: ${orders.length}');
       }
-      return [];
+
+      return orders;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('Error obteniendo pedidos: $e');
+        debugPrint('Error obteniendo pedidos App API: $e');
       }
       return [];
     }
   }
+
 
 
   // ================================================================
@@ -3309,11 +3194,7 @@ class ApiService {
       Map<String, dynamic> orderData, {
         bool forceProcessingIfPending = true,
       }) async {
-    await _ensureInitialized();
-
     try {
-      debugPrint('📦 Creando pedido con resultado...');
-
       final data = Map<String, dynamic>.from(orderData);
       final sanitizedLineItems = _sanitizeNewOrderLineItems(data['line_items']);
 
@@ -3330,53 +3211,37 @@ class ApiService {
         data['status'] = 'processing';
       }
 
-      debugPrint('📦 Status enviado: ${data['status']}');
-      debugPrint('📦 Payment method: ${data['payment_method']}');
-      _debugLineItems('LINE ITEMS PEDIDO ENVIADOS', sanitizedLineItems);
+      _debugLineItems('LINE ITEMS PEDIDO APP API', sanitizedLineItems);
 
-      final response = await _dio.post(
-        '/wp-json/wc/v3/orders',
-        data: data,
-        options: _wooOptions,
-      );
+      final response = await _appPost('/order/create', data: data);
 
-      debugPrint('📦 Status HTTP: ${response.statusCode}');
+      final responseData = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
 
-      if (response.statusCode == 201 || response.statusCode == 200) {
-        if (response.data is! Map) {
-          debugPrint('❌ Respuesta inesperada al crear pedido: ${response.data}');
-
-          return OrderCreateResult.failure(
-            'WooCommerce devolvió una respuesta no válida.',
-          );
-        }
-
-        final responseData = Map<String, dynamic>.from(response.data as Map);
-
-        debugPrint('✅ Pedido #${responseData['id']} creado correctamente');
-        debugPrint('🔑 Order key: ${responseData['order_key']}');
-        debugPrint('📌 Estado WooCommerce: ${responseData['status']}');
-
-        final createdItems = responseData['line_items'];
-        if (createdItems is List) {
-          debugPrint('📦 WooCommerce devolvió ${createdItems.length} línea(s)');
-        }
-
-        return OrderCreateResult.success(responseData);
+      if (responseData['success'] == false) {
+        return OrderCreateResult.failure(
+          responseData['message']?.toString() ?? 'No se pudo crear el pedido.',
+        );
       }
 
-      debugPrint('❌ Error al crear pedido: ${response.statusCode}');
-      debugPrint('Respuesta: ${response.data}');
+      final orderDataResponse = responseData['order'] is Map
+          ? Map<String, dynamic>.from(responseData['order'] as Map)
+          : <String, dynamic>{};
 
-      return OrderCreateResult.failure(
-        'WooCommerce respondió con código ${response.statusCode}.',
-      );
+      if (orderDataResponse.isEmpty) {
+        orderDataResponse['id'] = responseData['order_id'];
+        orderDataResponse['order_key'] = responseData['order_key'];
+        orderDataResponse['number'] = responseData['order_number'] ?? responseData['order_id'];
+        orderDataResponse['status'] = responseData['status'];
+      }
+
+      if (kDebugMode) {
+        debugPrint('✅ Pedido App API creado: ${orderDataResponse['id']}');
+      }
+
+      return OrderCreateResult.success(orderDataResponse);
     } on DioException catch (e) {
-      debugPrint('❌ DioException al crear pedido:');
-      debugPrint('Status Code: ${e.response?.statusCode}');
-      debugPrint('Response: ${e.response?.data}');
-      debugPrint('Message: ${e.message}');
-
       final responseData = e.response?.data;
 
       if (responseData is Map && responseData['message'] != null) {
@@ -3385,10 +3250,10 @@ class ApiService {
 
       return OrderCreateResult.failure(_mapDioError(e));
     } catch (e) {
-      debugPrint('❌ Error al crear pedido: $e');
       return OrderCreateResult.failure(e.toString());
     }
   }
+
 
 
   Future<bool> crearPedido(Map<String, dynamic> orderData) async {
@@ -3462,93 +3327,33 @@ class ApiService {
     required int quantity,
     String? customerNote,
   }) async {
-    await _ensureInitialized();
-
     try {
-      final safeQuantity = quantity <= 0 ? 1 : quantity;
-      final cleanEmail = email.trim().toLowerCase();
+      if (productId <= 0) return false;
 
-      if (cleanEmail.isEmpty || productId <= 0) {
-        return false;
-      }
-
-      debugPrint('📝 Solicitando presupuesto...');
-      debugPrint('📝 Email: $cleanEmail');
-      debugPrint('📝 Producto ID: $productId');
-      debugPrint('📝 Producto: $productName');
-      debugPrint('📝 Cantidad: $safeQuantity');
-
-      final presupuestoAbierto =
-      await _buscarPresupuestoAbiertoPorEmail(cleanEmail);
-
-      if (presupuestoAbierto != null) {
-        final orderId = presupuestoAbierto['id']?.toString();
-
-        if (orderId != null && orderId.isNotEmpty) {
-          debugPrint(
-            '📝 Presupuesto abierto encontrado #$orderId. Actualizando líneas...',
-          );
-
-          return actualizarPresupuesto(
-            orderId: orderId,
-            productId: productId,
-            quantity: safeQuantity,
-          );
-        }
-      }
-
-      final Map<String, dynamic> orderData = {
-        'status': 'checkout-draft',
-        'billing': {
-          'email': cleanEmail,
+      final response = await _appPost(
+        '/quote/add',
+        data: {
+          'product_id': productId,
+          'quantity': quantity <= 0 ? 1 : quantity,
+          if (customerNote != null && customerNote.trim().isNotEmpty)
+            'customer_note': customerNote.trim(),
         },
-        'line_items': [
-          {
-            'product_id': productId,
-            'quantity': safeQuantity,
-          },
-        ],
-        'customer_note':
-        customerNote ?? 'Presupuesto solicitado desde la app Mundicam',
-        'meta_data': [
-          {
-            'key': '_mundicam_app_quote',
-            'value': '1',
-          },
-        ],
-      };
-
-      final sanitizedLineItems =
-      _sanitizeNewOrderLineItems(orderData['line_items']);
-
-      if (sanitizedLineItems.isEmpty) {
-        return false;
-      }
-
-      orderData['line_items'] = sanitizedLineItems;
-
-      _debugLineItems('LINE ITEMS NUEVO PRESUPUESTO', sanitizedLineItems);
-
-      final response = await _dio.post(
-        '/wp-json/wc/v3/orders',
-        data: orderData,
-        options: _wooOptions,
       );
 
-      debugPrint('✅ Presupuesto creado - Status: ${response.statusCode}');
+      final data = response.data;
+      if (data is Map) {
+        return data['success'] == true || data['ok'] == true;
+      }
 
-      return response.statusCode == 201 || response.statusCode == 200;
-    } on DioException catch (e) {
-      debugPrint('❌ Error al crear presupuesto:');
-      debugPrint('❌ Status Code: ${e.response?.statusCode}');
-      debugPrint('❌ Response: ${e.response?.data}');
-
-      throw Exception(_mapDioError(e));
+      return response.statusCode == 200 || response.statusCode == 201;
     } catch (e) {
-      debugPrint('❌ Error inesperado creando presupuesto: $e');
+      if (kDebugMode) {
+        debugPrint('❌ Error creando presupuesto App API: $e');
+      }
       return false;
     }
   }
+
   Future<bool> actualizarPresupuesto({
     required String orderId,
     required int productId,
@@ -3744,106 +3549,68 @@ class ApiService {
     bool soloConProductos = true,
     bool soloCategoriasPadre = true,
   }) async {
-    await _ensureInitialized();
     try {
-      int page = 1;
-      int totalPages = 1;
-      final List<CategoryModel> todas = [];
+      final response = await _appGet(
+        '/categories',
+        queryParameters: {
+          'hide_empty': soloConProductos ? 1 : 0,
+          'parent_only': soloCategoriasPadre ? 1 : 0,
+        },
+      );
 
-      do {
-        final response = await _dio.get(
-          '/wp-json/wc/v3/products/categories',
-          queryParameters: {
-            'per_page': 100,
-            'page': page,
-            'orderby': 'name',
-            'order': 'asc',
-          },
-          options: _wooOptions,
-        );
+      final rawCategories = _extractAppList(
+        response.data,
+        const ['categories', 'data', 'items'],
+      );
 
-        final data = response.data;
-        todas.addAll(
-          (data as List).map((item) => CategoryModel.fromJson(item)),
-        );
-
-        final totalPagesHeader = response.headers.value('x-wp-totalpages');
-        totalPages = int.tryParse(totalPagesHeader ?? '1') ?? 1;
-        page++;
-      } while (page <= totalPages);
+      final categories = rawCategories
+          .whereType<Map>()
+          .map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
 
       return _postProcessCategories(
-        todas,
+        categories,
         soloConProductos: soloConProductos,
         soloCategoriasPadre: soloCategoriasPadre,
       );
     } on DioException catch (e) {
-      final statusCode = e.response?.statusCode;
-
-      if (statusCode == 401 || statusCode == 403) {
-        if (kDebugMode) {
-          debugPrint(
-            '🔒 Categorías WC v3 no disponibles para este usuario '
-                '(status=$statusCode). Se usa Store API pública.',
-          );
-        }
-        return _getCategoriasDesdeStoreApi(
-          soloConProductos: soloConProductos,
-          soloCategoriasPadre: soloCategoriasPadre,
-        );
-      }
-
       throw Exception(_mapDioError(e));
+    } catch (e) {
+      throw Exception('Error cargando categorías desde MundiCam App API: $e');
     }
   }
+
 
   Future<List<CategoryModel>> getSubcategoriasDe(int? parentId) async {
-    await _ensureInitialized();
     if (parentId == null) return [];
+
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products/categories',
+      final response = await _appGet(
+        '/categories',
         queryParameters: {
           'parent': parentId,
-          'per_page': 100,
-          'hide_empty': false,
+          'hide_empty': 0,
+          'parent_only': 0,
         },
-        options: _wooOptions,
       );
-      return (response.data as List)
-          .map((json) => CategoryModel.fromJson(json))
+
+      final rawCategories = _extractAppList(
+        response.data,
+        const ['categories', 'data', 'items'],
+      );
+
+      return rawCategories
+          .whereType<Map>()
+          .map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)))
           .toList();
-    } on DioException catch (e) {
-      final statusCode = e.response?.statusCode;
-      if (statusCode == 401 || statusCode == 403) {
-        try {
-          final response = await _dio.get(
-            '/wp-json/wc/store/v1/products/categories',
-            queryParameters: {
-              'parent': parentId,
-              'per_page': 100,
-              'hide_empty': false,
-            },
-            options: _storeApiOptions,
-          );
-          final data = response.data is List ? response.data as List : <dynamic>[];
-          return data
-              .whereType<Map>()
-              .map(
-                (json) => CategoryModel.fromJson(
-              Map<String, dynamic>.from(json),
-            ),
-          )
-              .toList();
-        } catch (_) {
-          return [];
-        }
-      }
-      return [];
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error cargando subcategorías App API: $e');
+      }
       return [];
     }
   }
+
 
   Future<List<CategoryModel>> getSubcategoriasDisponiblesCatalogo({
     required int parentCategoryId,
@@ -4833,61 +4600,25 @@ class ApiService {
     }
   }
   Future<List<QuoteMundicam>> getPresupuestosPorEmail(String email) async {
-    await _ensureInitialized();
-
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/orders',
-        queryParameters: {
-          'search': email.trim().toLowerCase(),
-          'status': 'checkout-draft',
-          'per_page': 50,
-          'orderby': 'date',
-          'order': 'desc',
-        },
-        options: _wooOptions,
+      final response = await _appGet('/quotes');
+      final rawQuotes = _extractAppList(
+        response.data,
+        const ['quotes', 'data', 'items'],
       );
 
-      final data = response.data;
-      final total = data is List ? data.length : 0;
-
-      debugPrint('📊 Presupuestos encontrados: $total');
-
-      if (data is! List) return [];
-
-      return data
+      return rawQuotes
           .whereType<Map>()
-          .map(
-            (item) => QuoteMundicam.fromJson(
-          Map<String, dynamic>.from(item),
-        ),
-      )
+          .map((item) => QuoteMundicam.fromJson(Map<String, dynamic>.from(item)))
           .toList();
-    } on DioException catch (e) {
-      // Algunos clientes normales no tienen permiso en WooCommerce para
-      // consultar pedidos checkout-draft por REST. Esto NO debe bloquear
-      // catálogo, búsqueda, carrito ni presupuestos locales.
-      if (e.response?.statusCode == 403) {
-        if (kDebugMode) {
-          debugPrint(
-            '🔒 Presupuestos remotos no disponibles para ${email.trim().toLowerCase()}. '
-                'Se continúa con lista vacía.',
-          );
-        }
-        return [];
-      }
-
-      if (kDebugMode) {
-        debugPrint('❌ Error getPresupuestosPorEmail: $e');
-      }
-      return [];
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('❌ Error getPresupuestosPorEmail: $e');
+        debugPrint('❌ Error getPresupuestosPorEmail App API: $e');
       }
       return [];
     }
   }
+
 
 
   // ================================================================
@@ -4895,85 +4626,26 @@ class ApiService {
   // ================================================================
 
   Future<Product?> getProductoById(int id) async {
-    await _ensureInitialized();
-
     if (id <= 0) return null;
 
     try {
-      final response = await _dio.get(
-        '/wp-json/wc/v3/products/$id',
-        options: _wooOptions,
+      final response = await _appGet('/products/$id');
+      final productMap = _extractAppMap(
+        response.data,
+        const ['product', 'data'],
       );
 
-      if (response.statusCode == 200) {
-        return _mapSingleProductWithBrand(response.data);
-      }
+      if (productMap == null || productMap.isEmpty) return null;
 
-      return null;
-    } on DioException catch (e) {
-      final statusCode = e.response?.statusCode;
-
-      if (statusCode == 401 || statusCode == 403) {
-        await _loadWordPressSession();
-
-        if (_hasWordPressSession) {
-          try {
-            if (kDebugMode) {
-              debugPrint(
-                '🔐 Producto $id bloqueado por WC v3 (status=$statusCode). '
-                    'Probando detalle por Store API autenticada.',
-              );
-            }
-
-            final response = await _dio.get(
-              '/wp-json/wc/store/v1/products/$id',
-              options: _storeApiOptions,
-            );
-
-            _captureStoreApiAuthFromResponse(response);
-
-            if (response.statusCode == 200 && response.data is Map) {
-              final json = _normalizeStoreProductForProductModel(
-                Map<String, dynamic>.from(response.data as Map),
-              );
-
-              final product = await _mapSingleProductWithBrand(json);
-
-              if (product != null && _productPrice(product) <= 0) {
-                if (kDebugMode) {
-                  debugPrint(
-                    '🔒 Store API autenticada no devuelve precio real para producto $id.',
-                  );
-                }
-                return null;
-              }
-
-              return product;
-            }
-          } catch (fallbackError) {
-            if (kDebugMode) {
-              debugPrint(
-                '🔒 No se pudo cargar producto $id por Store API autenticada: '
-                    '$fallbackError',
-              );
-            }
-            return null;
-          }
-        }
-      }
-
-      if (kDebugMode) {
-        debugPrint('Error al obtener producto $id: $e');
-      }
-
-      return null;
+      return Product.fromJson(productMap);
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('Error al obtener producto $id: $e');
+        debugPrint('Error al obtener producto $id desde App API: $e');
       }
       return null;
     }
   }
+
 
   // ================================================================
   // RMA

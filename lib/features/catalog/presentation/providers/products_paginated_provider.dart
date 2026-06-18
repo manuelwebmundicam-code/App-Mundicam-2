@@ -5,7 +5,7 @@ import 'package:mundicam/core/cache/product_cache_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
-import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
+import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
 
 final productsPaginatedProvider =
 StateNotifierProvider.family<ProductsPaginatedNotifier, List<Product>, int>(
@@ -23,7 +23,10 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   final int categoryId;
   final Ref ref;
 
-  static const Duration _cacheTtl = Duration(minutes: 3);
+  // TTL corto porque ahora el catálogo se alimenta desde HTML XStore,
+  // y los precios/stock visual pueden variar más que una respuesta REST cacheada.
+  static const Duration _cacheTtl = Duration(minutes: 1);
+  static const String _sourceCacheVersion = 'web_xstore_v3_20260617';
 
   int _currentPage = 1;
   int _totalPages = 1;
@@ -61,7 +64,9 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   }
 
   void clearCacheForCurrentCategory() {
+    // Limpia caché antigua y nueva para evitar resultados heredados del paso WC REST/Store API.
     ProductCacheService().clearMemoryPrefix('catalog_page|cat:$categoryId|');
+    ProductCacheService().clearMemoryPrefix('catalog_page|source:$_sourceCacheVersion|cat:$categoryId|');
   }
 
   Future<void> loadFirstPage({
@@ -84,11 +89,19 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
       if (token != _requestToken) return;
 
+      final products = _dedupeProducts(result.products);
+
       _hasLoadedFirstPage = true;
-      state = result.products;
-      _totalPages = result.totalPages;
-      _totalItems = result.totalItems;
-      _hasMore = result.hasNextPage;
+      state = products;
+      _totalPages = result.totalPages <= 0 ? 1 : result.totalPages;
+      _totalItems = _safeTotalItems(result.totalItems, products.length);
+      _hasMore = result.hasNextPage && products.isNotEmpty;
+
+      if (kDebugMode) {
+        debugPrint(
+          '✅ Productos primera página mostrados: ${products.length} / total=$_totalItems / pages=$_totalPages',
+        );
+      }
     } catch (e) {
       if (token != _requestToken) return;
 
@@ -126,15 +139,24 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
       if (token != _requestToken) return;
 
-      _currentPage = result.currentPage;
-      _totalPages = result.totalPages;
-      _totalItems = result.totalItems;
+      final nextProducts = _dedupeProducts(result.products);
+      final merged = _dedupeProducts([...state, ...nextProducts]);
 
-      if (result.products.isEmpty) {
+      _currentPage = result.currentPage <= 0 ? nextPage : result.currentPage;
+      _totalPages = result.totalPages <= 0 ? _currentPage : result.totalPages;
+      _totalItems = _safeTotalItems(result.totalItems, merged.length);
+
+      if (nextProducts.isEmpty) {
         _hasMore = false;
       } else {
-        state = [...state, ...result.products];
+        state = merged;
         _hasMore = result.hasNextPage;
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          '✅ Productos acumulados mostrados: ${state.length} / total=$_totalItems / page=$_currentPage',
+        );
       }
     } catch (e) {
       if (token != _requestToken) return;
@@ -206,15 +228,48 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
           attributeLabels: filters.attributeLabels,
         );
 
+        final products = _dedupeProducts(result.products);
+        final safeTotal = _safeTotalItems(result.totalItems, products.length);
+
         if (kDebugMode) {
           debugPrint(
-            '🌐 Catálogo cargado: $cacheKey · total=${result.totalItems}',
+            '🌐 Catálogo cargado: $cacheKey · recibidos=${result.products.length} · únicos=${products.length} · total=$safeTotal',
           );
         }
 
-        return result;
+        return CatalogProductsResult(
+          products: products,
+          currentPage: result.currentPage <= 0 ? page : result.currentPage,
+          totalPages: result.totalPages <= 0 ? 1 : result.totalPages,
+          totalItems: safeTotal,
+        );
       },
     );
+  }
+
+  static List<Product> _dedupeProducts(List<Product> products) {
+    final byId = <int, Product>{};
+    final withoutId = <String, Product>{};
+
+    for (final product in products) {
+      if (product.id > 0) {
+        byId[product.id] = product;
+      } else {
+        final key = '${product.sku}|${product.name}'.toLowerCase().trim();
+        if (key.isNotEmpty) withoutId[key] = product;
+      }
+    }
+
+    return [
+      ...byId.values,
+      ...withoutId.values,
+    ];
+  }
+
+  static int _safeTotalItems(int reportedTotal, int visibleCount) {
+    if (reportedTotal <= 0) return visibleCount;
+    if (reportedTotal < visibleCount) return visibleCount;
+    return reportedTotal;
   }
 
   static String _buildCacheKey({
@@ -228,7 +283,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     required int perPage,
   }) {
     return [
-      'catalog_page|cat:$categoryId',
+      'catalog_page|source:$_sourceCacheVersion|cat:$categoryId',
       'brandId:${brandId ?? 0}',
       'brand:${brandName.toLowerCase().trim()}',
       'search:${search.toLowerCase().trim()}',

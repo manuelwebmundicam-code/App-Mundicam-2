@@ -173,8 +173,23 @@ class Product {
     return isInstock;
   }
 
-  double get priceValue {
-    final clean = price
+  double get priceValue => _parsePriceToDouble(price);
+
+
+
+  double get regularPriceValue {
+    final value = _parsePriceToDouble(regularPrice);
+    return value > 0 ? value : priceValue;
+  }
+
+  String get displayPriceText {
+    final value = priceValue;
+    if (value <= 0) return 'Bajo consulta';
+    return _formatEuro(value);
+  }
+
+  static double _parsePriceToDouble(String rawPrice) {
+    final clean = rawPrice
         .replaceAll('€', '')
         .replaceAll(RegExp(r'[^0-9,.-]'), '')
         .trim();
@@ -187,6 +202,20 @@ class Product {
     }
 
     return double.tryParse(clean) ?? 0.0;
+  }
+
+  static String _formatEuro(double value) {
+    final parts = value.toStringAsFixed(2).split('.');
+    final integers = parts[0];
+    final decimals = parts.length > 1 ? parts[1] : '00';
+    final buffer = StringBuffer();
+    for (var i = 0; i < integers.length; i++) {
+      if (i > 0 && (integers.length - i) % 3 == 0) {
+        buffer.write('.');
+      }
+      buffer.write(integers[i]);
+    }
+    return '${buffer.toString()},$decimals €';
   }
 
   bool get hasValidPrice => priceValue > 0;

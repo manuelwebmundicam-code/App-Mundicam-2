@@ -2,16 +2,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:mundicam/core/firebase/firebase_service.dart';
+import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
-import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
-import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
-import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
@@ -729,7 +728,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   bool _isAddingToQuote = false;
 
   double _precioDouble(Product p) {
-    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
+    return p.priceValue;
   }
 
   String _formatearPrecio(double value) {
@@ -1113,93 +1112,39 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
 
   Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
-    if (product.id == 0) return;
+    if (product.id == 0 || !product.canRequestQuote) return;
 
-    if (!product.canRequestQuote) {
+    final email = FirebaseAuth.instance.currentUser?.email?.trim();
+    if (email == null || email.isEmpty) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            product.isUnderConsultation
-                ? '"${product.name}" está bajo consulta y no puede añadirse al presupuesto.'
-                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
-          ),
-          backgroundColor: Colors.orange.shade700,
+        const SnackBar(
+          content: Text('No se ha encontrado el email del usuario.'),
+          backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
         ),
       );
       return;
     }
 
-    final precio = _precioDouble(product);
-
-    // Mostrar el diálogo de selección de presupuesto
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => QuoteSelectionDialog(
-        productName: product.name,
-        productId: product.id,
-        price: precio,
-        quantity: cantidad,
-      ),
-    );
-
-    // Usuario canceló el diálogo
-    if (result == null || !mounted) return;
-
     setState(() => _isAddingToQuote = true);
 
     try {
-      final action = result['action'] as String;
-      final notifier = ref.read(localQuotesProvider.notifier);
-      String mensaje = '';
+      final ok = await ApiService().crearPresupuesto(
+        email: email,
+        productId: product.id,
+        productName: product.name,
+        price: product.priceValue,
+        quantity: cantidad,
+      );
 
-      if (action == 'crear_y_anadir') {
-        // CREAR NUEVO PRESUPUESTO
-        final nombre = result['nombre'] as String;
-        final orderId = DateTime.now().millisecondsSinceEpoch.toString();
-        final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
+      if (!mounted) return;
 
-        await notifier.crearPresupuesto(
-          orderId: orderId,
-          nombre: nombreFinal,
-        );
-
-        await notifier.anadirItem(
-          orderId: orderId,
-          item: LocalQuoteItem(
-            productId: product.id,
-            productName: product.name,
-            quantity: cantidad,
-            price: precio,
-          ),
-        );
-
-        mensaje = '$cantidad x ${product.name} añadido a "$nombreFinal"';
-      } else if (action == 'anadir_existente') {
-        // AÑADIR A PRESUPUESTO EXISTENTE
-        final orderId = result['orderId'] as String;
-        final nombre = result['nombre'] as String;
-
-        await notifier.anadirItem(
-          orderId: orderId,
-          item: LocalQuoteItem(
-            productId: product.id,
-            productName: product.name,
-            quantity: cantidad,
-            price: precio,
-          ),
-        );
-
-        mensaje = '$cantidad x ${product.name} añadido a "$nombre"';
-      }
-
-      if (mounted && mensaje.isNotEmpty) {
+      if (ok) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(mensaje),
+            content: Text('$cantidad x ${product.name} añadido al presupuesto'),
             backgroundColor: Colors.green.shade700,
             duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
@@ -1210,6 +1155,15 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
             ),
           ),
         );
+      } else {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo añadir el producto al presupuesto.'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     } catch (e) {
       if (kDebugMode) {
@@ -1217,6 +1171,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       }
 
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: $e'),
