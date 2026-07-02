@@ -7,23 +7,24 @@ import 'package:mundicam/features/home/presentation/providers/banner_mix_provide
 /// Provider que obtiene los tickets de soporte del usuario
 final ticketsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final apiService = ref.read(apiServiceProvider);
+
+  String? email = await apiService.currentSessionEmail();
   final user = FirebaseAuth.instance.currentUser;
 
-  if (user == null) return [];
-
-  String? email;
-  try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-    if (userDoc.exists && userDoc.data() != null) {
-      email = userDoc.get('email') as String?;
+  if ((email == null || email.isEmpty) && user != null) {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (userDoc.exists && userDoc.data() != null) {
+        email = userDoc.get('email') as String?;
+      }
+    } catch (e) {
+      debugPrint('Error al leer email: $e');
     }
-  } catch (e) {
-    debugPrint('Error al leer email: $e');
+    email ??= user.email ?? user.providerData.firstOrNull?.email;
   }
-  email ??= user.email ?? user.providerData.firstOrNull?.email;
 
   if (email == null || email.isEmpty) return [];
 

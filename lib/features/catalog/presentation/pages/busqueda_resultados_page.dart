@@ -2,7 +2,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:mundicam/core/firebase/firebase_service.dart';
@@ -10,14 +9,25 @@ import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
-import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
-class BusquedaResultadosPage extends ConsumerWidget {
+
+final _searchCanViewStockDetailsProvider = FutureProvider<bool>((ref) async {
+  try {
+    return ApiService().currentSessionCanViewStockDetails();
+  } catch (e) {
+    if (kDebugMode) {
+      debugPrint('Error resolviendo permiso de stock en búsqueda: $e');
+    }
+    return false;
+  }
+});
+
+class BusquedaResultadosPage extends ConsumerStatefulWidget {
   final String query;
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
@@ -30,139 +40,266 @@ class BusquedaResultadosPage extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final String cleanedQuery = _SearchEngine.cleanQuery(query);
-    final searchAsync = ref.watch(searchProductsProvider(cleanedQuery));
+  ConsumerState<BusquedaResultadosPage> createState() => _BusquedaResultadosPageState();
+}
+
+class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage> {
+  final ApiService _api = ApiService();
+  late String _cleanedQuery;
+  bool _loading = true;
+  Object? _error;
+  List<Product> _productos = const <Product>[];
+  List<_SearchFacet> _availableCategoryFacets = const <_SearchFacet>[];
+  List<_SearchFacet> _availableBrandFacets = const <_SearchFacet>[];
+  int _totalItems = 0;
+  int _selectedCategoryId = 0;
+  String _selectedCategoryName = '';
+  String _selectedBrand = '';
+  String _orderBy = '';
+  int _requestToken = 0;
+
+  bool get _hasActiveFilters =>
+      _selectedCategoryId > 0 || _selectedBrand.trim().isNotEmpty || _orderBy.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _cleanedQuery = _SearchEngine.cleanQuery(widget.query);
+    _loadResults();
+  }
+
+  Future<void> _loadResults({bool forceRefresh = false}) async {
+    // forceRefresh se mantiene para llamadas explícitas de UI; la API ya evita caché de filtros por query.
+    if (forceRefresh) {
+      // La recarga manual invalida el ciclo visual aunque el endpoint use la misma query.
+    }
+    final token = ++_requestToken;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final result = await _api.getProductosCatalogoFiltrado(
+        categoryId: _selectedCategoryId > 0 ? _selectedCategoryId : null,
+        brandName: _selectedBrand.trim().isEmpty ? null : _selectedBrand.trim(),
+        search: _cleanedQuery,
+        page: 1,
+        perPage: 80,
+        orderBy: _orderBy.trim().isEmpty ? null : _orderBy.trim(),
+      );
+
+      if (!mounted || token != _requestToken) return;
+      final sorted = _SearchEngine.sortByRelevance(result.products, _cleanedQuery);
+      final categoryFacets = await _webLikeCategoryFacets(sorted);
+      final brandFacets = _brandFacets(_SearchEngine.productsForFilterFacets(sorted, _cleanedQuery));
+      if (!mounted || token != _requestToken) return;
+      setState(() {
+        _productos = sorted;
+        _availableCategoryFacets = categoryFacets;
+        _availableBrandFacets = brandFacets;
+        _totalItems = result.totalItems > 0 ? result.totalItems : sorted.length;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted || token != _requestToken) return;
+      setState(() {
+        _loading = false;
+        _error = e;
+        _productos = const <Product>[];
+        _availableCategoryFacets = const <_SearchFacet>[];
+        _availableBrandFacets = const <_SearchFacet>[];
+        _totalItems = 0;
+      });
+    }
+  }
+
+  void _openFilters() {
+    final categories = _availableCategoryFacets.isNotEmpty ? _availableCategoryFacets : _categoryFacets(_productos);
+    final brands = _availableBrandFacets.isNotEmpty ? _availableBrandFacets : _brandFacets(_SearchEngine.productsForFilterFacets(_productos, _cleanedQuery));
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return _SearchFiltersSheet(
+          query: _cleanedQuery,
+          selectedCategoryId: _selectedCategoryId,
+          selectedBrand: _selectedBrand,
+          orderBy: _orderBy,
+          categories: categories,
+          brands: brands,
+          onApply: ({required categoryId, required categoryName, required brand, required orderBy}) {
+            Navigator.of(context).pop();
+            setState(() {
+              _selectedCategoryId = categoryId;
+              _selectedCategoryName = categoryName;
+              _selectedBrand = brand;
+              _orderBy = orderBy;
+            });
+            _loadResults(forceRefresh: true);
+          },
+          onReset: () {
+            Navigator.of(context).pop();
+            _resetFilters();
+          },
+        );
+      },
+    );
+  }
+
+  void _resetFilters() {
+    setState(() {
+      _selectedCategoryId = 0;
+      _selectedCategoryName = '';
+      _selectedBrand = '';
+      _orderBy = '';
+    });
+    _loadResults(forceRefresh: true);
+  }
+
+  Future<List<_SearchFacet>> _webLikeCategoryFacets(List<Product> products) async {
+    // Para que el filtro de búsqueda global se comporte como la web, aquí no
+    // sacamos subfamilias aleatorias desde los 50/80 productos cargados.
+    // Primero intentamos usar las categorías principales reales del catálogo
+    // con el contador que devuelve WordPress/WooCommerce.
+    try {
+      final allCategories = await _api.getCategorias(hideEmpty: true, parentOnly: true);
+      final mainCategories = allCategories
+          .where((cat) => cat.id > 0 && cat.parent == 0 && cat.count > 0 && !_SearchEngine.isForbiddenFacetName(cat.name))
+          .map((cat) => _SearchFacet(id: cat.id, name: cat.name, count: cat.count))
+          .toList();
+
+      if (mainCategories.isNotEmpty) {
+        mainCategories.sort((a, b) {
+          final orderA = _SearchEngine.mainCategoryOrder(a.name);
+          final orderB = _SearchEngine.mainCategoryOrder(b.name);
+          if (orderA != orderB) return orderA.compareTo(orderB);
+          return a.name.compareTo(b.name);
+        });
+        return mainCategories.take(12).toList();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudieron cargar categorías principales para filtros: $e');
+      }
+    }
+
+    return _categoryFacets(products, onlyMainLike: true);
+  }
+
+  List<_SearchFacet> _categoryFacets(List<Product> products, {bool onlyMainLike = false}) {
+    final byId = <int, _MutableFacet>{};
+    for (final product in products) {
+      for (var i = 0; i < product.categoryIds.length; i++) {
+        final id = product.categoryIds[i];
+        if (id <= 0) continue;
+        final name = i < product.categoryNames.length ? product.categoryNames[i].trim() : '';
+        if (name.isEmpty) continue;
+        if (_SearchEngine.isForbiddenFacetName(name)) continue;
+        if (onlyMainLike && !_SearchEngine.looksLikeMainCategory(name)) continue;
+        final compact = _SearchEngine._normalize(name);
+        if (compact.contains('sin categoria') || compact.contains('uncategorized')) continue;
+        byId.putIfAbsent(id, () => _MutableFacet(id: id, name: name)).count++;
+      }
+    }
+    final facets = byId.values
+        .map((item) => _SearchFacet(id: item.id, name: item.name, count: item.count))
+        .toList()
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return a.name.compareTo(b.name);
+      });
+    return facets.take(12).toList();
+  }
+
+  List<_SearchFacet> _brandFacets(List<Product> products) {
+    final byName = <String, _MutableFacet>{};
+    for (final product in products) {
+      final brand = product.brandName?.trim() ?? '';
+      if (brand.isEmpty || _SearchEngine.isForbiddenFacetName(brand)) continue;
+      final key = _SearchEngine._normalize(brand);
+      if (key.isEmpty) continue;
+      byName.putIfAbsent(key, () => _MutableFacet(id: 0, name: brand)).count++;
+    }
+    final facets = byName.values
+        .map((item) => _SearchFacet(id: item.id, name: item.name, count: item.count))
+        .toList()
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return a.name.compareTo(b.name);
+      });
+    return facets.take(12).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canViewStockDetails = ref.watch(_searchCanViewStockDetailsProvider).maybeWhen(
+      data: (value) => value,
+      orElse: () => false,
+    );
     final FirebaseService firebase = FirebaseService();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
       appBar: ProfessionalPageAppBar(
-        title: cleanedQuery.isEmpty ? 'RESULTADOS' : 'RESULTADOS: $cleanedQuery',
+        title: _cleanedQuery.isEmpty ? 'RESULTADOS' : 'RESULTADOS: $_cleanedQuery',
         subtitle: '',
         icon: Icons.search_rounded,
         onBack: () => Navigator.of(context).pop(),
       ),
-      body: searchAsync.when(
-        loading: () => const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: AppColors.primary),
-              SizedBox(height: 16),
-              Text(
-                'Buscando productos...',
-                style: TextStyle(color: Colors.grey),
-              ),
-            ],
-          ),
+      body: _loading && _productos.isEmpty
+          ? const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: AppColors.primary),
+            SizedBox(height: 16),
+            Text('Buscando productos...', style: TextStyle(color: Colors.grey)),
+          ],
         ),
-        error: (error, stack) => _buildErrorState(context, error),
-        data: (productosOriginales) {
-          final List<Product> productos = _SearchEngine.sortByRelevance(
-            productosOriginales,
-            cleanedQuery,
-          );
-
-          if (productos.isEmpty) {
-            return _buildEmptyState(context, cleanedQuery);
-          }
-
-          final detectedTerms =
-          _SearchEngine.detectedReadableTerms(cleanedQuery);
-
-          return Column(
-            children: [
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0xFFE7E7E7)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.03),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.search_rounded,
-                          size: 18,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '${productos.length} producto${productos.length != 1 ? 's' : ''} encontrado${productos.length != 1 ? 's' : ''}',
-                            style: const TextStyle(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (detectedTerms.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: detectedTerms.map((term) {
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 9,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color:
-                                AppColors.primary.withValues(alpha: 0.18),
-                              ),
-                            ),
-                            child: Text(
-                              term,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ],
-                  ],
-                ),
+      )
+          : _error != null
+          ? _buildErrorState(context, _error!)
+          : _productos.isEmpty
+          ? _buildEmptyState(context, _cleanedQuery)
+          : Column(
+        children: [
+          _SearchResultsHeader(
+            query: _cleanedQuery,
+            totalItems: _totalItems > 0 ? _totalItems : _productos.length,
+            loadedItems: _productos.length,
+            selectedCategoryName: _selectedCategoryName,
+            selectedBrand: _selectedBrand,
+            orderBy: _orderBy,
+            hasActiveFilters: _hasActiveFilters,
+            onOpenFilters: _openFilters,
+            onReset: _resetFilters,
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () => _loadResults(forceRefresh: true),
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                itemCount: _productos.length,
+                itemBuilder: (context, index) {
+                  return ProductTileBusqueda(
+                    p: _productos[index],
+                    firebase: firebase,
+                    onGoCart: widget.onGoCart,
+                    onGoQuotes: widget.onGoQuotes,
+                    canViewStockDetails: canViewStockDetails,
+                  );
+                },
               ),
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                  itemCount: productos.length,
-                  itemBuilder: (context, index) {
-                    return ProductTileBusqueda(
-                      p: productos[index],
-                      firebase: firebase,
-                      onGoCart: onGoCart,
-                      onGoQuotes: onGoQuotes,
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -181,11 +318,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
                 color: Color(0xFFF8EAEA),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.error_outline,
-                size: 48,
-                color: AppColors.primary,
-              ),
+              child: const Icon(Icons.error_outline, size: 48, color: AppColors.primary),
             ),
             const SizedBox(height: 18),
             const Text(
@@ -199,14 +332,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              '$error',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 13,
-              ),
-            ),
+            Text('$error', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600], fontSize: 13)),
             const SizedBox(height: 18),
             OutlinedButton.icon(
               onPressed: () => Navigator.pop(context),
@@ -235,15 +361,8 @@ class BusquedaResultadosPage extends ConsumerWidget {
             Container(
               width: 110,
               height: 110,
-              decoration: const BoxDecoration(
-                color: Color(0xFFF8EAEA),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.search_off_rounded,
-                size: 58,
-                color: AppColors.primary,
-              ),
+              decoration: const BoxDecoration(color: Color(0xFFF8EAEA), shape: BoxShape.circle),
+              child: const Icon(Icons.search_off_rounded, size: 58, color: AppColors.primary),
             ),
             const SizedBox(height: 20),
             Text(
@@ -260,11 +379,7 @@ class BusquedaResultadosPage extends ConsumerWidget {
             Text(
               'Prueba con una búsqueda más general, una marca, una referencia o una tecnología concreta.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-                height: 1.5,
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey[600], height: 1.5),
             ),
             if (suggestions.isNotEmpty) ...[
               const SizedBox(height: 18),
@@ -274,21 +389,15 @@ class BusquedaResultadosPage extends ConsumerWidget {
                 alignment: WrapAlignment.center,
                 children: suggestions.map((suggestion) {
                   return ActionChip(
-                    label: Text(
-                      suggestion,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      ),
-                    ),
+                    label: Text(suggestion, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
                     onPressed: () {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
                           builder: (_) => BusquedaResultadosPage(
                             query: suggestion,
-                            onGoCart: onGoCart,
-                            onGoQuotes: onGoQuotes,
+                            onGoCart: widget.onGoCart,
+                            onGoQuotes: widget.onGoQuotes,
                           ),
                         ),
                       );
@@ -312,6 +421,456 @@ class BusquedaResultadosPage extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _SearchResultsHeader extends StatelessWidget {
+  final String query;
+  final int totalItems;
+  final int loadedItems;
+  final String selectedCategoryName;
+  final String selectedBrand;
+  final String orderBy;
+  final bool hasActiveFilters;
+  final VoidCallback onOpenFilters;
+  final VoidCallback onReset;
+
+  const _SearchResultsHeader({
+    required this.query,
+    required this.totalItems,
+    required this.loadedItems,
+    required this.selectedCategoryName,
+    required this.selectedBrand,
+    required this.orderBy,
+    required this.hasActiveFilters,
+    required this.onOpenFilters,
+    required this.onReset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE7E7E7)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.search_rounded, size: 18, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  totalItems > loadedItems
+                      ? '$totalItems productos encontrados'
+                      : '$loadedItems producto${loadedItems != 1 ? 's' : ''} encontrado${loadedItems != 1 ? 's' : ''}',
+                  style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w900, fontSize: 13),
+                ),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: onOpenFilters,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: hasActiveFilters ? AppColors.primary : const Color(0xFFF0F2F5),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: hasActiveFilters ? AppColors.primary : const Color(0xFFD9DEE7)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.tune_rounded, size: 17, color: hasActiveFilters ? Colors.white : AppColors.textPrimary),
+                      const SizedBox(width: 6),
+                      Text('Filtros', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, color: hasActiveFilters ? Colors.white : AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (hasActiveFilters) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _chip('Búsqueda: $query'),
+                if (selectedCategoryName.trim().isNotEmpty) _chip(selectedCategoryName),
+                if (selectedBrand.trim().isNotEmpty) _chip('Fabricante: $selectedBrand'),
+                if (orderBy.trim().isNotEmpty) _chip(_orderLabel(orderBy)),
+                InkWell(
+                  onTap: onReset,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFDECEC),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+                    ),
+                    child: const Text('Quitar filtros', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.primary)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+      ),
+      child: Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.primary)),
+    );
+  }
+
+  String _orderLabel(String value) {
+    switch (value) {
+      case 'price_asc':
+        return 'Precio bajo primero';
+      case 'price_desc':
+        return 'Precio alto primero';
+      case 'date':
+        return 'Más recientes';
+      default:
+        return value;
+    }
+  }
+}
+
+class _SearchFiltersSheet extends StatefulWidget {
+  final String query;
+  final int selectedCategoryId;
+  final String selectedBrand;
+  final String orderBy;
+  final List<_SearchFacet> categories;
+  final List<_SearchFacet> brands;
+  final void Function({
+  required int categoryId,
+  required String categoryName,
+  required String brand,
+  required String orderBy,
+  }) onApply;
+  final VoidCallback onReset;
+
+  const _SearchFiltersSheet({
+    required this.query,
+    required this.selectedCategoryId,
+    required this.selectedBrand,
+    required this.orderBy,
+    required this.categories,
+    required this.brands,
+    required this.onApply,
+    required this.onReset,
+  });
+
+  @override
+  State<_SearchFiltersSheet> createState() => _SearchFiltersSheetState();
+}
+
+class _SearchFiltersSheetState extends State<_SearchFiltersSheet> {
+  late int _categoryId;
+  late String _categoryName;
+  late String _brand;
+  late String _orderBy;
+
+  @override
+  void initState() {
+    super.initState();
+    _categoryId = widget.selectedCategoryId;
+    _categoryName = '';
+    for (final item in widget.categories) {
+      if (item.id == _categoryId) {
+        _categoryName = item.name;
+        break;
+      }
+    }
+    _brand = widget.selectedBrand;
+    _orderBy = widget.orderBy;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.86,
+        minChildSize: 0.45,
+        maxChildSize: 0.94,
+        builder: (context, controller) {
+          return Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF4F7FB),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: Column(
+              children: [
+                _header(context),
+                Expanded(
+                  child: ListView(
+                    controller: controller,
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                    children: [
+                      _sectionCard(
+                        title: 'Ordenar por',
+                        icon: Icons.swap_vert_rounded,
+                        children: [
+                          _optionTile('Más recientes', 'date', Icons.access_time_rounded),
+                          _optionTile('Precio bajo primero', 'price_asc', Icons.trending_up_rounded),
+                          _optionTile('Precio alto primero', 'price_desc', Icons.trending_down_rounded),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _sectionCard(
+                        title: 'Categorías del producto',
+                        icon: Icons.folder_special_rounded,
+                        subtitle: 'Resultados para "${widget.query}"',
+                        children: widget.categories.isEmpty
+                            ? [_emptyInfo('No hay categorías disponibles para esta búsqueda.')]
+                            : widget.categories.map((item) => _facetTile(item, isCategory: true)).toList(),
+                      ),
+                      const SizedBox(height: 12),
+                      _sectionCard(
+                        title: 'Fabricante',
+                        icon: Icons.factory_rounded,
+                        children: widget.brands.isEmpty
+                            ? [_emptyInfo('No hay fabricantes disponibles para esta búsqueda.')]
+                            : widget.brands.map((item) => _facetTile(item, isCategory: false)).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+                _bottomButtons(),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _header(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
+      decoration: const BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(14)),
+            child: const Icon(Icons.tune_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Filtros', style: TextStyle(fontFamily: 'Oswald', fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
+                Text('Resultados · "${widget.query}"', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white70)),
+              ],
+            ),
+          ),
+          IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close_rounded, color: Colors.white)),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionCard({
+    required String title,
+    required IconData icon,
+    String? subtitle,
+    required List<Widget> children,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE1E5EC)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(11)),
+                child: Icon(icon, color: AppColors.primary, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(title.toUpperCase(), style: const TextStyle(fontFamily: 'Oswald', fontSize: 13, fontWeight: FontWeight.w900, color: Colors.black87))),
+            ],
+          ),
+          if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(subtitle, style: const TextStyle(fontSize: 11.5, color: Color(0xFF6B7280), fontWeight: FontWeight.w600)),
+          ],
+          const SizedBox(height: 10),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _optionTile(String title, String value, IconData icon) {
+    final selected = _orderBy == value;
+    return _plainTile(
+      title: title,
+      count: null,
+      icon: icon,
+      selected: selected,
+      onTap: () => setState(() => _orderBy = selected ? '' : value),
+    );
+  }
+
+  Widget _facetTile(_SearchFacet item, {required bool isCategory}) {
+    final selected = isCategory
+        ? _categoryId == item.id
+        : _SearchEngine._normalize(_brand) == _SearchEngine._normalize(item.name);
+    return _plainTile(
+      title: item.name,
+      count: item.count,
+      icon: isCategory ? Icons.folder_rounded : Icons.sell_outlined,
+      selected: selected,
+      onTap: () {
+        setState(() {
+          if (isCategory) {
+            if (selected) {
+              _categoryId = 0;
+              _categoryName = '';
+            } else {
+              _categoryId = item.id;
+              _categoryName = item.name;
+            }
+          } else {
+            _brand = selected ? '' : item.name;
+          }
+        });
+      },
+    );
+  }
+
+  Widget _plainTile({
+    required String title,
+    required int? count,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(15),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary.withValues(alpha: 0.08) : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: selected ? AppColors.primary : const Color(0xFFE1E5EC)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: selected ? AppColors.primary : const Color(0xFF6B7280)),
+              const SizedBox(width: 10),
+              Expanded(child: Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: selected ? AppColors.primary : AppColors.textPrimary))),
+              if (count != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: selected ? AppColors.primary : const Color(0xFFEFF2F6), borderRadius: BorderRadius.circular(999)),
+                  child: Text('$count', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: selected ? Colors.white : const Color(0xFF6B7280))),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyInfo(String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(15), border: Border.all(color: const Color(0xFFE1E5EC))),
+      child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF6B7280))),
+    );
+  }
+
+  Widget _bottomButtons() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+      decoration: const BoxDecoration(color: Color(0xFFF4F7FB), border: Border(top: BorderSide(color: Color(0xFFE1E5EC)))),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: widget.onReset,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textPrimary,
+                side: const BorderSide(color: Color(0xFFD9DEE7)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Restablecer', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton(
+              onPressed: () => widget.onApply(categoryId: _categoryId, categoryName: _categoryName, brand: _brand, orderBy: _orderBy),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Ver productos', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchFacet {
+  final int id;
+  final String name;
+  final int count;
+
+  const _SearchFacet({required this.id, required this.name, required this.count});
+}
+
+class _MutableFacet {
+  final int id;
+  final String name;
+  int count = 0;
+
+  _MutableFacet({required this.id, required this.name});
 }
 
 class _SearchEngine {
@@ -545,6 +1104,115 @@ class _SearchEngine {
     return terms.toList();
   }
 
+  static List<Product> productsForFilterFacets(List<Product> products, String query) {
+    final terms = _meaningfulTerms(query);
+    if (terms.isEmpty) return products;
+
+    final precise = products.where((product) {
+      final text = _productFilterText(product);
+      return terms.every((term) => _textContainsTerm(text, term));
+    }).toList();
+
+    // Si el endpoint devuelve pocos productos muy exactos, usamos esos para contar
+    // fabricantes. Si no hay suficientes datos, mantenemos el conjunto original
+    // para no dejar el filtro vacío.
+    return precise.isNotEmpty ? precise : products;
+  }
+
+  static String _productFilterText(Product product) {
+    final attributesText = product.attributes
+        .map((attribute) => '${attribute.name} ${attribute.options.join(' ')}')
+        .join(' ');
+    return _normalize([
+      product.name,
+      product.sku,
+      product.shortDescription,
+      product.description,
+      product.brandName ?? '',
+      product.categoryNames.join(' '),
+      product.categorySlugs.join(' '),
+      attributesText,
+    ].join(' '));
+  }
+
+  static List<String> _meaningfulTerms(String query) {
+    final stopWords = <String>{
+      'de', 'del', 'la', 'las', 'el', 'los', 'para', 'por', 'con', 'sin',
+      'en', 'un', 'una', 'unos', 'unas', 'y', 'o', 'a', 'al',
+    };
+    final normalized = _normalize(query);
+    final terms = <String>{};
+    for (final raw in normalized.split(' ')) {
+      var term = raw.trim();
+      if (term.length < 3 || stopWords.contains(term)) continue;
+      if (term.endsWith('es') && term.length > 4) {
+        term = term.substring(0, term.length - 2);
+      } else if (term.endsWith('s') && term.length > 3) {
+        term = term.substring(0, term.length - 1);
+      }
+      if (term.length >= 3) terms.add(term);
+    }
+    return terms.toList();
+  }
+
+  static bool _textContainsTerm(String text, String term) {
+    if (text.contains(term)) return true;
+    if (term == 'caja' && text.contains('box')) return true;
+    if (term == 'seguridad' && (text.contains('security') || text.contains('segur'))) return true;
+    return false;
+  }
+
+  static bool isForbiddenFacetName(String value) {
+    final normalized = _normalize(value);
+    return normalized.isEmpty ||
+        normalized.contains('sin categoria') ||
+        normalized.contains('uncategorized') ||
+        normalized.contains('oferta') ||
+        normalized.contains('outlet') ||
+        normalized.contains('formacion');
+  }
+
+  static bool looksLikeMainCategory(String value) {
+    final normalized = _normalize(value);
+    if (normalized.isEmpty) return false;
+    const mainWords = [
+      'video cctv hd',
+      'video ip hd',
+      'complementos',
+      'intrusion',
+      'accesos',
+      'incendio',
+      'networking',
+      'drones pro',
+      'energia',
+      'anti hurto',
+      'antihurto',
+    ];
+    return mainWords.any((item) => normalized == item || normalized.contains(item));
+  }
+
+  static int mainCategoryOrder(String value) {
+    final normalized = _normalize(value);
+    final order = <String>[
+      'video cctv hd',
+      'video ip hd',
+      'complementos',
+      'intrusion',
+      'accesos',
+      'incendio',
+      'networking',
+      'drones pro',
+      'energia',
+      'anti hurto',
+      'antihurto',
+    ];
+    for (var i = 0; i < order.length; i++) {
+      final key = order[i];
+      if (normalized == key || normalized.contains(key)) return i;
+    }
+    return 999;
+  }
+
   static List<String> detectedReadableTerms(String query) {
     final normalized = _normalize(query);
     final detected = <String>[];
@@ -712,6 +1380,7 @@ class ProductTileBusqueda extends ConsumerStatefulWidget {
   final FirebaseService firebase;
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
+  final bool canViewStockDetails;
 
   const ProductTileBusqueda({
     super.key,
@@ -719,6 +1388,7 @@ class ProductTileBusqueda extends ConsumerStatefulWidget {
     required this.firebase,
     this.onGoCart,
     this.onGoQuotes,
+    this.canViewStockDetails = false,
   });
 
   @override
@@ -731,7 +1401,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   bool _isAddingToQuote = false;
 
   double _precioDouble(Product p) {
-    return p.priceValue;
+    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
   }
 
   String _formatearPrecio(double value) {
@@ -831,6 +1501,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                             _stockChip(p),
                           ],
                         ),
+                        if (widget.canViewStockDetails) ...[
+                          const SizedBox(height: 6),
+                          _SearchStockDetailsText(product: p),
+                        ],
                         if (p.shortDescription.trim().isNotEmpty) ...[
                           const SizedBox(height: 8),
                           Text(
@@ -949,8 +1623,10 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   size: 17,
                 ),
                 label: Text(
-                  !p.hasStock
-                      ? 'SIN STOCK'
+                  p.isUnderConsultation
+                      ? 'NO PRESUPUESTAR'
+                      : !p.hasStock
+                      ? 'NO PRESUPUESTAR'
                       : _isAddingToQuote
                       ? 'AÑADIENDO...'
                       : 'AÑADIR AL PRESUPUESTO',
@@ -1115,12 +1791,14 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     if (_isAddingToQuote) return;
     if (product.id == 0) return;
 
-    if (!product.hasStock) {
+    if (!product.canRequestQuote) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
+            product.isUnderConsultation
+                ? '"${product.name}" está bajo consulta y no puede añadirse al presupuesto.'
+                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
           ),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
@@ -1131,63 +1809,66 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     }
 
     final precio = _precioDouble(product);
-    final qty = cantidad <= 0 ? 1 : cantidad;
 
+    // Mostrar el diálogo de selección de presupuesto
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => QuoteSelectionDialog(
         productName: product.name,
         productId: product.id,
         price: precio,
-        quantity: qty,
+        quantity: cantidad,
       ),
     );
 
+    // Usuario canceló el diálogo
     if (result == null || !mounted) return;
 
     setState(() => _isAddingToQuote = true);
 
     try {
-      final action = result['action']?.toString() ?? '';
+      final action = result['action'] as String;
       final notifier = ref.read(localQuotesProvider.notifier);
       String mensaje = '';
 
       if (action == 'crear_y_anadir') {
-        final nombre = result['nombre']?.toString().trim() ?? '';
+        // CREAR NUEVO PRESUPUESTO
+        final nombre = result['nombre'] as String;
         final orderId = DateTime.now().millisecondsSinceEpoch.toString();
         final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
 
-        await notifier.crearPresupuesto(orderId: orderId, nombre: nombreFinal);
+        await notifier.crearPresupuesto(
+          orderId: orderId,
+          nombre: nombreFinal,
+        );
+
         await notifier.anadirItem(
           orderId: orderId,
           item: LocalQuoteItem(
             productId: product.id,
             productName: product.name,
-            quantity: qty,
+            quantity: cantidad,
             price: precio,
           ),
         );
 
-        mensaje = '$qty x ${product.name} añadido a "$nombreFinal"';
+        mensaje = '$cantidad x ${product.name} añadido a "$nombreFinal"';
       } else if (action == 'anadir_existente') {
-        final orderId = result['orderId']?.toString() ?? '';
-        final nombre = result['nombre']?.toString() ?? 'Presupuesto';
-
-        if (orderId.isEmpty) {
-          throw Exception('No se pudo identificar el presupuesto seleccionado.');
-        }
+        // AÑADIR A PRESUPUESTO EXISTENTE
+        final orderId = result['orderId'] as String;
+        final nombre = result['nombre'] as String;
 
         await notifier.anadirItem(
           orderId: orderId,
           item: LocalQuoteItem(
             productId: product.id,
             productName: product.name,
-            quantity: qty,
+            quantity: cantidad,
             price: precio,
           ),
         );
 
-        mensaje = '$qty x ${product.name} añadido a "$nombre"';
+        mensaje = '$cantidad x ${product.name} añadido a "$nombre"';
       }
 
       if (mounted && mensaje.isNotEmpty) {
@@ -1196,8 +1877,8 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
           SnackBar(
             content: Text(mensaje),
             backgroundColor: Colors.green.shade700,
-            behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
               label: 'VER',
               textColor: Colors.white,
@@ -1207,19 +1888,76 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
         );
       }
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error en _addToQuote búsqueda: $e');
+      }
+
       if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al añadir al presupuesto: $e'),
+            content: Text('Error: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isAddingToQuote = false);
+      if (mounted) {
+        setState(() => _isAddingToQuote = false);
+      }
     }
+  }
+}
+
+
+class _SearchStockDetailsText extends StatelessWidget {
+  final Product product;
+
+  const _SearchStockDetailsText({required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanDetails = product.stockDetailsText?.trim();
+    if (cleanDetails == null || cleanDetails.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    const textColor = Color(0xFF1565C0);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F8FF),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFBFD7F2)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.inventory_2_outlined,
+            size: 13,
+            color: textColor,
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              'Stock: $cleanDetails',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 10.8,
+                color: textColor,
+                fontWeight: FontWeight.w800,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

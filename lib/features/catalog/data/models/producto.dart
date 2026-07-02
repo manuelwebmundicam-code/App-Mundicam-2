@@ -1,3 +1,6 @@
+// ARCHIVO: lib/features/catalog/data/models/producto.dart
+// Sustituye el archivo completo por este contenido.
+
 import 'dart:convert';
 
 class Product {
@@ -19,6 +22,11 @@ class Product {
   /// Se usa especialmente para productos "Bajo consulta" o productos visibles
   /// en catálogo, pero no accionables comercialmente.
   final bool isPurchasable;
+
+  /// Indica si el endpoint permite solicitar presupuesto para este producto.
+  /// Regla MundiCam: si el producto está sin stock, no se debe poder
+  /// comprar ni presupuestar desde la app.
+  final bool remoteCanRequestQuote;
 
   /// HTML de precio/estado devuelto por WooCommerce.
   ///
@@ -57,6 +65,7 @@ class Product {
     required this.description,
     required this.attributes,
     this.isPurchasable = true,
+    this.remoteCanRequestQuote = true,
     this.priceHtml = '',
     this.stockStatus = '',
     this.categoryIds = const <int>[],
@@ -64,6 +73,63 @@ class Product {
     this.categorySlugs = const <String>[],
     this.stockLocations,
   });
+
+  Product copyWith({
+    int? id,
+    String? name,
+    String? price,
+    String? regularPrice,
+    String? imageUrl,
+    String? sku,
+    int? stockQuantity,
+    bool? onSale,
+    bool? isInstock,
+    String? shortDescription,
+    String? description,
+    List<ProductAttribute>? attributes,
+    bool? isPurchasable,
+    bool? remoteCanRequestQuote,
+    String? priceHtml,
+    String? stockStatus,
+    List<int>? categoryIds,
+    List<String>? categoryNames,
+    List<String>? categorySlugs,
+    List<StockLocation>? stockLocations,
+  }) {
+    return Product(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      price: price ?? this.price,
+      regularPrice: regularPrice ?? this.regularPrice,
+      imageUrl: imageUrl ?? this.imageUrl,
+      sku: sku ?? this.sku,
+      stockQuantity: stockQuantity ?? this.stockQuantity,
+      onSale: onSale ?? this.onSale,
+      isInstock: isInstock ?? this.isInstock,
+      shortDescription: shortDescription ?? this.shortDescription,
+      description: description ?? this.description,
+      attributes: attributes ?? this.attributes,
+      isPurchasable: isPurchasable ?? this.isPurchasable,
+      remoteCanRequestQuote: remoteCanRequestQuote ?? this.remoteCanRequestQuote,
+      priceHtml: priceHtml ?? this.priceHtml,
+      stockStatus: stockStatus ?? this.stockStatus,
+      categoryIds: categoryIds ?? this.categoryIds,
+      categoryNames: categoryNames ?? this.categoryNames,
+      categorySlugs: categorySlugs ?? this.categorySlugs,
+      stockLocations: stockLocations ?? this.stockLocations,
+    );
+  }
+
+  Product copyWithStockFrom(Product source) {
+    return copyWith(
+      stockQuantity: source.stockQuantity,
+      isInstock: source.isInstock,
+      isPurchasable: source.isPurchasable,
+      remoteCanRequestQuote: source.remoteCanRequestQuote,
+      stockStatus: source.stockStatus,
+      stockLocations: source.stockLocations,
+    );
+  }
 
   // =========================
   // STOCK DETALLADO
@@ -173,23 +239,8 @@ class Product {
     return isInstock;
   }
 
-  double get priceValue => _parsePriceToDouble(price);
-
-
-
-  double get regularPriceValue {
-    final value = _parsePriceToDouble(regularPrice);
-    return value > 0 ? value : priceValue;
-  }
-
-  String get displayPriceText {
-    final value = priceValue;
-    if (value <= 0) return 'Bajo consulta';
-    return _formatEuro(value);
-  }
-
-  static double _parsePriceToDouble(String rawPrice) {
-    final clean = rawPrice
+  double get priceValue {
+    final clean = price
         .replaceAll('€', '')
         .replaceAll(RegExp(r'[^0-9,.-]'), '')
         .trim();
@@ -202,20 +253,6 @@ class Product {
     }
 
     return double.tryParse(clean) ?? 0.0;
-  }
-
-  static String _formatEuro(double value) {
-    final parts = value.toStringAsFixed(2).split('.');
-    final integers = parts[0];
-    final decimals = parts.length > 1 ? parts[1] : '00';
-    final buffer = StringBuffer();
-    for (var i = 0; i < integers.length; i++) {
-      if (i > 0 && (integers.length - i) % 3 == 0) {
-        buffer.write('.');
-      }
-      buffer.write(integers[i]);
-    }
-    return '${buffer.toString()},$decimals €';
   }
 
   bool get hasValidPrice => priceValue > 0;
@@ -242,10 +279,12 @@ class Product {
         commercialText.contains('solicitarprecio');
   }
 
-  bool get canAddToCart => hasValidPrice && !isUnderConsultation && hasStock;
+  bool get canAddToCart => isPurchasable && hasValidPrice && !isUnderConsultation && hasStock;
 
-  // Se puede presupuestar siempre que haya stock, incluso si el precio es 0 o Bajo consulta.
-  bool get canRequestQuote => hasStock;
+  // v1.6.2: sin stock no se compra ni se presupuesta.
+  // Puede presupuestarse un producto sin precio directo si tiene stock y el
+  // backend lo permite, pero nunca un producto marcado como sin stock.
+  bool get canRequestQuote => id > 0 && remoteCanRequestQuote && hasStock;
 
   String get commercialStatusLabel {
     if (isUnderConsultation || !hasValidPrice) return 'Bajo consulta';
@@ -293,17 +332,9 @@ class Product {
     // IMAGEN
     // =========================
 
-    String firstImage = 'https://via.placeholder.com/150';
-
-    final images = json['images'];
-    if (images is List && images.isNotEmpty) {
-      final first = images.first;
-      if (first is Map) {
-        final src = first['src']?.toString().trim();
-        if (src != null && src.isNotEmpty) {
-          firstImage = src;
-        }
-      }
+    String firstImage = _extractBestImageUrl(json);
+    if (firstImage.trim().isEmpty) {
+      firstImage = 'https://via.placeholder.com/800';
     }
 
     // =========================
@@ -352,7 +383,14 @@ class Product {
     // =========================
 
     final categories = _parseCategories(json['categories']);
-    final stockStatus = (json['stock_status'] ?? '').toString().trim();
+    final pricesMap = json['prices'] is Map
+        ? Map<String, dynamic>.from(json['prices'] as Map)
+        : <String, dynamic>{};
+    final minorUnit = _parseInt(pricesMap['currency_minor_unit'], fallback: 2);
+    final stockStatus = (json['stock_status'] ?? json['stockStatus'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
     final parsedStockLocations = StockLocation.parseList(json);
     final stockTotalByLocations = parsedStockLocations.fold<int>(
       0,
@@ -362,16 +400,39 @@ class Product {
     return Product(
       id: _parseInt(json['id']),
       name: _cleanTextEntities(json['name']?.toString() ?? 'Sin nombre'),
-      price: _extractPrice(json['price'] ?? json['prices']?['price']),
+      // En la app MundiCam el precio visible debe ser siempre el precio ya
+      // resuelto por el backend para el usuario autenticado/rol actual.
+      // Por eso se prioriza display_price / role_price frente a price bruto.
+      price: _extractPrice(
+        json['display_price'] ??
+            json['role_price'] ??
+            json['price'] ??
+            json['raw_price'] ??
+            pricesMap['price'],
+        minorUnit: minorUnit,
+        fromMinorUnits: json['display_price'] == null &&
+            json['role_price'] == null &&
+            json['price'] == null &&
+            json['raw_price'] == null &&
+            pricesMap.containsKey('price'),
+      ),
       regularPrice: _extractPrice(
-        json['regular_price'] ?? json['prices']?['regular_price'],
+        json['display_regular_price'] ??
+            json['regular_price'] ??
+            pricesMap['regular_price'],
+        minorUnit: minorUnit,
+        fromMinorUnits: json['display_regular_price'] == null &&
+            json['regular_price'] == null &&
+            pricesMap.containsKey('regular_price'),
       ),
       imageUrl: firstImage,
       sku: (json['sku'] ?? '').toString(),
       stockQuantity: _parseInt(json['stock_quantity']),
-      onSale: json['on_sale'] == true,
+      onSale: _parseBool(json['on_sale']),
       isInstock: stockStatus == 'instock' ||
-          json['is_in_stock'] == true ||
+          stockStatus == 'onbackorder' ||
+          _parseBool(json['is_in_stock']) ||
+          _parseBool(json['in_stock']) ||
           stockTotalByLocations > 0,
       shortDescription:
       cleanShort.trim().isEmpty ? 'Sin descripción' : cleanShort.trim(),
@@ -380,7 +441,8 @@ class Product {
           : cleanLong.trim(),
       attributes: parsedAttributes,
       isPurchasable: _parsePurchasable(json),
-      priceHtml: json['price_html']?.toString() ?? '',
+      remoteCanRequestQuote: _parseBool(json['can_request_quote'], fallback: true),
+      priceHtml: _safeString(json['price_html']),
       stockStatus: stockStatus,
       categoryIds: categories.ids,
       categoryNames: categories.names,
@@ -389,20 +451,151 @@ class Product {
     );
   }
 
-  static String _extractPrice(dynamic value) {
+  static String _extractPrice(
+    dynamic value, {
+    int minorUnit = 2,
+    bool fromMinorUnits = false,
+  }) {
     if (value == null) return '0.00';
     final raw = value.toString().trim();
-    if (raw.isEmpty) return '0.00';
-    return raw;
+    if (raw.isEmpty || raw.toLowerCase() == 'null') return '0.00';
+
+    final cleaned = raw
+        .replaceAll('€', '')
+        .replaceAll(RegExp(r'[^0-9,.-]'), '')
+        .trim();
+    if (cleaned.isEmpty) return '0.00';
+
+    if (fromMinorUnits &&
+        !cleaned.contains(',') &&
+        !cleaned.contains('.') &&
+        RegExp(r'^-?\d+$').hasMatch(cleaned)) {
+      final cents = int.tryParse(cleaned);
+      if (cents != null) {
+        var divisor = 1.0;
+        for (var i = 0; i < minorUnit; i++) {
+          divisor *= 10;
+        }
+        return (cents / divisor).toStringAsFixed(minorUnit <= 0 ? 0 : 2);
+      }
+    }
+
+    if (cleaned.contains(',') && cleaned.contains('.')) {
+      return cleaned.replaceAll('.', '').replaceAll(',', '.');
+    }
+
+    return cleaned.replaceAll(',', '.');
+  }
+
+  static String _extractBestImageUrl(Map<String, dynamic> json) {
+    final direct = _firstImageCandidate([
+      json['image_full'],
+      json['image_full_url'],
+      json['full_image'],
+      json['full_src'],
+      json['fullSrc'],
+      json['image_url_full'],
+      json['image_url'],
+      json['imageUrl'],
+      json['image'],
+    ]);
+    if (direct.isNotEmpty) return direct;
+
+    final images = json['images'];
+    if (images is List && images.isNotEmpty) {
+      for (final raw in images) {
+        if (raw is Map) {
+          final map = Map<dynamic, dynamic>.from(raw);
+          final candidate = _firstImageCandidate([
+            map['full_src'],
+            map['fullSrc'],
+            map['full'],
+            map['large_src'],
+            map['largeSrc'],
+            map['source_url'],
+            map['src'],
+            map['url'],
+          ]);
+          if (candidate.isNotEmpty) return candidate;
+        } else if (raw is String && raw.trim().isNotEmpty) {
+          return raw.trim();
+        }
+      }
+    }
+
+    return '';
+  }
+
+  static String _firstImageCandidate(List<dynamic> values) {
+    for (final value in values) {
+      final candidate = _extractImageCandidate(value);
+      if (candidate.isNotEmpty) return candidate;
+    }
+    return '';
+  }
+
+  static String _extractImageCandidate(dynamic value) {
+    if (value == null) return '';
+
+    if (value is String) {
+      final clean = value.trim();
+      if (clean.isEmpty || clean.toLowerCase() == 'null' || clean.toLowerCase() == 'false') {
+        return '';
+      }
+      return clean;
+    }
+
+    if (value is Map) {
+      final map = Map<dynamic, dynamic>.from(value);
+      return _firstImageCandidate([
+        map['full_src'],
+        map['fullSrc'],
+        map['full'],
+        map['large_src'],
+        map['largeSrc'],
+        map['source_url'],
+        map['src'],
+        map['url'],
+      ]);
+    }
+
+    if (value is List) {
+      return _firstImageCandidate(value);
+    }
+
+    return '';
+  }
+
+  static String _safeString(dynamic value) {
+    if (value == null) return '';
+    final clean = value.toString().trim();
+    if (clean.isEmpty || clean.toLowerCase() == 'null') return '';
+    return clean;
+  }
+
+  static bool _parseBool(dynamic value, {bool fallback = false}) {
+    if (value == null) return fallback;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    final clean = value.toString().trim().toLowerCase();
+    if (clean.isEmpty || clean == 'null') return fallback;
+    if (clean == 'false' || clean == '0' || clean == 'no' || clean == 'off') {
+      return false;
+    }
+    return clean == 'true' || clean == '1' || clean == 'yes' || clean == 'si' || clean == 'sí' || clean == 'on';
   }
 
   static bool _parsePurchasable(Map<String, dynamic> json) {
+    if (json.containsKey('can_add_to_cart')) {
+      return _parseBool(json['can_add_to_cart']);
+    }
+
     if (json.containsKey('is_purchasable')) {
-      return json['is_purchasable'] == true;
+      return _parseBool(json['is_purchasable']);
     }
 
     if (json.containsKey('purchasable')) {
-      return json['purchasable'] == true;
+      return _parseBool(json['purchasable']);
     }
 
     final addToCart = json['add_to_cart'];
@@ -446,13 +639,23 @@ class Product {
   }
 
   static String _cleanHtml(String value) {
+    // Conserva separadores reales antes de eliminar HTML.
+    // WooCommerce suele enviar fichas técnicas en tablas; si se borran las
+    // etiquetas sin saltos, queda todo pegado: ParámetroValorVoltaje...,
+    // que después se ve mal en la ficha de producto.
     return _cleanTextEntities(
       value
           .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-          .replaceAll(RegExp(r'</?p[^>]*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</(p|div|section|article|h[1-6])\s*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'<(p|div|section|article|h[1-6])[^>]*>', caseSensitive: false), '\n')
           .replaceAll(RegExp(r'<li[^>]*>', caseSensitive: false), '\n• ')
-          .replaceAll(RegExp(r'</li>', caseSensitive: false), '')
-          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll(RegExp(r'</li\s*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'<tr[^>]*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</tr\s*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'<t[dh][^>]*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</t[dh]\s*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</?(table|thead|tbody|tfoot)[^>]*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'<[^>]*>'), ' ')
           .replaceAll(RegExp(r'\n{3,}'), '\n\n')
           .trim(),
     );
@@ -666,6 +869,7 @@ class Product {
       'is_purchasable': isPurchasable,
       'purchasable': isPurchasable,
       'price_html': priceHtml,
+      'can_request_quote': remoteCanRequestQuote,
       'short_description': shortDescription,
       'description': description,
       'attributes': attributes.map((attribute) => attribute.toJson()).toList(),
@@ -1071,3 +1275,4 @@ class _ParsedCategories {
     required this.slugs,
   });
 }
+

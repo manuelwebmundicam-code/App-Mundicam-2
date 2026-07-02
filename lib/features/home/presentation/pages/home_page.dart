@@ -137,12 +137,15 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ],
       ),
-      child: const Column(
+      child: Column(
         children: [
-          HomeHeader(),
-          SizedBox(height: 2),
-          SearchBarWidget(),
-          MenuBarWidget(),
+          const HomeHeader(),
+          const SizedBox(height: 2),
+          SearchBarWidget(
+            onGoCart: widget.onGoCart,
+            onGoQuotes: widget.onGoQuotes,
+          ),
+          const MenuBarWidget(),
         ],
       ),
     );

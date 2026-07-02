@@ -47,6 +47,9 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
   }
 
   Future<String?> _getUserEmail() async {
+    final appEmail = await ApiService().currentSessionEmail();
+    if (appEmail != null && appEmail.isNotEmpty) return appEmail;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../../../../shared/theme/app_theme.dart';
+import '../../data/models/local_quote_model.dart';
 import '../providers/local_quote_provider.dart';
 
 class QuoteSelectionDialog extends ConsumerStatefulWidget {
@@ -19,356 +19,411 @@ class QuoteSelectionDialog extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<QuoteSelectionDialog> createState() => _QuoteSelectionDialogState();
+  ConsumerState<QuoteSelectionDialog> createState() =>
+      _QuoteSelectionDialogState();
 }
 
 class _QuoteSelectionDialogState extends ConsumerState<QuoteSelectionDialog> {
-  final TextEditingController _nameController = TextEditingController();
-  bool _creatingNew = false;
+  final TextEditingController _nombreController = TextEditingController();
+  bool _mostrandoFormulario = false;
 
   @override
   void dispose() {
-    _nameController.dispose();
+    _nombreController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final quotes = ref.watch(localQuotesProvider).where((quote) => !quote.isExpired).toList();
-    final hasQuotes = quotes.isNotEmpty;
-    final showForm = _creatingNew || !hasQuotes;
+    final localQuotes = ref.watch(localQuotesProvider);
+    final quotesActivos = localQuotes.where((q) => !q.isExpired).toList();
+    final hayPresupuestos = quotesActivos.isNotEmpty;
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
-      backgroundColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 430),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.16),
-              blurRadius: 24,
-              offset: const Offset(0, 10),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            _buildHeader(),
+            const SizedBox(height: 16),
+
+            // Info del producto
+            _buildProductInfo(),
+            const SizedBox(height: 20),
+
+            // CONTENIDO: Lista O Formulario
+            if (_mostrandoFormulario || !hayPresupuestos)
+              _buildFormulario(hayPresupuestos)
+            else
+              _buildListaPresupuestos(quotesActivos),
+
+            const SizedBox(height: 12),
+            // Cancelar
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.grey[700],
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  'CANCELAR',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
             ),
           ],
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildHeader(context),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildProductSummary(),
-                    const SizedBox(height: 16),
-                    if (!showForm) ...[
-                      const Text(
-                        'Elige un presupuesto existente',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 260),
-                        child: ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: quotes.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final quote = quotes[index];
-                            return _QuoteOptionTile(
-                              title: quote.nombre,
-                              subtitle: '${quote.items.length} producto${quote.items.length == 1 ? '' : 's'} · ${_formatMoney(quote.total)}',
-                              onTap: () {
-                                Navigator.of(context).pop({
-                                  'action': 'anadir_existente',
-                                  'orderId': quote.orderId,
-                                  'nombre': quote.nombre,
-                                });
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 46,
-                        child: OutlinedButton.icon(
-                          onPressed: () => setState(() => _creatingNew = true),
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: const Text('CREAR NUEVO PRESUPUESTO'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.primary,
-                            side: const BorderSide(color: AppColors.primary),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          ),
-                        ),
-                      ),
-                    ] else ...[
-                      Text(
-                        hasQuotes ? 'Crear nuevo presupuesto' : 'Nombre del presupuesto',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _nameController,
-                        autofocus: true,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _createAndAdd(),
-                        decoration: InputDecoration(
-                          hintText: 'Ej. Casa Juan (opcional)',
-                          filled: true,
-                          fillColor: const Color(0xFFF8F9FB),
-                          prefixIcon: const Icon(Icons.edit_note_rounded),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(color: Color(0xFFE1E4EA)),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(color: Color(0xFFE1E4EA)),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Si lo dejas vacío, se creará con un número automático.',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: Color(0xFF6B7280),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          if (hasQuotes) ...[
-                            Expanded(
-                              child: SizedBox(
-                                height: 48,
-                                child: OutlinedButton(
-                                  onPressed: () => setState(() => _creatingNew = false),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: AppColors.textPrimary,
-                                    side: const BorderSide(color: Color(0xFFD9DEE7)),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                  ),
-                                  child: const Text('VOLVER'),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                          ],
-                          Expanded(
-                            flex: hasQuotes ? 2 : 1,
-                            child: SizedBox(
-                              height: 48,
-                              child: ElevatedButton.icon(
-                                onPressed: _createAndAdd,
-                                icon: const Icon(Icons.add_task_rounded, size: 18),
-                                label: const Text('CREAR Y AÑADIR'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primary,
-                                  foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader() {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Icon(
+            Icons.request_quote_outlined,
+            color: AppColors.primary,
+            size: 24,
+          ),
+        ),
+        const SizedBox(width: 14),
+        const Expanded(
+          child: Text(
+            'Añadir a presupuesto',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'Oswald',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProductInfo() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 8, 16),
-      decoration: const BoxDecoration(
-        color: AppColors.primary,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.productName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${widget.quantity} x ${widget.price.toStringAsFixed(2)} € = ${(widget.price * widget.quantity).toStringAsFixed(2)} €',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
             ),
-            child: const Icon(Icons.request_quote_outlined, color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'AÑADIR A PRESUPUESTO',
-              style: TextStyle(
-                color: Colors.white,
-                fontFamily: 'Oswald',
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).pop(),
-            icon: const Icon(Icons.close_rounded, color: Colors.white),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildProductSummary() {
+  // ═══════════════════════════════════════════════════
+  // LISTA DE PRESUPUESTOS EXISTENTES
+  // ═══════════════════════════════════════════════════
+
+  Widget _buildListaPresupuestos(List<LocalQuote> quotes) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text(
+          'TUS PRESUPUESTOS',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: Colors.grey,
+            letterSpacing: 0.8,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...quotes.map((quote) => _buildQuoteTile(quote)),
+        const SizedBox(height: 12),
+        _buildBotonCrearNuevo(),
+      ],
+    );
+  }
+
+  Widget _buildQuoteTile(LocalQuote quote) {
+    final totalItems = quote.items.fold<int>(0, (sum, i) => sum + i.quantity);
+
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FB),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE7E7E7)),
+        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.productName,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-              height: 1.2,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${widget.quantity} ud. · ${_formatMoney(widget.price)}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _createAndAdd() {
-    Navigator.of(context).pop({
-      'action': 'crear_y_anadir',
-      'nombre': _nameController.text.trim(),
-    });
-  }
-
-  String _formatMoney(double value) {
-    if (value <= 0) return 'Bajo consulta';
-    return '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
-  }
-}
-
-class _QuoteOptionTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _QuoteOptionTile({
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Ink(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFE1E4EA)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            // Simplemente devuelve los datos, el que llama decide
+            Navigator.pop(context, {
+              'action': 'anadir_existente',
+              'orderId': quote.orderId,
+              'nombre': quote.nombre,
+            });
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.folder_outlined,
+                    color: AppColors.primary,
+                    size: 22,
+                  ),
                 ),
-                child: const Icon(Icons.folder_copy_outlined, color: AppColors.primary, size: 20),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w900,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        quote.nombre,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
+                      const SizedBox(height: 4),
+                      Text(
+                        '$totalItems producto${totalItems != 1 ? 's' : ''} · ${quote.total.toStringAsFixed(2)} €',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(Icons.chevron_right_rounded, color: Color(0xFF9CA3AF)),
-            ],
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: AppColors.primary.withValues(alpha: 0.7),
+                  size: 22,
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildBotonCrearNuevo() {
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _mostrandoFormulario = true;
+          _nombreController.clear();
+        });
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: AppColors.primary.withValues(alpha: 0.4),
+            style: BorderStyle.solid,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.add_rounded, color: AppColors.primary, size: 20),
+            const SizedBox(width: 8),
+            const Text(
+              'CREAR NUEVO PRESUPUESTO',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  // FORMULARIO NUEVO PRESUPUESTO
+  // ═══════════════════════════════════════════════════
+
+  Widget _buildFormulario(bool hayPresupuestosPrevios) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'NOMBRE DEL PRESUPUESTO',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Colors.grey,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const Spacer(),
+            if (hayPresupuestosPrevios)
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _mostrandoFormulario = false;
+                    _nombreController.clear();
+                  });
+                },
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 0),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  '← VOLVER',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _nombreController,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            hintText: 'Ej: Presupuesto Casa Mallorca',
+            hintStyle: TextStyle(color: Colors.grey[400]),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide:
+              const BorderSide(color: AppColors.primary, width: 1.5),
+            ),
+            contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            prefixIcon: Icon(
+              Icons.edit_note_rounded,
+              color: AppColors.primary.withValues(alpha: 0.7),
+            ),
+            suffixIcon: _nombreController.text.isNotEmpty
+                ? IconButton(
+              icon: const Icon(Icons.clear, size: 18),
+              onPressed: () {
+                _nombreController.clear();
+                setState(() {});
+              },
+            )
+                : null,
+          ),
+          onSubmitted: (_) => _confirmar(),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Si no pones nombre, se usará el ID automáticamente.',
+          style: TextStyle(
+            fontSize: 10,
+            color: Colors.grey[500],
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _confirmar,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              elevation: 0,
+            ),
+            child: const Text(
+              'CREAR Y AÑADIR PRODUCTO',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _confirmar() {
+    final nombre = _nombreController.text.trim();
+    // Si no pone nombre, se usará el ID en el provider
+    Navigator.pop(context, {
+      'action': 'crear_y_anadir',
+      'nombre': nombre, // Puede ser vacío, el provider usará el ID
+    });
   }
 }

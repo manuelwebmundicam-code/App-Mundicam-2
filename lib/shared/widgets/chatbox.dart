@@ -72,38 +72,6 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
 
   late final Map<String, _ChatNode> _nodes = _buildNodes();
 
-  final Map<String, String> _brandMap = {
-    'ajax': 'Ajax',
-    'dahua': 'Dahua',
-    'hikvision': 'Hikvision',
-    'hiwatch': 'HiWatch',
-    'ksenia': 'Ksenia',
-    'tp link': 'TP-Link',
-    'tplink': 'TP-Link',
-    'tp-link': 'TP-Link',
-    'omada': 'Omada',
-    'mobotix': 'Mobotix',
-    'bosch': 'Bosch',
-    'teletek': 'Teletek',
-    'zkteco': 'ZKTeco',
-    'zk teco': 'ZKTeco',
-    'anviz': 'Anviz',
-    'yale': 'Yale',
-    'paradox': 'Paradox',
-    'satel': 'Satel',
-    'honeywell': 'Honeywell',
-    'siemens': 'Siemens',
-    'wisenet': 'Wisenet',
-    'hanwha': 'Hanwha',
-    'vivotek': 'Vivotek',
-    'uniview': 'Uniview',
-    'axis': 'Axis',
-    'pelco': 'Pelco',
-    'wisim': 'WISIM',
-    'wis': 'WISIM',
-    'evolve': 'Evolve Xtender',
-    'xtender': 'Evolve Xtender',
-  };
 
   final List<_CategoryDef> _categories = const [
     _CategoryDef(
@@ -672,48 +640,7 @@ class _ChatBoxState extends ConsumerState<ChatBox> {
     _scrollToBottom();
   }
 
-  String _normalize(String input) {
-    return input
-        .toLowerCase()
-        .trim()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ü', 'u')
-        .replaceAll('ñ', 'n');
-  }
 
-  bool _containsAny(String text, List<String> terms) {
-    final normalized = _normalize(text);
-    return terms.any((term) => normalized.contains(_normalize(term)));
-  }
-
-  String? _detectBrand(String text) {
-    final normalized = _normalize(text);
-
-    for (final entry in _brandMap.entries) {
-      if (normalized.contains(entry.key)) {
-        return entry.value;
-      }
-    }
-
-    return null;
-  }
-
-  bool _looksLikeReference(String raw) {
-    final value = raw.trim().toUpperCase();
-
-    return RegExp(r'[A-Z]{2,}[-_][A-Z0-9]').hasMatch(value) ||
-        RegExp(r'\b[A-Z]{2,}[0-9]{2,}[A-Z0-9-]*\b').hasMatch(value) ||
-        value.startsWith('IPC') ||
-        value.startsWith('DHI') ||
-        value.startsWith('DS-') ||
-        value.startsWith('AJ-') ||
-        value.startsWith('KSI') ||
-        value.startsWith('DH-');
-  }
 
   void _showNode(String key) {
     final node = _nodes[key];
@@ -1509,7 +1436,6 @@ class _ChatOption {
   final String? whatsappText;
   final String? emailSubject;
   final String? webUrl;
-  final bool requiresLogin;
 
   const _ChatOption({
     required this.label,
@@ -1522,7 +1448,6 @@ class _ChatOption {
     this.whatsappText,
     this.emailSubject,
     this.webUrl,
-    this.requiresLogin = false,
   });
 }
 

@@ -27,9 +27,45 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Map<String, dynamic>? _wooCustomer;
   bool _loadingData = true;
   bool _isAdmin = false;
+  String _roleLabel = 'Cliente';
+  IconData _roleIcon = Icons.person_outline_rounded;
   String? _errorMessage;
 
-  Color get _brandColor => _isAdmin ? Colors.deepPurple : AppColors.primary;
+  Color get _roleColor {
+    final label = _roleLabel.toLowerCase();
+    if (_isAdmin || label.contains('admin')) return Colors.deepPurple;
+    if (label.contains('comercial')) return const Color(0xFF128C4A);
+    return AppColors.primary;
+  }
+
+  Color get _brandColor => _roleColor;
+
+  void _setVisibleRole(List<String> roles) {
+    final normalizedRoles = roles.map((role) => role.toLowerCase().trim()).toList();
+
+    if (normalizedRoles.any((role) =>
+        role == 'administrator' ||
+        role == 'administrador' ||
+        role == 'shop_manager' ||
+        role == 'gestor_de_la_tienda' ||
+        role.contains('admin'))) {
+      _isAdmin = true;
+      _roleLabel = 'Administrador';
+      _roleIcon = Icons.admin_panel_settings_outlined;
+      return;
+    }
+
+    if (normalizedRoles.any((role) => role.contains('comercial'))) {
+      _isAdmin = false;
+      _roleLabel = 'Comercial';
+      _roleIcon = Icons.support_agent_outlined;
+      return;
+    }
+
+    _isAdmin = false;
+    _roleLabel = 'Cliente';
+    _roleIcon = Icons.business_center_outlined;
+  }
 
   @override
   void initState() {
@@ -38,75 +74,91 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Future<void> _cargarDatosUsuario() async {
+    final apiService = ApiService();
     final user = FirebaseAuth.instance.currentUser;
 
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'No has iniciado sesión';
-          _loadingData = false;
-        });
-      }
-      return;
-    }
-
-    debugPrint('🔍 Cargando perfil - UID: ${user.uid}');
-    debugPrint(' Email Firebase Auth: ${user.email}');
+    debugPrint('🔍 Cargando perfil - Firebase UID: ${user?.uid ?? '-'}');
+    debugPrint(' Email Firebase Auth: ${user?.email ?? '-'}');
 
     try {
-      final apiService = ApiService();
-
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
       Map<String, dynamic>? firestoreData;
-      if (userDoc.exists) {
-        firestoreData = userDoc.data();
 
-        if (firestoreData?['isBlocked'] == true) {
-          if (mounted) {
-            setState(() {
-              _errorMessage = 'Cuenta bloqueada';
-              _loadingData = false;
-            });
+      if (user != null) {
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+
+          if (userDoc.exists) {
+            firestoreData = userDoc.data();
+            if (firestoreData?['isBlocked'] == true) {
+              if (mounted) {
+                setState(() {
+                  _errorMessage = 'Cuenta bloqueada';
+                  _loadingData = false;
+                });
+              }
+              return;
+            }
+
+            final firestoreRole = firestoreData?['role']?.toString().trim().toLowerCase();
+            _isAdmin = firestoreRole == 'admin' ||
+                firestoreRole == 'administrator' ||
+                firestoreRole == 'administrador';
+            if (_isAdmin) {
+              _roleLabel = 'Administrador';
+              _roleIcon = Icons.admin_panel_settings_outlined;
+            } else if ((firestoreRole ?? '').contains('comercial')) {
+              _roleLabel = 'Comercial';
+              _roleIcon = Icons.support_agent_outlined;
+            }
+
+            debugPrint(' Firestore role: ${firestoreData?['role']}');
+            debugPrint(' Firestore email: ${firestoreData?['email']}');
           }
-          return;
+        } catch (e) {
+          debugPrint('⚠️ Firestore no disponible para perfil: $e');
         }
-
-        debugPrint(' Firestore role: ${firestoreData?['role']}');
-        debugPrint(' Firestore email: ${firestoreData?['email']}');
       }
 
-      int? wordpressId = _extractWordPressId(
-        firestoreData: firestoreData,
-        firebaseUid: user.uid,
-      );
+      String? email = await apiService.currentSessionEmail();
 
-      String? email = _firstNonEmptyString([
-        user.email,
-        _stringFromUserData(
+      if (email == null || email.isEmpty) {
+        email = user?.email?.trim().toLowerCase();
+      }
+
+      if (email == null || email.isEmpty) {
+        email = _stringFromUserData(
           firestoreData,
           const [
             'email',
             'billing_email',
             'user_email',
             'customer_email',
-            'wordpress_email',
           ],
-        ),
-        user.providerData.isNotEmpty ? user.providerData.first.email : null,
-      ])?.toLowerCase();
+        );
+      }
 
-      debugPrint(' Email inicial: ${email ?? '-'}');
-      debugPrint(' WordPress ID inicial: ${wordpressId ?? '-'}');
+      if ((email == null || email.isEmpty) && user != null && user.providerData.isNotEmpty) {
+        email = user.providerData.first.email?.trim().toLowerCase();
+      }
+
+      int? wordpressId = await apiService.currentSessionWordPressId();
+      wordpressId ??= _extractWordPressId(
+        firestoreData: firestoreData,
+        firebaseUid: user?.uid ?? '',
+      );
+
+      final roles = await apiService.currentSessionRoles();
+      _setVisibleRole(roles);
+
+      debugPrint(' Email final perfil: ${email ?? '-'}');
+      debugPrint(' WordPress ID final perfil: ${wordpressId ?? '-'}');
+      debugPrint(' Roles App API perfil: $roles');
 
       Map<String, dynamic>? wooCustomer;
 
-      // Perfil alineado con ApiService: esta pantalla ya no llama a métodos
-      // de sesión antiguos. Primero intenta resolver el cliente por email y,
-      // si no es posible, por WordPress/WooCommerce ID.
       if (email != null && email.isNotEmpty) {
         wooCustomer = await apiService.getCustomerByEmail(email);
       }
@@ -115,70 +167,27 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         wooCustomer = await apiService.getCustomerById(wordpressId);
       }
 
-      wordpressId ??= _parsePositiveInt(
-        wooCustomer?['id'] ??
-            wooCustomer?['wordpress_id'] ??
-            wooCustomer?['woocommerce_id'],
-      );
-
-      email = _firstNonEmptyString([
-        wooCustomer?['email'],
-        email,
-        _stringFromUserData(
-          firestoreData,
-          const [
-            'email',
-            'billing_email',
-            'user_email',
-            'customer_email',
-            'wordpress_email',
-          ],
-        ),
-      ])?.toLowerCase();
-
-      final roleCandidates = <dynamic>[
-        wooCustomer?['roles'],
-        wooCustomer?['role'],
-        firestoreData?['role'],
-        firestoreData?['roles'],
-        firestoreData?['wordpress_roles'],
-      ];
-
-      _isAdmin = roleCandidates.any(_roleCanUseAdminTheme);
-
-      debugPrint(' Email final: ${email ?? '-'}');
-      debugPrint(' WordPress ID final: ${wordpressId ?? '-'}');
-
-      final fallbackCustomer = _buildFallbackCustomer(
-        remoteUser: wooCustomer,
-        firestoreData: firestoreData,
-        firebaseUser: user,
-        email: email,
-        wordpressId: wordpressId,
-      );
-
-      final finalCustomer = _mergeCustomerData(
-        fallbackCustomer,
-        wooCustomer,
-      );
-
-      if (mounted) {
-        setState(() {
-          _wooCustomer = finalCustomer;
-          _errorMessage = null;
-          _loadingData = false;
-        });
+      if (wooCustomer != null) {
+        debugPrint(
+          '✅ Cliente encontrado: ${wooCustomer['first_name']} ${wooCustomer['last_name']}',
+        );
+        if (mounted) {
+          setState(() {
+            _wooCustomer = wooCustomer;
+            _loadingData = false;
+          });
+        }
+      } else {
+        debugPrint('⚠️ Cliente no encontrado en WooCommerce');
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Cliente no encontrado.\nContacta con tu gestor comercial.';
+            _loadingData = false;
+          });
+        }
       }
-
-      debugPrint(
-        '✅ Perfil cargado: '
-            'id=${finalCustomer['id'] ?? '-'} '
-            'email=${finalCustomer['email'] ?? '-'} '
-            'nombre=${finalCustomer['first_name'] ?? ''} ${finalCustomer['last_name'] ?? ''}',
-      );
     } catch (e) {
-      debugPrint('❌ Error cargando perfil: $e');
-
+      debugPrint('❌ Error: $e');
       if (mounted) {
         setState(() {
           _errorMessage = 'Error de conexión';
@@ -186,139 +195,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         });
       }
     }
-  }
-
-  Map<String, dynamic> _buildFallbackCustomer({
-    required Map<String, dynamic>? remoteUser,
-    required Map<String, dynamic>? firestoreData,
-    required User firebaseUser,
-    required String? email,
-    required int? wordpressId,
-  }) {
-    final firstName = _firstNonEmptyString([
-      remoteUser?['first_name'],
-      firestoreData?['first_name'],
-      firestoreData?['firstName'],
-    ]);
-
-    final lastName = _firstNonEmptyString([
-      remoteUser?['last_name'],
-      firestoreData?['last_name'],
-      firestoreData?['lastName'],
-    ]);
-
-    final displayName = _firstNonEmptyString([
-      remoteUser?['name'],
-      firestoreData?['name'],
-      firebaseUser.displayName,
-      [firstName, lastName]
-          .where((item) => item != null && item.trim().isNotEmpty)
-          .join(' '),
-    ]);
-
-    final billing = remoteUser?['billing'] is Map
-        ? Map<String, dynamic>.from(remoteUser!['billing'] as Map)
-        : <String, dynamic>{};
-
-    final shipping = remoteUser?['shipping'] is Map
-        ? Map<String, dynamic>.from(remoteUser!['shipping'] as Map)
-        : <String, dynamic>{};
-
-    if (email != null && email.isNotEmpty) {
-      billing['email'] ??= email;
-    }
-    if (firstName != null && firstName.isNotEmpty) {
-      billing['first_name'] ??= firstName;
-    }
-    if (lastName != null && lastName.isNotEmpty) {
-      billing['last_name'] ??= lastName;
-    }
-
-    final roles = _rolesFromDynamic(
-      remoteUser?['roles'] ??
-          remoteUser?['role'] ??
-          firestoreData?['wordpress_roles'] ??
-          firestoreData?['roles'] ??
-          firestoreData?['role'],
-    );
-
-    return <String, dynamic>{
-      if (wordpressId != null && wordpressId > 0) 'id': wordpressId,
-      if (email != null && email.isNotEmpty) 'email': email,
-      if (displayName != null && displayName.isNotEmpty) 'name': displayName,
-      if (firstName != null && firstName.isNotEmpty) 'first_name': firstName,
-      if (lastName != null && lastName.isNotEmpty) 'last_name': lastName,
-      'roles': roles,
-      'billing': billing,
-      'shipping': shipping,
-      'meta_data': remoteUser?['meta_data'] is List
-          ? List<dynamic>.from(remoteUser!['meta_data'] as List)
-          : <dynamic>[],
-    };
-  }
-
-  Map<String, dynamic> _mergeCustomerData(
-      Map<String, dynamic> fallback,
-      Map<String, dynamic>? remote,
-      ) {
-    if (remote == null || remote.isEmpty) return fallback;
-
-    final merged = Map<String, dynamic>.from(fallback);
-
-    for (final entry in remote.entries) {
-      final value = entry.value;
-
-      if (value == null) continue;
-
-      if (entry.key == 'billing' && value is Map) {
-        final current = merged['billing'] is Map
-            ? Map<String, dynamic>.from(merged['billing'] as Map)
-            : <String, dynamic>{};
-
-        current.addAll(Map<String, dynamic>.from(value));
-        merged['billing'] = current;
-        continue;
-      }
-
-      if (entry.key == 'shipping' && value is Map) {
-        final current = merged['shipping'] is Map
-            ? Map<String, dynamic>.from(merged['shipping'] as Map)
-            : <String, dynamic>{};
-
-        current.addAll(Map<String, dynamic>.from(value));
-        merged['shipping'] = current;
-        continue;
-      }
-
-      if (entry.key == 'meta_data' && value is List && value.isNotEmpty) {
-        merged['meta_data'] = List<dynamic>.from(value);
-        continue;
-      }
-
-      final text = value.toString().trim();
-      if (text.isNotEmpty && text.toLowerCase() != 'null') {
-        merged[entry.key] = value;
-      }
-    }
-
-    return merged;
-  }
-
-  String? _firstNonEmptyString(List<dynamic> values) {
-    for (final value in values) {
-      if (value == null) continue;
-
-      final text = value.toString().trim();
-
-      if (text.isNotEmpty &&
-          text != '—' &&
-          text.toLowerCase() != 'null' &&
-          text.toLowerCase() != 'false') {
-        return text;
-      }
-    }
-
-    return null;
   }
 
   String? _stringFromUserData(
@@ -338,76 +214,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
 
     return null;
-  }
-
-  List<String> _rolesFromDynamic(dynamic value) {
-    final roles = <String>[];
-
-    void addRole(dynamic item) {
-      if (item == null) return;
-
-      if (item is Iterable) {
-        for (final child in item) {
-          addRole(child);
-        }
-        return;
-      }
-
-      if (item is Map) {
-        for (final entry in item.entries) {
-          if (entry.value == true || entry.value == 1 || entry.value?.toString() == '1') {
-            addRole(entry.key);
-          } else {
-            addRole(entry.value);
-          }
-        }
-        return;
-      }
-
-      final raw = item.toString().trim();
-      if (raw.isEmpty || raw.toLowerCase() == 'null') return;
-
-      for (final part in raw.split(',')) {
-        final role = part.trim();
-        if (role.isNotEmpty && !roles.contains(role)) {
-          roles.add(role);
-        }
-      }
-    }
-
-    addRole(value);
-    return roles;
-  }
-
-  String _normalizeRole(String value) {
-    return value
-        .toLowerCase()
-        .trim()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ñ', 'n')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
-  }
-
-  bool _roleCanUseAdminTheme(dynamic value) {
-    final roles = _rolesFromDynamic(value);
-
-    for (final role in roles) {
-      final normalized = _normalizeRole(role);
-      if (normalized == 'admin' ||
-          normalized == 'administrator' ||
-          normalized == 'administrador' ||
-          normalized == 'shopmanager' ||
-          normalized == 'gestordelatienda' ||
-          normalized.startsWith('comercial')) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   int? _extractWordPressId({
@@ -485,56 +291,37 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   String _getInicial() {
-    final firstName = _wooCustomer?['first_name']?.toString() ?? '';
-    if (firstName.isNotEmpty) return firstName[0].toUpperCase();
-
-    final company = _getCompany();
-    if (company.isNotEmpty) return company[0].toUpperCase();
-
-    final email = _wooCustomer?['email']?.toString() ?? '';
-    return email.isNotEmpty ? email[0].toUpperCase() : 'M';
+    if (_wooCustomer != null) {
+      final n = _wooCustomer!['first_name']?.toString() ?? '';
+      if (n.isNotEmpty) return n[0].toUpperCase();
+      final c = _wooCustomer!['billing']?['company']?.toString() ?? '';
+      if (c.isNotEmpty) return c[0].toUpperCase();
+    }
+    final e = _wooCustomer?['email'] ?? FirebaseAuth.instance.currentUser?.email ?? '';
+    return e.isNotEmpty ? e[0].toUpperCase() : 'M';
   }
 
   String _getDisplayName() {
-    final firstName = _wooCustomer?['first_name']?.toString() ?? '';
-    final lastName = _wooCustomer?['last_name']?.toString() ?? '';
-    final fullName = '$firstName $lastName'.trim();
-
-    if (fullName.isNotEmpty) return fullName;
-
-    final name = _wooCustomer?['name']?.toString().trim() ?? '';
-    if (name.isNotEmpty && name.toLowerCase() != 'null') return name;
-
-    final email = _wooCustomer?['email']?.toString().trim() ?? '';
-    if (email.isNotEmpty) return email;
-
+    if (_wooCustomer != null) {
+      final f = _wooCustomer!['first_name']?.toString() ?? '';
+      final l = _wooCustomer!['last_name']?.toString() ?? '';
+      if (f.isNotEmpty || l.isNotEmpty) return '$f $l'.trim();
+    }
     return 'Usuario';
   }
 
-  String _getCompany() {
-    final billing = _wooCustomer?['billing'];
-    if (billing is Map) {
-      return billing['company']?.toString().trim() ?? '';
-    }
-    return '';
-  }
 
   String _getMeta(String key) {
-    if (_wooCustomer == null) return '—';
-
+    if (_wooCustomer == null) return "—";
     final meta = _wooCustomer!['meta_data'] as List? ?? [];
-
     try {
-      for (final item in meta) {
-        if (item is Map &&
-            item['key']?.toString().toLowerCase().trim() ==
-                key.toLowerCase().trim()) {
-          return item['value']?.toString() ?? '—';
+      for (final m in meta) {
+        if (m is Map && m['key']?.toString().toLowerCase().trim() == key.toLowerCase().trim()) {
+          return m['value']?.toString() ?? "—";
         }
       }
     } catch (_) {}
-
-    return '—';
+    return "—";
   }
 
   String _safeValue(dynamic value) {
@@ -545,11 +332,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   String _maskSensitivePaymentData(String value) {
     var text = value.trim();
-
     if (text.isEmpty || text == '—' || text.toLowerCase() == 'null') {
       return '—';
     }
-
     text = text.replaceAllMapped(
       RegExp(r'\b([A-Z]{2}\d{2}[A-Z0-9\s]{10,34})\b', caseSensitive: false),
           (match) {
@@ -559,7 +344,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         return '$prefix** **** **** **** **** $last4';
       },
     );
-
     text = text.replaceAllMapped(
       RegExp(r'\b(?:\d[ -]?){12,19}\b'),
           (match) {
@@ -569,7 +353,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         return '****$last4';
       },
     );
-
     return text;
   }
 
@@ -584,88 +367,60 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       'default_payment_method',
       'b2b_payment_method',
     ];
-
     for (final key in keys) {
       final value = _getMeta(key).trim();
-      if (value.isNotEmpty &&
-          value != '—' &&
-          value.toLowerCase() != 'null') {
+      if (value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
         return value;
       }
     }
-
     return '';
   }
 
   String _paymentMethodLabel() {
     final raw = _getPaymentMethodRaw().trim();
-
     if (raw.isEmpty || raw == '—' || raw.toLowerCase() == 'null') {
       return '—';
     }
-
     final value = raw.toLowerCase();
     final masked = _maskSensitivePaymentData(raw);
 
-    if (value.contains('bacs') ||
-        value.contains('transferencia') ||
-        value.contains('bank') ||
-        value.contains('iban')) {
-      return masked == raw
-          ? 'Transferencia bancaria'
-          : 'Transferencia bancaria · $masked';
+    if (value.contains('bacs') || value.contains('transferencia') || value.contains('bank') || value.contains('iban')) {
+      return masked == raw ? 'Transferencia bancaria' : 'Transferencia bancaria · $masked';
     }
-
-    if (value.contains('redsys') ||
-        value.contains('tarjeta') ||
-        value.contains('card') ||
-        value.contains('tpv') ||
-        value.contains('stripe')) {
+    if (value.contains('redsys') || value.contains('tarjeta') || value.contains('card') || value.contains('tpv') || value.contains('stripe')) {
       final last4Match = RegExp(r'\*{2,}\d{4}').firstMatch(masked);
       if (last4Match != null) {
         return 'Tarjeta terminada en ${last4Match.group(0)}';
       }
       return 'Tarjeta bancaria';
     }
-
-    if (value.contains('paypal')) return 'PayPal';
-
-    if (value.contains('cheque') ||
-        value.contains('giro') ||
-        value.contains('pagare') ||
-        value.contains('pagaré') ||
-        value.contains('aplazado') ||
-        value.contains('credito') ||
-        value.contains('crédito')) {
+    if (value.contains('paypal')) {
+      return 'PayPal';
+    }
+    if (value.contains('cheque') || value.contains('giro') || value.contains('pagare') || value.contains('pagaré') || value.contains('aplazado') || value.contains('credito') || value.contains('crédito')) {
       return 'Giro / pago aplazado';
     }
-
     return masked;
   }
 
   String _creditLimitLabel() {
     final credit = _getMeta('credit_limit').trim();
-
-    if (credit.isEmpty ||
-        credit == '—' ||
-        credit == '0' ||
-        credit == '0.0' ||
-        credit == '0.00' ||
-        credit.toLowerCase() == 'null') {
+    if (credit.isEmpty || credit == '—' || credit == '0' || credit == '0.0' || credit == '0.00' || credit.toLowerCase() == 'null') {
       return 'No aplica';
     }
-
     if (credit.contains('€')) return credit;
     return '$credit€';
   }
 
+
+  // ================= MÉTODOS MEJORADOS =================
   String _getAssignedManager() {
     final manager = _getMeta('assigned_manager').trim();
-
-    if (manager.isEmpty || manager == '—' || manager.toLowerCase() == 'null') {
+    if (manager.isEmpty ||
+        manager == '—' ||
+        manager.toLowerCase() == 'null') {
       return 'Mundicam';
     }
-
     return manager;
   }
 
@@ -724,11 +479,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     return '—';
   }
+  // =================================================
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-
     return Scaffold(
       backgroundColor: _pageBg,
       appBar: _ProfilePageAppBar(
@@ -738,9 +492,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         onRefresh: _refreshProfile,
         onLogout: () => _confirmSignOut(context),
       ),
-      body: user == null
-          ? const Center(child: Text('No has iniciado sesión'))
-          : _loadingData
+      body: _loadingData
           ? Center(
         child: CircularProgressIndicator(color: _brandColor),
       )
@@ -760,14 +512,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       _quickButton(
                         context,
                         Icons.request_quote_outlined,
-                        'Presupuestos',
+                        "Presupuestos",
                         const QuotesPage(),
                       ),
                       const SizedBox(width: 12),
                       _quickButton(
                         context,
                         Icons.local_shipping_outlined,
-                        'Mis Pedidos',
+                        "Mis Pedidos",
                         const OrdersPage(),
                       ),
                     ],
@@ -775,20 +527,20 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   const SizedBox(height: 22),
                   _buildMenuCard(
                     context,
-                    title: 'SOPORTE Y REPARACIONES',
+                    title: "SOPORTE Y REPARACIONES",
                     items: [
                       _buildMenuItem(
                         context,
                         Icons.handyman_outlined,
-                        'Gestión de RMA',
-                        'Material en reparación',
+                        "Gestión de RMA",
+                        "Material en reparación",
                         const RmaPage(),
                       ),
                       _buildMenuItem(
                         context,
                         Icons.chat_bubble_outline_rounded,
-                        'Tickets Técnicos',
-                        'Habla con soporte',
+                        "Tickets Técnicos",
+                        "Habla con soporte",
                         const SupportTicketsPage(),
                       ),
                     ],
@@ -803,7 +555,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Widget _buildHeader() {
-    final company = _getCompany();
     final email = _wooCustomer?['email']?.toString() ?? '';
 
     return Container(
@@ -892,21 +643,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         height: 1.1,
                       ),
                     ),
-                    if (company.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        company,
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _muted,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 6),
                     Text(
                       email,
                       textAlign: TextAlign.center,
@@ -925,16 +662,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       runSpacing: 6,
                       children: [
                         _profilePill(
-                          icon: Icons.business_center_outlined,
-                          text: 'Cliente profesional',
+                          icon: _roleIcon,
+                          text: _roleLabel,
                           color: _brandColor,
                         ),
-                        if (_isAdmin)
-                          _profilePill(
-                            icon: Icons.admin_panel_settings_outlined,
-                            text: 'Administrador',
-                            color: Colors.deepPurple,
-                          ),
                       ],
                     ),
                   ],
@@ -1014,7 +745,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               onPressed: _refreshProfile,
               icon: const Icon(Icons.refresh),
               label: const Text(
-                'REINTENTAR',
+                "REINTENTAR",
                 style: TextStyle(
                   fontFamily: 'Oswald',
                   fontWeight: FontWeight.w900,
@@ -1055,10 +786,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _mainCardHeader(
-            _isAdmin ? 'PERFIL ADMINISTRADOR' : 'DATOS DEL CLIENTE',
-            _isAdmin
-                ? Icons.admin_panel_settings_outlined
-                : Icons.business_center_outlined,
+            _isAdmin ? "PERFIL ADMINISTRADOR" : "PERFIL ${_roleLabel.toUpperCase()}",
+            _isAdmin ? Icons.admin_panel_settings_outlined : _roleIcon,
           ),
           const SizedBox(height: 16),
           _dataGroup(
@@ -1066,28 +795,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.person_outline,
-                'Nombre',
-                '${_wooCustomer!['first_name'] ?? ''} ${_wooCustomer!['last_name'] ?? ''}'
+                "Nombre",
+                "${_wooCustomer!['first_name'] ?? ''} ${_wooCustomer!['last_name'] ?? ''}"
                     .trim(),
               ),
               _infoRow(
-                Icons.confirmation_number_outlined,
-                'ID cliente',
-                _safeValue(_wooCustomer!['id']),
-              ),
-              _infoRow(
                 Icons.business_outlined,
-                'Empresa',
+                "Empresa",
                 _safeValue(billing['company']),
               ),
               _infoRow(
                 Icons.badge_outlined,
-                'CIF / NIF',
+                "CIF / NIF",
                 _getCifNif(),
               ),
               _infoRow(
                 Icons.support_agent_outlined,
-                'Gestor asignado',
+                "Gestor asignado",
                 _getAssignedManager(),
               ),
             ],
@@ -1098,12 +822,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.phone_outlined,
-                'Teléfono',
+                "Teléfono",
                 _safeValue(billing['phone']),
               ),
               _infoRow(
                 Icons.email_outlined,
-                'Email',
+                "Email",
                 _safeValue(_wooCustomer!['email']),
               ),
             ],
@@ -1114,27 +838,27 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.location_on_outlined,
-                'Dirección',
+                "Dirección",
                 _safeValue(billing['address_1']),
               ),
               _infoRow(
                 Icons.markunread_mailbox_outlined,
-                'Código Postal',
+                "Código Postal",
                 _safeValue(billing['postcode']),
               ),
               _infoRow(
                 Icons.location_city_outlined,
-                'Ciudad',
+                "Ciudad",
                 _safeValue(billing['city']),
               ),
               _infoRow(
                 Icons.map_outlined,
-                'Provincia',
+                "Provincia",
                 _safeValue(billing['state']),
               ),
               _infoRow(
                 Icons.flag_outlined,
-                'País',
+                "País",
                 _safeValue(billing['country']),
               ),
             ],
@@ -1145,12 +869,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.payments_outlined,
-                'Forma de pago',
+                "Forma de pago",
                 _paymentMethodLabel(),
               ),
               _infoRow(
                 Icons.account_balance_wallet_outlined,
-                'Límite de crédito B2B',
+                "Límite de crédito B2B",
                 _creditLimitLabel(),
               ),
             ],
@@ -1250,9 +974,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   );
 
   Widget _infoRow(IconData icon, String label, String value) {
-    final displayValue = value.trim().isEmpty ? '—' : value.trim();
-    final isEmpty = displayValue == '—';
-
+    final displayValue = value.trim().isEmpty ? "—" : value.trim();
+    final isEmpty = displayValue == "—";
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1310,10 +1033,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       ) {
     return Expanded(
       child: GestureDetector(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => page),
-        ),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
         child: Container(
           height: 112,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
@@ -1434,10 +1154,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       ) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => page),
-      ),
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
       leading: Container(
         width: 42,
         height: 42,
@@ -1480,26 +1197,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('¿Cerrar sesión?'),
-        content: const Text('Se cerrará la sesión.'),
+        title: const Text("¿Cerrar sesión?"),
+        content: const Text("Se cerrará la sesión."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('CANCELAR'),
+            child: const Text("CANCELAR"),
           ),
           TextButton(
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
-              await ApiService().clearWordPressSession();
-
               final prefs = await SharedPreferences.getInstance();
               await prefs.clear();
-
               if (ctx.mounted) Navigator.pop(ctx);
               SystemNavigator.pop();
             },
             child: const Text(
-              'CERRAR SESIÓN',
+              "CERRAR SESIÓN",
               style: TextStyle(
                 color: Colors.red,
                 fontWeight: FontWeight.bold,
@@ -1511,6 +1225,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// APP BAR PERSONALIZADO PARA PERFIL (CON FLECHA VISIBLE Y TÍTULO CENTRADO)
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -1555,6 +1273,7 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
           child: Stack(
             alignment: Alignment.center,
             children: [
+              // Flecha izquierda
               Positioned(
                 left: 8,
                 child: IconButton(
@@ -1568,6 +1287,7 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
                   splashRadius: 22,
                 ),
               ),
+              // Título centrado
               Center(
                 child: Text(
                   title.toUpperCase(),
@@ -1584,6 +1304,7 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
                   ),
                 ),
               ),
+              // Botones derecha
               Positioned(
                 right: 8,
                 child: Row(

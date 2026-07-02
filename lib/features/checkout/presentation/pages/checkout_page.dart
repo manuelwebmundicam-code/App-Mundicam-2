@@ -213,24 +213,23 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   // ──────────────────────────────────────────────
 
   Future<void> _cargarDatosCliente() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      setState(() {
-        _loadingProfile = false;
-        _errorMessage = 'Debes iniciar sesión para continuar';
-      });
-      return;
-    }
+    final apiService = ApiService();
 
     try {
-      String? email = user.email?.trim().toLowerCase();
-      if (email == null || email.isEmpty) {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-        email = (userDoc.data()?['email'] as String?)?.trim().toLowerCase();
+      String? email = await apiService.currentSessionEmail();
+
+      final user = FirebaseAuth.instance.currentUser;
+      if ((email == null || email.isEmpty) && user != null) {
+        email = user.email?.trim().toLowerCase();
+        if (email == null || email.isEmpty) {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          email = (userDoc.data()?['email'] as String?)?.trim().toLowerCase();
+        }
       }
+
       if (email == null || email.isEmpty) {
         setState(() {
           _loadingProfile = false;
@@ -239,7 +238,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         return;
       }
 
-      final apiService = ApiService();
       final wooCustomer = await apiService.getCustomerByEmail(email);
       if (wooCustomer == null) {
         setState(() {
@@ -537,8 +535,16 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           return;
         }
 
-        final paymentUrl = _buildWooPaymentUrl(
-            orderId: result.orderId!, orderKey: orderKey);
+        final securePaymentUrl = result.paymentUrl ??
+            await ApiService().getSecureCardPaymentUrl(
+              orderId: result.orderId!,
+              orderKey: orderKey,
+            );
+        final paymentUrl = securePaymentUrl ??
+            _buildWooPaymentUrl(orderId: result.orderId!, orderKey: orderKey);
+
+        if (!mounted) return;
+
         setState(() => _isLoading = false);
 
         final paid = await Navigator.push<bool>(
@@ -548,6 +554,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               orderId: result.orderId!,
               orderKey: orderKey,
               paymentUrl: paymentUrl,
+              orderNumber: result.orderNumber,
+              amount: total,
+              paymentMethodTitle: _paymentMethodTitle,
             ),
           ),
         );

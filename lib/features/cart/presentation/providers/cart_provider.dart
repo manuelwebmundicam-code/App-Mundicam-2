@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 
 class CartItem {
@@ -153,6 +154,18 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     }
 
     _saveCart();
+
+    // Sincronización ligera con el carrito persistente del plugin nuevo.
+    // Si falla no bloquea el carrito local ni la experiencia de compra.
+    ApiService()
+        .addProductToRemoteCart(productId: product.id, quantity: safeQty)
+        .then((ok) {
+      if (kDebugMode) {
+        debugPrint(ok
+            ? '✅ Carrito remoto App API sincronizado'
+            : '⚠️ Carrito remoto App API no sincronizado');
+      }
+    });
   }
 
   void removeProduct(int productId) {

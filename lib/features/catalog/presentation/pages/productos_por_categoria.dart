@@ -1,3 +1,6 @@
+// ARCHIVO: lib/features/catalog/presentation/pages/productos_por_categoria.dart
+// Sustituye el archivo completo por este contenido.
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -11,23 +14,28 @@ import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
+import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/busqueda_resultados_page.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
 import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.dart';
-import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
-import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
-import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 
 final _canViewStockDetailsProvider = FutureProvider<bool>((ref) async {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return false;
-
   try {
+    // La sesión de negocio válida es WordPress/MundiCam App API.
+    // No dependemos de Firebase para decidir permisos de stock.
+    final canViewFromAppSession = await ApiService().currentSessionCanViewStockDetails();
+    if (canViewFromAppSession) return true;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+
     final wordpressId = await _resolveWordPressIdForCurrentUser(user);
     if (wordpressId == null || wordpressId <= 0) {
       return false;
@@ -131,6 +139,7 @@ int? _wordPressIdFromDynamic(dynamic value) {
 class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
   final int categoryId;
   final String categoryName;
+  final String? initialSearch;
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
 
@@ -138,6 +147,7 @@ class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
     super.key,
     required this.categoryId,
     required this.categoryName,
+    this.initialSearch,
     this.onGoCart,
     this.onGoQuotes,
   });
@@ -174,24 +184,37 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     _preserveFiltersForNextCategoryOpen = false;
 
     final currentFilters = ref.read(productFilterProvider);
+    final initialSearch = widget.initialSearch?.trim() ?? '';
+    final hasInitialSearch = initialSearch.isNotEmpty;
     final shouldClearFiltersFromOtherCategory = !preserveFilters &&
         previousCategoryId != null &&
         previousCategoryId != widget.categoryId &&
-        currentFilters.hasActiveFilters;
+        currentFilters.hasActiveFilters &&
+        !hasInitialSearch;
 
-    _searchController.text = currentFilters.search;
+    _searchController.text = hasInitialSearch ? initialSearch : currentFilters.search;
 
     _scrollController.addListener(_onScrollThrottled);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
 
-      if (shouldClearFiltersFromOtherCategory) {
+      if (hasInitialSearch) {
+        ref.read(productFilterProvider.notifier).update(
+          search: initialSearch,
+          orderBy: '',
+          brand: '',
+          brandId: null,
+          attributeTermIds: const <String, int>{},
+          attributeLabels: const <String, String>{},
+          attributeGroupLabels: const <String, String>{},
+        );
+        _reloadCurrentCategory(scrollTop: true);
+      } else if (shouldClearFiltersFromOtherCategory) {
         _searchController.clear();
         ref.read(productFilterProvider.notifier).reset();
       }
 
       _prewarmCategorySearchCache();
-      _prewarmCategoryFiltersCache();
     });
   }
 
@@ -312,25 +335,6 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     });
   }
 
-  void _prewarmCategoryFiltersCache() {
-    if (widget.categoryId <= 0) return;
-
-    Future<void>.delayed(const Duration(milliseconds: 550), () async {
-      if (!mounted) return;
-
-      try {
-        await ApiService()
-            .getCatalogFiltersForCategory(
-          categoryId: widget.categoryId,
-          forceRefresh: false,
-        )
-            .timeout(const Duration(seconds: 5));
-      } catch (_) {
-        // La precarga de filtros nunca debe bloquear ni mostrar error.
-      }
-    });
-  }
-
   void _reloadCurrentCategory({
     bool scrollTop = true,
   }) {
@@ -341,6 +345,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     );
 
     notifier.clearCacheForCurrentCategory();
+    notifier.showReloadingState();
     unawaited(notifier.loadFirstPage(forceRefresh: true));
 
     if (scrollTop) {
@@ -375,8 +380,13 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   void _scheduleSearchSuggestions(String value) {
     _suggestionsDebounce?.cancel();
 
-    final clean = value.trim();
-    if (clean.length < 3) {
+    final clean = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+
+    // En categorías hacemos el mismo comportamiento que en Home:
+    // solo desplegamos predictivo cuando el usuario escribe un SKU.
+    // Búsquedas genéricas como domo/turret se ejecutan al confirmar o con filtros,
+    // pero no abren una tarjeta abstracta de sugerencias.
+    if (clean.length < 2 || !_looksLikeSku(clean)) {
       _suggestionsToken++;
       if (_searchSuggestions.isNotEmpty || _isLoadingSuggestions) {
         setState(() {
@@ -387,36 +397,29 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       return;
     }
 
-    final quickSuggestions = _fallbackQuickSuggestions(clean);
-    if (quickSuggestions.isNotEmpty) {
-      setState(() {
-        _searchSuggestions = quickSuggestions;
-        _isLoadingSuggestions = true;
-      });
-    }
+    setState(() {
+      _searchSuggestions = [];
+      _isLoadingSuggestions = true;
+    });
 
-    _suggestionsDebounce = Timer(const Duration(milliseconds: 300), () async {
+    _suggestionsDebounce = Timer(const Duration(milliseconds: 180), () async {
       final token = ++_suggestionsToken;
       if (!mounted) return;
 
-      if (_searchSuggestions.isEmpty) {
-        setState(() => _isLoadingSuggestions = true);
-      }
-
       try {
-        final suggestions = await _buildSmartSuggestions(clean).timeout(
-          const Duration(seconds: 4),
+        final suggestions = await _buildSkuProductSuggestions(clean).timeout(
+          const Duration(seconds: 8),
         );
 
         if (!mounted || token != _suggestionsToken) return;
         setState(() {
-          _searchSuggestions = suggestions.isEmpty ? quickSuggestions : suggestions;
+          _searchSuggestions = suggestions;
           _isLoadingSuggestions = false;
         });
       } catch (_) {
         if (!mounted || token != _suggestionsToken) return;
         setState(() {
-          _searchSuggestions = quickSuggestions;
+          _searchSuggestions = [];
           _isLoadingSuggestions = false;
         });
       }
@@ -449,11 +452,81 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     );
   }
 
+  Future<List<_CatalogSearchSuggestion>> _buildSkuProductSuggestions(String rawQuery) async {
+    final cleanQuery = rawQuery.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (!_looksLikeSku(cleanQuery)) return [];
+
+    final byId = <int, Product>{};
+    final api = ApiService();
+
+    void addAll(Iterable<Product> products) {
+      for (final product in products) {
+        if (product.id <= 0) continue;
+        byId[product.id] = product;
+      }
+    }
+
+    try {
+      addAll(
+        await api.buscarProductosPredictivo(cleanQuery, limit: 12).timeout(
+          const Duration(seconds: 6),
+        ),
+      );
+    } catch (_) {
+      // Continuamos con la búsqueda estándar de catálogo.
+    }
+
+    if (byId.isEmpty) {
+      try {
+        addAll(
+          await api.buscarProductos(cleanQuery).timeout(
+            const Duration(seconds: 6),
+          ),
+        );
+      } catch (_) {
+        // Si falla, no mostramos sugerencias genéricas para no confundir.
+      }
+    }
+
+    final tokens = _meaningfulTokens(cleanQuery);
+    final scoredProducts = byId.values
+        .map(
+          (product) => _ScoredProduct(
+        product: product,
+        score: _scoreSuggestionProduct(
+          product,
+          cleanQuery,
+          tokens,
+          const <String>{},
+          true,
+        ),
+      ),
+    )
+        .where((item) => item.score > 0)
+        .toList()
+      ..sort((a, b) {
+        final byScore = b.score.compareTo(a.score);
+        if (byScore != 0) return byScore;
+        return a.product.name.compareTo(b.product.name);
+      });
+
+    return scoredProducts
+        .take(5)
+        .map(
+          (item) => _CatalogSearchSuggestion.product(
+        item.product,
+        skuLike: true,
+        global: item.product.id > 0,
+      ),
+    )
+        .toList();
+  }
+
   Future<List<_CatalogSearchSuggestion>> _buildSmartSuggestions(
       String rawQuery,
       ) async {
     final cleanQuery = rawQuery.trim();
-    if (cleanQuery.length < 3) return [];
+    if (cleanQuery.length < 2) return [];
 
     final cacheKey = _suggestionsCacheKey(cleanQuery);
     final cachedSuggestions = _readSuggestionsCache(cacheKey);
@@ -484,8 +557,18 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
           ? const Duration(milliseconds: 900)
           : const Duration(milliseconds: 1400);
 
-      for (final term in searchTerms.take(2)) {
+      for (final term in searchTerms.take(3)) {
         try {
+          if (categoryId == null) {
+            final products = await ApiService()
+                .buscarProductos(term)
+                .timeout(const Duration(seconds: 5));
+            for (final product in products) {
+              target[product.id] = product;
+            }
+            if (target.length >= perPage) continue;
+          }
+
           final result = await ApiService().getProductosCatalogoFiltrado(
             categoryId: categoryId,
             search: term,
@@ -675,7 +758,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
   List<_CatalogSearchSuggestion> _fallbackQuickSuggestions(String rawQuery) {
     final cleanQuery = rawQuery.trim();
-    if (cleanQuery.length < 3) return [];
+    if (cleanQuery.length < 2) return [];
 
     final suggestions = <_CatalogSearchSuggestion>[];
     final used = <String>{};
@@ -909,11 +992,11 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   void _handleSuggestionTap(_CatalogSearchSuggestion suggestion) {
-    _hideSearchSuggestions();
-    FocusScope.of(context).unfocus();
-
     final product = suggestion.product;
     if (product != null) {
+      // Igual que en Home: no vaciamos la sugerencia de SKU al abrir la ficha.
+      // Al volver atrás, el usuario conserva la tarjeta con imagen, nombre y SKU.
+      FocusScope.of(context).unfocus();
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => ProductDetailScreen(
@@ -929,6 +1012,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       return;
     }
 
+    _hideSearchSuggestions();
+    FocusScope.of(context).unfocus();
+
     final cleanValue = suggestion.type == _CatalogSearchSuggestionType.brand &&
         suggestion.brandName != null &&
         suggestion.brandName!.trim().isNotEmpty
@@ -939,6 +1025,33 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     _searchController.selection = TextSelection.fromPosition(
       TextPosition(offset: _searchController.text.length),
     );
+
+    final targetCategoryId = suggestion.targetCategoryId;
+    final targetCategoryName = suggestion.targetCategoryName?.trim() ?? '';
+    if (targetCategoryId != null && targetCategoryId > 0 && targetCategoryName.isNotEmpty) {
+      _preserveFiltersForNextCategoryOpen = true;
+      ref.read(productFilterProvider.notifier).update(
+        search: cleanValue,
+        orderBy: '',
+        brand: '',
+        brandId: null,
+        attributeTermIds: const <String, int>{},
+        attributeLabels: const <String, String>{},
+        attributeGroupLabels: const <String, String>{},
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ProductosPorCategoriaScreen(
+            categoryId: targetCategoryId,
+            categoryName: targetCategoryName,
+            initialSearch: cleanValue,
+            onGoCart: widget.onGoCart,
+            onGoQuotes: widget.onGoQuotes,
+          ),
+        ),
+      );
+      return;
+    }
 
     _openGlobalSearchResults(cleanValue);
   }
@@ -1234,7 +1347,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     return RegExp(r'(cable|latiguillo|conector|rj45|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|pila|pilas|bateria|baterias|fuente|alimentador|alimentacion|transformador|adaptador|cargador)').hasMatch(compact);
   }
 
-  bool _isMainDeviceProductForAccessorySearch(String productName) {
+  bool _isMainDeviceAccessoryName(String productName) {
     final compactName = _compactForSearch(productName);
 
     final hasMainDeviceWord = RegExp(
@@ -1271,7 +1384,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       product.brandName ?? '',
     ].join(' '));
 
-    if (_isMainDeviceProductForAccessorySearch(product.name)) {
+    if (_isMainDeviceAccessoryName(product.name)) {
       return false;
     }
 
@@ -1330,6 +1443,16 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     final compactSku = _compactForSearch(product.sku);
     final compactName = _compactForSearch(product.name);
     final compactBrand = _compactForSearch(product.brandName ?? '');
+    if (skuLike) {
+      if (compactSku.isEmpty) return 0;
+      if (compactSku == compactQuery) return 500;
+      if (compactSku.startsWith(compactQuery)) return 420;
+      if (compactSku.contains(compactQuery)) return 360;
+      // En búsquedas con formato de SKU solo se aceptan coincidencias de SKU.
+      // No se puntúa nombre, descripción ni atributos para evitar falsos positivos.
+      return 0;
+    }
+
     final compactStrongText = _compactForSearch([
       product.name,
       product.sku,
@@ -1541,6 +1664,10 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       return;
     }
 
+    // La búsqueda confirmada desde una categoría debe comportarse igual que
+    // el buscador de Home: búsqueda global, resultados precisos y filtros
+    // reales sobre esos resultados. No la forzamos dentro de la categoría
+    // actual porque genera falsos resultados y deja sin filtros útiles.
     _openGlobalSearchResults(cleanSearch);
   }
 
@@ -1644,6 +1771,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         parentCategoryId: widget.categoryId,
         categoryName: widget.categoryName,
         productosEnPantalla: productosState,
+        onApplyFilters: () => _reloadCurrentCategory(scrollTop: true),
       ),
       appBar: _CatalogCategoryAppBar(
         title: widget.categoryName,
@@ -1957,15 +2085,31 @@ class _CatalogControls extends StatelessWidget {
             textInputAction: TextInputAction.search,
             onChanged: onChanged,
             onSubmitted: (_) => onSubmitted(),
+            style: const TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
             decoration: InputDecoration(
-              hintText: 'Buscar en ${categoryName.toLowerCase()}',
-              prefixIcon: const Icon(Icons.search_rounded),
+              hintText: 'Buscar SKU, producto o característica',
+              hintStyle: const TextStyle(
+                color: Color(0xFF8A94A6),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: AppColors.primary,
+              ),
               suffixIcon: controller.text.trim().isNotEmpty
                   ? IconButton(
                 icon: const Icon(Icons.close_rounded),
                 onPressed: onClearSearch,
               )
-                  : null,
+                  : IconButton(
+                icon: const Icon(Icons.arrow_forward_rounded),
+                onPressed: onSubmitted,
+              ),
               filled: true,
               fillColor: const Color(0xFFF8F9FB),
               contentPadding: const EdgeInsets.symmetric(
@@ -2251,87 +2395,93 @@ class _SearchSuggestionsPanel extends StatelessWidget {
           ),
         ],
       ),
-      child: isLoading && suggestions.isEmpty
-          ? const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.primary,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 360),
+        child: isLoading && suggestions.isEmpty
+            ? const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primary,
+                ),
               ),
-            ),
-            SizedBox(width: 10),
-            Text(
-              'Buscando sugerencias...',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: Color(0xFF6B7280),
-                fontWeight: FontWeight.w600,
+              SizedBox(width: 10),
+              Text(
+                'Buscando sugerencias...',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+        )
+            : SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (suggestions.any(
+                    (item) => item.type == _CatalogSearchSuggestionType.redirect,
+              ))
+                const _SuggestionSectionLabel('APARTADO'),
+              ...suggestions
+                  .where(
+                    (item) =>
+                item.type == _CatalogSearchSuggestionType.redirect,
+              )
+                  .map((item) => _SuggestionTile(
+                suggestion: item,
+                onTap: onTap,
+              )),
+              if (suggestions.any(
+                    (item) => item.type == _CatalogSearchSuggestionType.product,
+              ))
+                const _SuggestionSectionLabel('PRODUCTOS'),
+              ...suggestions
+                  .where(
+                    (item) =>
+                item.type == _CatalogSearchSuggestionType.product,
+              )
+                  .map((item) => _SuggestionTile(
+                suggestion: item,
+                onTap: onTap,
+              )),
+              if (suggestions.any(
+                    (item) => item.type == _CatalogSearchSuggestionType.brand,
+              ))
+                const _SuggestionSectionLabel('MARCAS'),
+              ...suggestions
+                  .where(
+                    (item) =>
+                item.type == _CatalogSearchSuggestionType.brand,
+              )
+                  .map((item) => _SuggestionTile(
+                suggestion: item,
+                onTap: onTap,
+              )),
+              if (suggestions.any(
+                    (item) => item.type == _CatalogSearchSuggestionType.query,
+              ))
+                const _SuggestionSectionLabel('SUGERENCIAS'),
+              ...suggestions
+                  .where(
+                    (item) =>
+                item.type == _CatalogSearchSuggestionType.query,
+              )
+                  .map((item) => _SuggestionTile(
+                suggestion: item,
+                onTap: onTap,
+              )),
+            ],
+          ),
         ),
-      )
-          : Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (suggestions.any(
-                (item) => item.type == _CatalogSearchSuggestionType.redirect,
-          ))
-            const _SuggestionSectionLabel('MEJOR APARTADO'),
-          ...suggestions
-              .where(
-                (item) =>
-            item.type == _CatalogSearchSuggestionType.redirect,
-          )
-              .map((item) => _SuggestionTile(
-            suggestion: item,
-            onTap: onTap,
-          )),
-          if (suggestions.any(
-                (item) => item.type == _CatalogSearchSuggestionType.product,
-          ))
-            const _SuggestionSectionLabel('DESTACADOS'),
-          ...suggestions
-              .where(
-                (item) =>
-            item.type == _CatalogSearchSuggestionType.product,
-          )
-              .map((item) => _SuggestionTile(
-            suggestion: item,
-            onTap: onTap,
-          )),
-          if (suggestions.any(
-                (item) => item.type == _CatalogSearchSuggestionType.brand,
-          ))
-            const _SuggestionSectionLabel('MARCAS RELACIONADAS'),
-          ...suggestions
-              .where(
-                (item) =>
-            item.type == _CatalogSearchSuggestionType.brand,
-          )
-              .map((item) => _SuggestionTile(
-            suggestion: item,
-            onTap: onTap,
-          )),
-          if (suggestions.any(
-                (item) => item.type == _CatalogSearchSuggestionType.query,
-          ))
-            const _SuggestionSectionLabel('SUGERENCIAS'),
-          ...suggestions
-              .where(
-                (item) =>
-            item.type == _CatalogSearchSuggestionType.query,
-          )
-              .map((item) => _SuggestionTile(
-            suggestion: item,
-            onTap: onTap,
-          )),
-        ],
       ),
     );
   }
@@ -2375,7 +2525,7 @@ class _SuggestionTile extends StatelessWidget {
     return InkWell(
       onTap: () => onTap(suggestion),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 9, 14, 9),
+        padding: const EdgeInsets.fromLTRB(14, 7, 14, 7),
         child: Row(
           children: [
             if (product != null)
@@ -2383,8 +2533,8 @@ class _SuggestionTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 child: CachedNetworkImage(
                   imageUrl: product.imageUrl,
-                  width: 42,
-                  height: 42,
+                  width: 38,
+                  height: 38,
                   fit: BoxFit.contain,
                   cacheManager: ImageCacheService.cacheManager,
                   placeholder: (_, _) => Container(
@@ -2399,8 +2549,8 @@ class _SuggestionTile extends StatelessWidget {
               )
             else
               Container(
-                width: 34,
-                height: 34,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(11),
@@ -2727,7 +2877,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   bool _isAddingToQuote = false;
 
   double _precioDouble(Product p) {
-    return p.priceValue;
+    return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
   }
 
   String _formatearPrecioCompleto(double precio) {
@@ -2801,6 +2951,17 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     if (!widget.p.canAddToCart) return 0;
     if (_maxCantidadCompra <= 0) return cantidad;
     return cantidad.clamp(1, _maxCantidadCompra).toInt();
+  }
+
+  int get _cantidadPresupuestoSegura {
+    if (!widget.p.canRequestQuote) return 0;
+
+    final maxQty = widget.p.hasMundicamInternalStock
+        ? widget.p.generalStockQuantity + widget.p.murciaStockQuantity
+        : (widget.p.stockQuantity > 0 ? widget.p.stockQuantity : 999);
+
+    if (maxQty <= 0) return 0;
+    return cantidad.clamp(1, maxQty).toInt();
   }
   bool get _puedeComprar => widget.p.canAddToCart && _cantidadSegura > 0;
   bool get _puedeAnadirPresupuesto => widget.p.canRequestQuote && !_isAddingToQuote;
@@ -3020,8 +3181,10 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     size: 17,
                   ),
                   label: Text(
-                    !_tieneStock
-                        ? 'SIN STOCK'
+                    _bajoConsulta
+                        ? 'NO PRESUPUESTAR'
+                        : !_tieneStock
+                        ? 'NO PRESUPUESTAR'
                         : _isAddingToQuote
                         ? 'AÑADIENDO...'
                         : 'AÑADIR AL PRESUPUESTO',
@@ -3184,12 +3347,14 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     if (_isAddingToQuote) return;
     if (product.id == 0) return;
 
-    if (!product.hasStock) {
+    if (!product.canRequestQuote) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
+            product.isUnderConsultation
+                ? '"${product.name}" está bajo consulta y no puede añadirse al presupuesto.'
+                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
           ),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
@@ -3199,10 +3364,10 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       return;
     }
 
-    final precio = _precioDouble(product);
-    final qty = _cantidadSegura;
-
+    final qty = _cantidadPresupuestoSegura;
     if (qty <= 0) return;
+
+    final precio = _precioDouble(product);
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -3228,7 +3393,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         final orderId = DateTime.now().millisecondsSinceEpoch.toString();
         final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
 
-        await notifier.crearPresupuesto(orderId: orderId, nombre: nombreFinal);
+        await notifier.crearPresupuesto(
+          orderId: orderId,
+          nombre: nombreFinal,
+        );
+
         await notifier.anadirItem(
           orderId: orderId,
           item: LocalQuoteItem(
@@ -3242,7 +3411,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         mensaje = '$qty x ${product.name} añadido a "$nombreFinal"';
       } else if (action == 'anadir_existente') {
         final orderId = result['orderId']?.toString() ?? '';
-        final nombre = result['nombre']?.toString() ?? 'Presupuesto';
+        final nombre = result['nombre']?.toString() ?? 'presupuesto';
 
         if (orderId.isEmpty) {
           throw Exception('No se pudo identificar el presupuesto seleccionado.');
@@ -3261,14 +3430,16 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         mensaje = '$qty x ${product.name} añadido a "$nombre"';
       }
 
-      if (mounted && mensaje.isNotEmpty) {
+      if (!mounted) return;
+
+      if (mensaje.isNotEmpty) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(mensaje),
             backgroundColor: Colors.green.shade700,
-            behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
               label: 'VER',
               textColor: Colors.white,
@@ -3278,19 +3449,25 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         );
       }
     } catch (e) {
-      debugPrint('❌ Error en _addToQuote: $e');
+      if (kDebugMode) {
+        debugPrint('Error en _addToQuote: $e');
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al añadir al presupuesto: $e'),
+            content: Text('Error: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isAddingToQuote = false);
+      if (mounted) {
+        setState(() => _isAddingToQuote = false);
+      }
     }
   }
 
@@ -3395,3 +3572,4 @@ class ProductImage extends StatelessWidget {
     );
   }
 }
+
