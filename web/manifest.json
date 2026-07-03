@@ -1,6 +1,6 @@
 {
-    "name": "pruebaaa",
-    "short_name": "pruebaaa",
+    "name": "MundiCam",
+    "short_name": "MundiCam",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
