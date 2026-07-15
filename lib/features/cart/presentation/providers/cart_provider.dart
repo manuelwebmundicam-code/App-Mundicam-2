@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 
 class CartItem {
@@ -153,6 +154,18 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     }
 
     _saveCart();
+
+    // Sincronización ligera con el carrito persistente del plugin nuevo.
+    // Si falla no bloquea el carrito local ni la experiencia de compra.
+    ApiService()
+        .addProductToRemoteCart(productId: product.id, quantity: safeQty)
+        .then((ok) {
+      if (kDebugMode) {
+        debugPrint(ok
+            ? '✅ Carrito remoto App API sincronizado'
+            : '⚠️ Carrito remoto App API no sincronizado');
+      }
+    });
   }
 
   void removeProduct(int productId) {
@@ -187,7 +200,13 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     _saveCart();
   }
 
-  double get total => state.fold(0, (sum, item) {
+  /// Base imponible del carrito.
+  ///
+  /// El endpoint devuelve el precio profesional B2B por rol sin IVA.
+  /// La app solo lo usa para mostrar una estimación y para enviar
+  /// `expected_total` al backend como control antifallo. El backend siempre
+  /// recalcula el precio oficial antes de crear el pedido.
+  double get subtotal => state.fold(0, (sum, item) {
     if (!item.product.canAddToCart) return sum;
 
     final price = double.tryParse(
@@ -198,9 +217,9 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     return sum + (price * item.quantity);
   });
 
-  double get subtotal => total / 1.21;
+  double get iva => subtotal * 0.21;
 
-  double get iva => total - subtotal;
+  double get total => subtotal + iva;
 
   void _debugCart(String origen) {
     debugPrint('════════ CARRITO $origen ════════');

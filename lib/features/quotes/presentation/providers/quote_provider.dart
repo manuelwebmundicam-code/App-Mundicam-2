@@ -20,10 +20,15 @@ final hiddenQuoteIdsProvider = StateProvider<Set<String>>((ref) => <String>{});
 /// 2. FirebaseAuth.currentUser.email
 /// 3. providerData.first.email
 Future<String?> _resolveCurrentUserEmail() async {
+  final apiEmail = await ApiService().currentSessionEmail();
+  if (apiEmail != null && apiEmail.isNotEmpty) {
+    return apiEmail;
+  }
+
   final user = FirebaseAuth.instance.currentUser;
 
   if (user == null) {
-    debugPrint('❌ No hay usuario autenticado');
+    debugPrint('❌ No hay usuario Firebase y la sesión App API no tiene email');
     return null;
   }
 

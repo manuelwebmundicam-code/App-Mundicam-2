@@ -109,7 +109,7 @@ class _RegisterPageState extends State<RegisterPage> {
             child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover),
           ),
           Positioned.fill(
-            child: Container(color: Colors.black.withValues(alpha: 0.6)),
+            child: Container(color: Colors.black.withOpacity(0.6)),
           ),
           Center(
             child: SingleChildScrollView(
@@ -119,7 +119,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 child: Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: AppColors.background.withValues(alpha: 0.95),
+                    color: AppColors.background.withOpacity(0.95),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(

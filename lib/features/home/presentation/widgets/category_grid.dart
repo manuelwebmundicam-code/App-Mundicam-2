@@ -359,7 +359,7 @@ class CategoryCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(15),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
+              color: Colors.black.withOpacity(0.08),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -382,8 +382,8 @@ class CategoryCard extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       stops: const [0.45, 1.0],
                       colors: [
-                        Colors.black.withValues(alpha: 0.04),
-                        Colors.black.withValues(alpha: 0.85),
+                        Colors.black.withOpacity(0.04),
+                        Colors.black.withOpacity(0.85),
                       ],
                     ),
                   ),
@@ -496,7 +496,7 @@ class _CategoryAssetImageState extends State<_CategoryAssetImage> {
         child: Icon(
           Icons.category_outlined,
           size: 42,
-          color: Colors.white.withValues(alpha: 0.65),
+          color: Colors.white.withOpacity(0.65),
         ),
       ),
     );

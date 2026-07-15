@@ -30,3 +30,7 @@ doc/api/
 flutter_analyze.txt
 git_status.txt
 idea_files.txt
+
+# Android signing keys
+*.jks
+*.keystore

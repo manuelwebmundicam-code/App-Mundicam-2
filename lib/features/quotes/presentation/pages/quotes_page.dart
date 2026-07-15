@@ -9,6 +9,7 @@ import '../../../../shared/theme/app_theme.dart';
 import '../../../../shared/widgets/professional_page_app_bar.dart';
 import '../../../../shared/providers/badge_provider.dart';
 import '../../../cart/presentation/providers/cart_provider.dart';
+import '../../../catalog/presentation/pages/producto_detalles_page.dart';
 import '../../data/models/quote_model.dart';
 import '../../data/models/local_quote_model.dart';
 import '../providers/quote_provider.dart';
@@ -85,6 +86,68 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     ref.invalidate(quotesProvider);
     ref.invalidate(quoteBadgeProvider);
     ref.invalidate(cartBadgeProvider);
+  }
+
+  Future<void> _openProductDetail(int productId, String productName) async {
+    if (productId <= 0 || _isLoadingAction) return;
+
+    final navigator = Navigator.of(context);
+
+    try {
+      final product = await ApiService().getProductoById(productId);
+
+      if (!mounted) return;
+
+      if (product == null) {
+        _showSnackBar('No se pudo abrir el producto "$productName".', Colors.red);
+        return;
+      }
+
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => ProductDetailScreen(
+            product: product,
+            onGoCart: widget.onGoCart,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Error abriendo producto: $e', Colors.red);
+    }
+  }
+
+  Widget _buildDeleteProductButton({
+    required bool isDeleting,
+    required VoidCallback onPressed,
+  }) {
+    if (isDeleting) {
+      return const SizedBox(
+        width: 44,
+        height: 44,
+        child: Padding(
+          padding: EdgeInsets.all(10),
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red),
+        ),
+      );
+    }
+
+    return Tooltip(
+      message: 'Eliminar producto',
+      child: Material(
+        color: Colors.red.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onPressed,
+          child: const SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(Icons.close_rounded, size: 24, color: Colors.red),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _saveHiddenIds() async {
@@ -472,7 +535,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: Row(
         children: [
@@ -481,7 +544,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             decoration: BoxDecoration(
               gradient: const LinearGradient(colors: [AppColors.primary, Color(0xFFE53935)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               borderRadius: BorderRadius.circular(14),
-              boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3))],
+              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))],
             ),
             child: const Icon(Icons.request_quote_rounded, color: Colors.white, size: 22),
           ),
@@ -509,7 +572,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
         border: Border.all(color: const Color(0xFFF0F0F0)),
       ),
       child: ClipRRect(
@@ -525,7 +588,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           }),
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.folder_rounded, color: Colors.orange, size: 24),
           ),
           title: Row(
@@ -576,7 +639,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
         border: Border.all(color: const Color(0xFFF0F0F0)),
       ),
       child: ClipRRect(
@@ -593,7 +656,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           },
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.cloud_rounded, color: Colors.blue, size: 24),
           ),
           title: Row(
@@ -654,30 +717,77 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: Colors.orange.shade300, shape: BoxShape.circle)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(item.productName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF1A1A1A)), maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 3),
-              Text('${item.quantity} ud × ${_formatMoney(item.price)} = ${_formatMoney(item.subtotal)}', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-            ]),
-          ),
-          if (isDeleting)
-            const SizedBox(width: 28, height: 28, child: Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red)))
-          else
-            IconButton(
-              onPressed: () => _eliminarProductoLocal(quote, item.productId, item.productName),
-              icon: const Icon(Icons.close_rounded, size: 16, color: Colors.red),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _openProductDetail(item.productId, item.productName),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade300,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.productName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: Color(0xFF1A1A1A),
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${item.quantity} ud × ${_formatMoney(item.price)} = ${_formatMoney(item.subtotal)}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[500],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Toca para ver ficha técnica',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.grey[500],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _buildDeleteProductButton(
+                  isDeleting: isDeleting,
+                  onPressed: () => _eliminarProductoLocal(
+                    quote,
+                    item.productId,
+                    item.productName,
+                  ),
+                ),
+              ],
             ),
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -688,30 +798,73 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: Colors.blue.shade300, shape: BoxShape.circle)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF1A1A1A)), maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 3),
-              Text('${item.quantity} ud × ${_formatMoney(item.unitPrice)} = ${_formatMoney(item.total)}', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-            ]),
-          ),
-          if (isDeleting)
-            const SizedBox(width: 28, height: 28, child: Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red)))
-          else
-            IconButton(
-              onPressed: () => _eliminarProductoWeb(quote, item),
-              icon: const Icon(Icons.close_rounded, size: 16, color: Colors.red),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _openProductDetail(item.productId, item.name),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade300,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: Color(0xFF1A1A1A),
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${item.quantity} ud × ${_formatMoney(item.unitPrice)} = ${_formatMoney(item.total)}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[500],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Toca para ver ficha técnica',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.grey[500],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _buildDeleteProductButton(
+                  isDeleting: isDeleting,
+                  onPressed: () => _eliminarProductoWeb(quote, item),
+                ),
+              ],
             ),
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -739,10 +892,10 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       icon: Icon(icon, size: 15, color: color),
       label: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: color.withValues(alpha: 0.4)),
+        side: BorderSide(color: color.withOpacity(0.4)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         padding: const EdgeInsets.symmetric(vertical: 11),
-        backgroundColor: color.withValues(alpha: 0.03),
+        backgroundColor: color.withOpacity(0.03),
       ),
     );
   }
@@ -754,7 +907,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         gradient: const LinearGradient(colors: [Color(0xFFA60909), Color(0xFFD60808)], begin: Alignment.centerLeft, end: Alignment.centerRight),
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: const Color(0xFFA60909).withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: const Color(0xFFA60909).withOpacity(0.35), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: ElevatedButton.icon(
         onPressed: onPressed,
@@ -769,7 +922,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Widget _buildBadge(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
       child: Text(text, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5)),
     );
   }
@@ -807,7 +960,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           children: [
             Container(
               width: 56, height: 56,
-              decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.1), shape: BoxShape.circle),
+              decoration: BoxDecoration(color: iconColor.withOpacity(0.1), shape: BoxShape.circle),
               child: Icon(icon, color: iconColor, size: 28),
             ),
             const SizedBox(height: 16),

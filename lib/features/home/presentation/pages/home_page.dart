@@ -131,18 +131,21 @@ class _HomePageState extends ConsumerState<HomePage> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 14,
             offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: const Column(
+      child: Column(
         children: [
-          HomeHeader(),
-          SizedBox(height: 2),
-          SearchBarWidget(),
-          MenuBarWidget(),
+          const HomeHeader(),
+          const SizedBox(height: 2),
+          SearchBarWidget(
+            onGoCart: widget.onGoCart,
+            onGoQuotes: widget.onGoQuotes,
+          ),
+          const MenuBarWidget(),
         ],
       ),
     );
@@ -157,7 +160,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
+            color: Colors.black.withOpacity(0.035),
             blurRadius: 12,
             offset: const Offset(0, 5),
           ),
@@ -183,7 +186,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
+            color: Colors.black.withOpacity(0.035),
             blurRadius: 12,
             offset: const Offset(0, 5),
           ),
@@ -374,7 +377,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             borderRadius: BorderRadius.circular(22),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.18),
+                color: AppColors.primary.withOpacity(0.18),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               ),

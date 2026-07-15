@@ -128,7 +128,7 @@ class _MenuPillButton extends StatelessWidget {
               border: Border.all(color: borderColor, width: 1),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.035),
+                  color: Colors.black.withOpacity(0.035),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
