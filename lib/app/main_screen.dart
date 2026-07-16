@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,11 +7,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/providers/badge_provider.dart';
+import 'package:mundicam/shared/providers/order_badge_provider.dart';
+import 'package:mundicam/core/notifications/notification_service.dart';
+import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_page.dart';
 import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
 import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
@@ -27,6 +32,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _selectedIndex = 0;
   int _lastIndexBeforeCart = 0;
   bool _loadBadges = false;
+  bool _showingOrderNotificationDialog = false;
+  StreamSubscription<MundiCamOrderNotification>? _orderNotificationSub;
 
   final Set<String> _confirmedQuoteIds = <String>{};
 
@@ -52,6 +59,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
     WidgetsBinding.instance.addObserver(this);
 
     _loadConfirmedQuoteIdsFromPrefs();
+    _listenOrderNotifications();
+    NotificationService().syncCurrentTokenWithBackend();
 
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
@@ -64,8 +73,140 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   @override
   void dispose() {
+    _orderNotificationSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _listenOrderNotifications() {
+    final pending = NotificationService().takePendingOrderNotification();
+
+    if (pending != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _handleOrderNotification(pending);
+      });
+    }
+
+    _orderNotificationSub = NotificationService()
+        .orderNotifications
+        .listen(_handleOrderNotification);
+  }
+
+  Future<void> _handleOrderNotification(
+      MundiCamOrderNotification notification,
+      ) async {
+    if (!mounted) return;
+
+    final bool isGeneralNotification = notification.isGeneralNotification;
+
+    if (!isGeneralNotification) {
+      ref.invalidate(ordersProvider);
+      ref.read(newOrderBadgeProvider.notifier).state++;
+    }
+
+    if (!notification.showPopup) {
+      if (!isGeneralNotification) {
+        _openOrdersFromNotification();
+      }
+      return;
+    }
+
+    if (_showingOrderNotificationDialog) return;
+    _showingOrderNotificationDialog = true;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+            contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
+            actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            title: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _NotificationLogoIcon(
+                  isGeneralNotification: isGeneralNotification,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    notification.title,
+                    style: const TextStyle(
+                      fontFamily: 'Oswald',
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      height: 1.05,
+                      color: Color(0xFF111827),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              notification.body,
+              style: const TextStyle(
+                fontSize: 13.5,
+                height: 1.35,
+                color: Color(0xFF374151),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            actions: isGeneralNotification
+                ? [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text('Entendido'),
+              ),
+            ]
+                : [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cerrar'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _openOrdersFromNotification();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: const Icon(Icons.visibility_outlined, size: 17),
+                label: const Text('Ver pedidos'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      _showingOrderNotificationDialog = false;
+    }
+  }
+
+  void _openOrdersFromNotification() {
+    ref.read(newOrderBadgeProvider.notifier).state = 0;
+    ref.invalidate(ordersProvider);
+    _switchToTab(2, popToRoot: true);
   }
 
   Future<void> _loadConfirmedQuoteIdsFromPrefs() async {
@@ -117,10 +258,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   int _visibleQuoteBadgeCount(int rawQuoteCount) {
     final quotesAsync = ref.watch(quotesProvider);
+    final localQuotes = ref.watch(localQuotesProvider);
+    final localCount = localQuotes.where((quote) => !quote.isExpired).length;
 
     return quotesAsync.maybeWhen(
       data: (quotes) {
-        return quotes.where((quote) {
+        final webCount = quotes.where((quote) {
           final quoteId = quote.id.toString();
 
           if (_confirmedQuoteIds.contains(quoteId)) return false;
@@ -128,6 +271,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
           return true;
         }).length;
+
+        return localCount + webCount;
       },
       orElse: () {
         return math.max(0, rawQuoteCount - _confirmedQuoteIds.length);
@@ -145,6 +290,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
     setState(() {
       _selectedIndex = index;
       _loadedTabs[index] = true;
+
+      if (index == 2) {
+        ref.read(newOrderBadgeProvider.notifier).state = 0;
+      }
 
       if (index == 3 || index == 4) {
         _loadBadges = true;
@@ -174,6 +323,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   void _onItemTapped(int index) {
+    if (index == 2) {
+      ref.read(newOrderBadgeProvider.notifier).state = 0;
+      ref.invalidate(ordersProvider);
+    }
+
     if (_selectedIndex == index) {
       final navigator = _navigatorKeys[index].currentState;
 
@@ -224,6 +378,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   Widget build(BuildContext context) {
     final int cartItemCount = _loadBadges ? ref.watch(cartBadgeProvider) : 0;
+    final int orderCount = _loadBadges ? ref.watch(newOrderBadgeProvider) : 0;
     final int rawQuoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
     final int quoteCount =
     _loadBadges ? _visibleQuoteBadgeCount(rawQuoteCount) : 0;
@@ -296,7 +451,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
+                  color: Colors.black.withOpacity(0.06),
                   blurRadius: 10,
                   offset: const Offset(0, -2),
                 ),
@@ -323,6 +478,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                   activeIcon: Icons.local_shipping,
                   label: 'Pedidos',
                   isSelected: _selectedIndex == 2,
+                  badgeCount: orderCount,
                   onTap: () => _onItemTapped(2),
                 ),
                 _BottomTabItem(
@@ -369,6 +525,53 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 }
 
+class _NotificationLogoIcon extends StatelessWidget {
+  final bool isGeneralNotification;
+
+  const _NotificationLogoIcon({
+    required this.isGeneralNotification,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.primary.withOpacity(0.14),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(5),
+        child: Image.asset(
+          'assets/images/mundicam_notification_logo.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return Icon(
+              isGeneralNotification
+                  ? Icons.notifications_active_outlined
+                  : Icons.local_shipping_outlined,
+              color: AppColors.primary,
+              size: 22,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _BottomTabItem extends StatelessWidget {
   final IconData icon;
   final IconData activeIcon;
@@ -396,8 +599,8 @@ class _BottomTabItem extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          splashColor: AppColors.primary.withValues(alpha: 0.08),
-          highlightColor: AppColors.primary.withValues(alpha: 0.04),
+          splashColor: AppColors.primary.withOpacity(0.08),
+          highlightColor: AppColors.primary.withOpacity(0.04),
           child: SizedBox(
             height: 58,
             child: Column(

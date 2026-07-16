@@ -5,7 +5,7 @@ import 'package:mundicam/core/cache/product_cache_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
-import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
+import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
 
 final productsPaginatedProvider =
 StateNotifierProvider.family<ProductsPaginatedNotifier, List<Product>, int>(
@@ -23,10 +23,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   final int categoryId;
   final Ref ref;
 
-  // TTL corto porque ahora el catálogo se alimenta desde HTML XStore,
-  // y los precios/stock visual pueden variar más que una respuesta REST cacheada.
-  static const Duration _cacheTtl = Duration(minutes: 1);
-  static const String _sourceCacheVersion = 'web_xstore_v3_20260617';
+  static const Duration _cacheTtl = Duration(minutes: 3);
 
   int _currentPage = 1;
   int _totalPages = 1;
@@ -64,9 +61,19 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
   }
 
   void clearCacheForCurrentCategory() {
-    // Limpia caché antigua y nueva para evitar resultados heredados del paso WC REST/Store API.
     ProductCacheService().clearMemoryPrefix('catalog_page|cat:$categoryId|');
-    ProductCacheService().clearMemoryPrefix('catalog_page|source:$_sourceCacheVersion|cat:$categoryId|');
+  }
+
+  void showReloadingState() {
+    _requestToken++;
+    _currentPage = 1;
+    _totalPages = 1;
+    _totalItems = 0;
+    _hasMore = true;
+    _hasLoadedFirstPage = false;
+    _isLoading = true;
+    _lastError = null;
+    state = const <Product>[];
   }
 
   Future<void> loadFirstPage({
@@ -89,19 +96,11 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
       if (token != _requestToken) return;
 
-      final products = _dedupeProducts(result.products);
-
       _hasLoadedFirstPage = true;
-      state = products;
-      _totalPages = result.totalPages <= 0 ? 1 : result.totalPages;
-      _totalItems = _safeTotalItems(result.totalItems, products.length);
-      _hasMore = result.hasNextPage && products.isNotEmpty;
-
-      if (kDebugMode) {
-        debugPrint(
-          '✅ Productos primera página mostrados: ${products.length} / total=$_totalItems / pages=$_totalPages',
-        );
-      }
+      state = result.products;
+      _totalPages = result.totalPages;
+      _totalItems = result.totalItems;
+      _hasMore = result.hasNextPage;
     } catch (e) {
       if (token != _requestToken) return;
 
@@ -139,24 +138,15 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
       if (token != _requestToken) return;
 
-      final nextProducts = _dedupeProducts(result.products);
-      final merged = _dedupeProducts([...state, ...nextProducts]);
+      _currentPage = result.currentPage;
+      _totalPages = result.totalPages;
+      _totalItems = result.totalItems;
 
-      _currentPage = result.currentPage <= 0 ? nextPage : result.currentPage;
-      _totalPages = result.totalPages <= 0 ? _currentPage : result.totalPages;
-      _totalItems = _safeTotalItems(result.totalItems, merged.length);
-
-      if (nextProducts.isEmpty) {
+      if (result.products.isEmpty) {
         _hasMore = false;
       } else {
-        state = merged;
+        state = [...state, ...result.products];
         _hasMore = result.hasNextPage;
-      }
-
-      if (kDebugMode) {
-        debugPrint(
-          '✅ Productos acumulados mostrados: ${state.length} / total=$_totalItems / page=$_currentPage',
-        );
       }
     } catch (e) {
       if (token != _requestToken) return;
@@ -201,6 +191,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
         );
 
     final cacheKey = _buildCacheKey(
+      userKey: apiService.catalogCacheIdentity,
       categoryId: categoryId,
       brandId: effectiveBrandId,
       brandName: brandName,
@@ -228,51 +219,19 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
           attributeLabels: filters.attributeLabels,
         );
 
-        final products = _dedupeProducts(result.products);
-        final safeTotal = _safeTotalItems(result.totalItems, products.length);
-
         if (kDebugMode) {
           debugPrint(
-            '🌐 Catálogo cargado: $cacheKey · recibidos=${result.products.length} · únicos=${products.length} · total=$safeTotal',
+            '🌐 Catálogo cargado: $cacheKey · total=${result.totalItems}',
           );
         }
 
-        return CatalogProductsResult(
-          products: products,
-          currentPage: result.currentPage <= 0 ? page : result.currentPage,
-          totalPages: result.totalPages <= 0 ? 1 : result.totalPages,
-          totalItems: safeTotal,
-        );
+        return result;
       },
     );
   }
 
-  static List<Product> _dedupeProducts(List<Product> products) {
-    final byId = <int, Product>{};
-    final withoutId = <String, Product>{};
-
-    for (final product in products) {
-      if (product.id > 0) {
-        byId[product.id] = product;
-      } else {
-        final key = '${product.sku}|${product.name}'.toLowerCase().trim();
-        if (key.isNotEmpty) withoutId[key] = product;
-      }
-    }
-
-    return [
-      ...byId.values,
-      ...withoutId.values,
-    ];
-  }
-
-  static int _safeTotalItems(int reportedTotal, int visibleCount) {
-    if (reportedTotal <= 0) return visibleCount;
-    if (reportedTotal < visibleCount) return visibleCount;
-    return reportedTotal;
-  }
-
   static String _buildCacheKey({
+    required String userKey,
     required int categoryId,
     required int? brandId,
     required String brandName,
@@ -283,7 +242,8 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
     required int perPage,
   }) {
     return [
-      'catalog_page|source:$_sourceCacheVersion|cat:$categoryId',
+      'catalog_page|$userKey',
+      'cat:$categoryId',
       'brandId:${brandId ?? 0}',
       'brand:${brandName.toLowerCase().trim()}',
       'search:${search.toLowerCase().trim()}',

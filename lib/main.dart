@@ -1,9 +1,13 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mundicam/firebase_options.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/cache/category_cache_service.dart';
 import 'package:mundicam/core/cache/storage_cache_service.dart';
@@ -18,20 +22,60 @@ final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
 });
 
+Future<void> ensureFirebaseReady() async {
+  try {
+    if (Firebase.apps.isNotEmpty) {
+      Firebase.app();
+      debugPrint('✅ Firebase ya estaba inicializado');
+      return;
+    }
+
+    final firebaseOptions = DefaultFirebaseOptions.currentPlatform;
+
+    if (firebaseOptions != null) {
+      await Firebase.initializeApp(options: firebaseOptions);
+    } else {
+      // En iOS, cuando todavía no se ha generado firebase_options.dart con
+      // FlutterFire CLI, Firebase puede inicializarse desde el archivo nativo:
+      // ios/Runner/GoogleService-Info.plist.
+      await Firebase.initializeApp();
+    }
+
+    debugPrint('✅ Firebase inicializado correctamente');
+  } on FirebaseException catch (e) {
+    if (e.code == 'duplicate-app') {
+      Firebase.app();
+      debugPrint('✅ Firebase ya estaba inicializado');
+      return;
+    }
+    rethrow;
+  }
+}
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  try {
+    await ensureFirebaseReady();
+  } catch (e) {
+    debugPrint('⚠️ Firebase background init ignorado: $e');
+  }
+
+  debugPrint('📩 FCM background title: ${message.notification?.title}');
+  debugPrint('📩 FCM background body: ${message.notification?.body}');
+  debugPrint('📩 FCM background data: ${message.data}');
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: 'AIzaSyAiagG6V0Cg4tgfuIDTe2Rz24G17N8ZHzQ',
-        appId: '1:754565814741:android:74c8d2a07bdf2bd5f9855c',
-        messagingSenderId: '754565814741',
-        projectId: 'mundicam-app',
-        storageBucket: 'mundicam-app.firebasestorage.app',
-      ),
-    );
-    debugPrint('✅ Firebase inicializado correctamente');
+    await ensureFirebaseReady();
+
+    if (!Platform.isIOS) {
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } else {
+      debugPrint('ℹ️ Notificaciones FCM desactivadas en iOS de momento.');
+    }
   } catch (e) {
     debugPrint('❌ Error al conectar Firebase: $e');
   }
@@ -47,8 +91,6 @@ void main() async {
     );
 
     await remoteConfig.setDefaults({
-      'wc_consumer_key': '',
-      'wc_consumer_secret': '',
       'api_base_url': 'https://www.mundicam.com',
     });
 
@@ -58,9 +100,24 @@ void main() async {
     debugPrint('⚠️ Error al inicializar Remote Config: $e');
   }
 
-  await NotificationService().initialize();
+  if (Firebase.apps.isNotEmpty && !Platform.isIOS) {
+    try {
+      await NotificationService().initialize();
+    } catch (e) {
+      debugPrint('⚠️ Error inicializando notificaciones: $e');
+    }
+  } else if (Platform.isIOS) {
+    debugPrint('ℹ️ Notificaciones omitidas en iOS. Se activarán más adelante con APNs.');
+  } else {
+    debugPrint('⚠️ Firebase no está inicializado. Se omiten notificaciones FCM.');
+  }
 
-  _precargarDatos();
+  final api = ApiService();
+  if (await api.hasStoredWordPressSession()) {
+    _precargarDatos();
+  } else {
+    debugPrint('ℹ️ Sin sesión MundiCam App API. Se omite precarga protegida.');
+  }
 
   runApp(const ProviderScope(child: MyApp()));
 }
@@ -78,7 +135,7 @@ Future<void> _precargarDatos() async {
     }
 
     if (cache.getCachedCategories() == null) {
-      debugPrint('📦 Precargando categorías...');
+      debugPrint('📦 Precargando categorías App API...');
 
       final categorias = await apiService.getCategorias();
 
@@ -128,31 +185,59 @@ class AuthWrapper extends ConsumerStatefulWidget {
 }
 
 class _AuthWrapperState extends ConsumerState<AuthWrapper> {
+  Future<bool>? _sessionFuture;
+
   @override
   void initState() {
     super.initState();
-    ref.read(categoriesProvider.future);
-    ref.read(academyProvider.future);
+    _sessionFuture = _validateSession();
+  }
+
+  Future<bool> _validateSession() async {
+    final api = ApiService();
+    final hasAppSession = await api.hasStoredWordPressSession();
+
+    if (!hasAppSession) {
+      if (Firebase.apps.isNotEmpty) {
+        try {
+          await FirebaseAuth.instance.signOut();
+        } catch (e) {
+          debugPrint('⚠️ No se pudo cerrar sesión Firebase: $e');
+        }
+      }
+      await api.clearWordPressSession();
+      return false;
+    }
+
+    try {
+      ref.read(categoriesProvider.future);
+      ref.read(academyProvider.future);
+    } catch (_) {}
+
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authStateProvider);
+    ref.watch(authStateProvider);
 
-    return authState.when(
-      data: (user) {
-        if (user != null) {
+    return FutureBuilder<bool>(
+      future: _sessionFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          );
+        }
+
+        if (snapshot.data == true) {
           return const MainScreen();
         }
 
         return const LoginPage();
       },
-      loading: () => const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-      ),
-      error: (e, stack) => Scaffold(body: Center(child: Text('Error: $e'))),
     );
   }
 }

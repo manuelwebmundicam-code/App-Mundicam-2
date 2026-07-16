@@ -56,7 +56,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
             child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover),
           ),
           Positioned.fill(
-            child: Container(color: Colors.black.withValues(alpha: 0.6)),
+            child: Container(color: Colors.black.withOpacity(0.6)),
           ),
           Center(
             child: SingleChildScrollView(
@@ -64,7 +64,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               child: Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.95),
+                  color: Colors.white.withOpacity(0.95),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Form(

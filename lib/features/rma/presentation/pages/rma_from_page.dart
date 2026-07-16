@@ -47,6 +47,9 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
   }
 
   Future<String?> _getUserEmail() async {
+    final appEmail = await ApiService().currentSessionEmail();
+    if (appEmail != null && appEmail.isNotEmpty) return appEmail;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
 
@@ -161,7 +164,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.08),
+                        color: AppColors.primary.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Icon(
@@ -236,7 +239,7 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
                         ),
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? AppColors.primary.withValues(alpha: 0.05)
+                              ? AppColors.primary.withOpacity(0.05)
                               : Colors.transparent,
                           border: Border(
                             bottom: BorderSide(color: Colors.grey.shade100),

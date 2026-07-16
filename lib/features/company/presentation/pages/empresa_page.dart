@@ -129,7 +129,7 @@ class _CompanyHero extends StatelessWidget {
           borderRadius: BorderRadius.circular(26),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.14),
+              color: Colors.black.withOpacity(0.14),
               blurRadius: 18,
               offset: const Offset(0, 8),
             ),
@@ -149,8 +149,8 @@ class _CompanyHero extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    _dark.withValues(alpha: 0.64),
-                    _dark.withValues(alpha: 0.96),
+                    _dark.withOpacity(0.64),
+                    _dark.withOpacity(0.96),
                   ],
                 ),
               ),
@@ -170,7 +170,7 @@ class _CompanyHero extends StatelessWidget {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.24),
+                            color: Colors.black.withOpacity(0.24),
                             blurRadius: 12,
                             offset: const Offset(0, 5),
                           ),
@@ -294,7 +294,7 @@ class _CompanyStoryCard extends StatelessWidget {
         border: Border.all(color: _border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
+            color: Colors.black.withOpacity(0.035),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),
@@ -322,7 +322,7 @@ class _CompanyStoryCard extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.transparent,
-                        Colors.black.withValues(alpha: 0.72),
+                        Colors.black.withOpacity(0.72),
                       ],
                     ),
                   ),
@@ -431,7 +431,7 @@ class _ValueCard extends StatelessWidget {
         border: Border.all(color: _border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.025),
+            color: Colors.black.withOpacity(0.025),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -444,7 +444,7 @@ class _ValueCard extends StatelessWidget {
             width: 43,
             height: 43,
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.08),
+              color: AppColors.primary.withOpacity(0.08),
               borderRadius: BorderRadius.circular(15),
             ),
             child: Icon(
@@ -507,7 +507,7 @@ class _SupportContactCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
+            color: Colors.black.withOpacity(0.10),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -542,7 +542,7 @@ class _SupportContactCard extends StatelessWidget {
           Text(
             'Contacta con nuestro equipo para resolver dudas, preparar proyectos o solicitar asesoramiento profesional.',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.76),
+              color: Colors.white.withOpacity(0.76),
               fontSize: 12.8,
               height: 1.42,
               fontWeight: FontWeight.w500,
@@ -657,7 +657,7 @@ class _SupportOutlineButton extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           foregroundColor: Colors.white,
           side: BorderSide(
-            color: Colors.white.withValues(alpha: 0.22),
+            color: Colors.white.withOpacity(0.22),
           ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
@@ -827,7 +827,7 @@ class _FooterButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(22),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.17),
+                color: AppColors.primary.withOpacity(0.17),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               ),

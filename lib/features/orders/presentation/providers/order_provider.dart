@@ -8,27 +8,27 @@ import 'package:mundicam/features/home/presentation/providers/banner_mix_provide
 /// Provider que obtiene los pedidos del usuario
 final ordersProvider = FutureProvider<List<OrderMundicam>>((ref) async {
   final apiService = ref.read(apiServiceProvider);
+
+  // La sesión principal es WordPress/MundiCam App API. Firebase queda como apoyo.
+  String? email = await apiService.currentSessionEmail();
+
   final user = FirebaseAuth.instance.currentUser;
 
-  if (user == null) {
-    return [];
-  }
-
-  // Obtener email desde Firestore, Firebase Auth o providerData
-  String? email;
-  try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-    if (userDoc.exists && userDoc.data() != null) {
-      email = userDoc.get('email') as String?;
+  if ((email == null || email.isEmpty) && user != null) {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (userDoc.exists && userDoc.data() != null) {
+        email = userDoc.get('email') as String?;
+      }
+    } catch (e) {
+      debugPrint('Error al leer email de Firestore: $e');
     }
-  } catch (e) {
-    debugPrint('Error al leer email de Firestore: $e');
+    email ??= user.email;
+    email ??= user.providerData.firstOrNull?.email;
   }
-  email ??= user.email;
-  email ??= user.providerData.firstOrNull?.email;
 
   if (email == null || email.isEmpty) {
     debugPrint('❌ No se encontró email para buscar pedidos');

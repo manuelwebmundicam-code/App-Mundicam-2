@@ -12,12 +12,14 @@ class FiltroSelector extends ConsumerStatefulWidget {
   final int parentCategoryId;
   final String categoryName;
   final List<Product> productosEnPantalla;
+  final VoidCallback? onApplyFilters;
 
   const FiltroSelector({
     super.key,
     required this.parentCategoryId,
     required this.categoryName,
     required this.productosEnPantalla,
+    this.onApplyFilters,
   });
 
   @override
@@ -202,23 +204,12 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       // La primera vez WooCommerce tiene que cargar términos de varios atributos
       // y puede tardar más que en un refresh posterior. Si cortamos a los pocos
       // segundos, aparece el mensaje de error aunque la API termine respondiendo.
-      var groups = await _apiService.getCatalogFiltersForCategory(
+      final groups = await _apiService.getCatalogFiltersForCategory(
         categoryId: widget.parentCategoryId,
+        brandId: filters.brandId,
         search: effectiveSearch,
         forceRefresh: forceRefresh,
       );
-
-      if (groups.isEmpty && widget.productosEnPantalla.isNotEmpty) {
-        groups = _apiService.buildLocalCatalogFiltersFromProducts(
-          widget.productosEnPantalla,
-        );
-
-        if (kDebugMode) {
-          debugPrint(
-            '📊 Filtros generados desde productos en pantalla: ${groups.length} grupos',
-          );
-        }
-      }
 
       final subcategories = await _loadSubcategoriesFast();
 
@@ -246,30 +237,12 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       }
     } catch (e) {
       if (!mounted || requestToken != _loadToken) return;
-
-      final fallbackGroups = widget.productosEnPantalla.isNotEmpty
-          ? _apiService.buildLocalCatalogFiltersFromProducts(
-        widget.productosEnPantalla,
-      )
-          : <CatalogFilterGroup>[];
-
-      final subcategories = await _loadSubcategoriesFast();
-
-      if (!mounted || requestToken != _loadToken) return;
       setState(() {
-        _availableFilterGroups = fallbackGroups;
-        _availableSubcategories = subcategories;
         _loading = false;
-        _error = fallbackGroups.isEmpty
-            ? 'No se pudieron cargar los filtros.'
-            : null;
+        _error = 'No se pudieron cargar los filtros.';
       });
-
       if (kDebugMode) {
-        debugPrint(
-          '⚠️ Filtros endpoint no disponibles. '
-              'Fallback local=${fallbackGroups.length} grupos. Error: $e',
-        );
+        debugPrint('❌ Error loading web filters: $e');
       }
     }
   }
@@ -337,7 +310,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     // pulsar "Ver productos". Así se pueden marcar varios filtros sin
     // lanzar una recarga por cada clic.
     setState(() {
-      if (group.taxonomy == 'pa_marcas') {
+      if (_isBrandGroup(group)) {
         final isSelected = _draftFilters.brandId == option.id ||
             _draftFilters.brand.trim().toLowerCase() ==
                 option.name.trim().toLowerCase();
@@ -387,7 +360,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
   void _clearGroup(CatalogFilterGroup group) {
     setState(() {
-      if (group.taxonomy == 'pa_marcas') {
+      if (_isBrandGroup(group)) {
         _draftFilters = _draftFilters.copyWith(
           brand: '',
           clearBrandId: true,
@@ -419,7 +392,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       CatalogFilterGroup group,
       CatalogFilterOption option,
       ) {
-    if (group.taxonomy == 'pa_marcas') {
+    if (_isBrandGroup(group)) {
       return filters.brandId == option.id ||
           filters.brand.trim().toLowerCase() == option.name.trim().toLowerCase();
     }
@@ -428,7 +401,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   }
 
   bool _isGroupSelected(MundiFilters filters, CatalogFilterGroup group) {
-    if (group.taxonomy == 'pa_marcas') {
+    if (_isBrandGroup(group)) {
       return filters.hasBrand;
     }
 
@@ -475,6 +448,9 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     );
 
     Navigator.pop(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onApplyFilters?.call();
+    });
   }
 
   void _cerrarDrawer() => Navigator.pop(context);
@@ -504,6 +480,20 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         .replaceAll('ü', 'u')
         .replaceAll('û', 'u')
         .replaceAll('ñ', 'n');
+  }
+
+  bool _isBrandGroup(CatalogFilterGroup group) {
+    final normalized = _normalize(
+      '${group.taxonomy} ${group.title} ${group.key}',
+    ).replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+    return normalized.contains('pamarcas') ||
+        normalized.contains('pamarca') ||
+        normalized.contains('productbrand') ||
+        normalized.contains('pafabricante') ||
+        normalized.contains('fabricante') ||
+        normalized.contains('marca') ||
+        normalized.contains('brand');
   }
 
   IconData _iconForFilterGroup(CatalogFilterGroup group) {
@@ -590,7 +580,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(28)),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.24),
+            color: AppColors.primary.withOpacity(0.24),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -602,10 +592,10 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.16),
+              color: Colors.white.withOpacity(0.16),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.12),
+                color: Colors.white.withOpacity(0.12),
               ),
             ),
             child: const Icon(
@@ -636,7 +626,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.76),
+                    color: Colors.white.withOpacity(0.76),
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
                   ),
@@ -703,7 +693,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         border: Border.all(color: const Color(0xFFE6EAF0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
+            color: Colors.black.withOpacity(0.035),
             blurRadius: 16,
             offset: const Offset(0, 7),
           ),
@@ -718,7 +708,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.08),
+                  color: AppColors.primary.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(icon, size: 17, color: AppColors.primary),
@@ -962,12 +952,12 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppColors.primary.withValues(alpha: 0.08)
+              ? AppColors.primary.withOpacity(0.08)
               : const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isSelected
-                ? AppColors.primary.withValues(alpha: 0.24)
+                ? AppColors.primary.withOpacity(0.24)
                 : const Color(0xFFE6EAF0),
           ),
         ),
@@ -1042,7 +1032,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.08),
+                color: AppColors.primary.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -1069,7 +1059,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 margin: const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.08),
+                  color: AppColors.primary.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
@@ -1104,7 +1094,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, -3),
           ),

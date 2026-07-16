@@ -76,7 +76,7 @@ class CartPage extends ConsumerWidget {
                 border: Border.all(color: const Color(0xFFE8E8E8)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
+                    color: Colors.black.withOpacity(0.03),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -165,7 +165,7 @@ class CartPage extends ConsumerWidget {
         border: Border.all(color: const Color(0xFFE8E8E8)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: Colors.black.withOpacity(0.03),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -362,9 +362,7 @@ class CartPage extends ConsumerWidget {
   Widget _buildCheckoutSection(WidgetRef ref, BuildContext context) {
     final cartItems = ref.watch(cartProvider);
 
-    // En la app mostramos el importe tal cual viene del producto.
-    // No añadimos ningún impuesto ni desglose adicional aquí.
-    final totalCarrito = cartItems.fold<double>(
+    final subtotal = cartItems.fold<double>(
       0,
           (sum, item) {
         final price = double.tryParse(
@@ -374,6 +372,9 @@ class CartPage extends ConsumerWidget {
         return sum + (price * item.quantity);
       },
     );
+
+    final iva = subtotal * 0.21;
+    final total = subtotal + iva;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
@@ -394,8 +395,13 @@ class CartPage extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _summaryRow(
-              'Importe productos',
-              '${totalCarrito.toStringAsFixed(2)} €',
+              'Base imponible',
+              '${subtotal.toStringAsFixed(2)} €',
+            ),
+            const SizedBox(height: 10),
+            _summaryRow(
+              'IVA (21%) incluido',
+              '${iva.toStringAsFixed(2)} €',
             ),
             Container(
               margin: const EdgeInsets.symmetric(vertical: 16),
@@ -416,7 +422,7 @@ class CartPage extends ConsumerWidget {
                   ),
                 ),
                 Text(
-                  '${totalCarrito.toStringAsFixed(2)} €',
+                  '${total.toStringAsFixed(2)} €',
                   style: const TextStyle(
                     fontFamily: 'Oswald',
                     fontSize: 22,

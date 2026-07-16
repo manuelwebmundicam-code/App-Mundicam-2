@@ -30,3 +30,13 @@ doc/api/
 flutter_analyze.txt
 git_status.txt
 idea_files.txt
+
+# Build/cache/backups locales
+*.apk
+*.aab
+*.ipa
+*.jks
+*.keystore
+lib_backup*/
+profile_page_backup_*.dart
+*.zip
