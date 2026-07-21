@@ -152,6 +152,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   bool _isAddingToQuote = false;
   bool _descriptionExpanded = true;
   bool _cargandoRecomendados = true;
+  bool _isRefreshingProduct = false;
   Product? _productWithFreshStock;
   List<Product> _recomendados = [];
 
@@ -187,6 +188,48 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     } catch (e) {
       if (kDebugMode) {
         debugPrint('No se pudo refrescar stock interno del producto: $e');
+      }
+    }
+  }
+
+  Future<void> _refreshProductDetail() async {
+    if (_isRefreshingProduct) return;
+
+    setState(() {
+      _isRefreshingProduct = true;
+    });
+
+    try {
+      final fullProduct = await ApiService().getProductoById(widget.product.id);
+      if (!mounted) return;
+
+      if (fullProduct != null) {
+        setState(() {
+          _productWithFreshStock = fullProduct;
+        });
+      }
+
+      ref.invalidate(_canViewStockDetailsProvider);
+      await _cargarRecomendados();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('No se pudo recargar el producto: $e');
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo actualizar el producto'),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshingProduct = false;
+        });
       }
     }
   }
@@ -753,63 +796,69 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         onBack: () => Navigator.pop(context),
       ),
       bottomNavigationBar: _bottomActions(p, enStock),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 22),
-        children: [
-          _imageCard(p),
-          const SizedBox(height: 14),
-          _productHeader(
-            p: p,
-            marca: marca,
-            precio: precio,
-            precioRegular: precioRegular,
-            tieneDescuento: tieneDescuento,
-            descuento: descuento,
-            ahorro: ahorro,
-            enStock: enStock,
-            bajoConsulta: bajoConsulta,
-            canViewStockDetails: canViewStockDetails,
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: _refreshProductDetail,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
           ),
-          const SizedBox(height: 16),
-          _trustBlock(),
-          const SizedBox(height: 18),
-          _buildSectionTitle('INFORMACIÓN TÉCNICA'),
-          const SizedBox(height: 12),
-          if (descCorta.isNotEmpty) ...[
-            _buildShortDescriptionCard(
-              descCorta,
-              title: 'Características principales',
-              icon: Icons.tune_rounded,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 22),
+          children: [
+            _imageCard(p),
+            const SizedBox(height: 14),
+            _productHeader(
+              p: p,
+              marca: marca,
+              precio: precio,
+              precioRegular: precioRegular,
+              tieneDescuento: tieneDescuento,
+              descuento: descuento,
+              ahorro: ahorro,
+              enStock: enStock,
+              bajoConsulta: bajoConsulta,
+              canViewStockDetails: canViewStockDetails,
             ),
-            const SizedBox(height: 12),
-          ],
-          if (attributeRows.isNotEmpty) ...[
-            _buildAttributesCard(attributeRows),
-            const SizedBox(height: 12),
-          ],
-          if (descLimpia.isNotEmpty &&
-              descLimpia != 'Sin descripción detallada' &&
-              descLimpia != descCorta) ...[
-            if (descripcionCompletaRows.isNotEmpty)
-              _buildExpandableKeyValueCard(
-                title: 'Ficha técnica detallada',
-                icon: Icons.table_chart_outlined,
-                rows: descripcionCompletaRows,
-              )
-            else
-              _buildExpandableDescription(
-                title: 'Descripción técnica',
-                icon: Icons.article_outlined,
-                text: descLimpia,
-              ),
+            const SizedBox(height: 16),
+            _trustBlock(),
             const SizedBox(height: 18),
+            _buildSectionTitle('INFORMACIÓN TÉCNICA'),
+            const SizedBox(height: 12),
+            if (descCorta.isNotEmpty) ...[
+              _buildShortDescriptionCard(
+                descCorta,
+                title: 'Características principales',
+                icon: Icons.tune_rounded,
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (attributeRows.isNotEmpty) ...[
+              _buildAttributesCard(attributeRows),
+              const SizedBox(height: 12),
+            ],
+            if (descLimpia.isNotEmpty &&
+                descLimpia != 'Sin descripción detallada' &&
+                descLimpia != descCorta) ...[
+              if (descripcionCompletaRows.isNotEmpty)
+                _buildExpandableKeyValueCard(
+                  title: 'Ficha técnica detallada',
+                  icon: Icons.table_chart_outlined,
+                  rows: descripcionCompletaRows,
+                )
+              else
+                _buildExpandableDescription(
+                  title: 'Descripción técnica',
+                  icon: Icons.article_outlined,
+                  text: descLimpia,
+                ),
+              const SizedBox(height: 18),
+            ],
+            if (!_cargandoRecomendados && _recomendados.isNotEmpty) ...[
+              _buildRecommendedSection(marca),
+              const SizedBox(height: 20),
+            ],
           ],
-          if (!_cargandoRecomendados && _recomendados.isNotEmpty) ...[
-            _buildRecommendedSection(marca),
-            const SizedBox(height: 20),
-          ],
-        ],
+        ),
       ),
     );
   }

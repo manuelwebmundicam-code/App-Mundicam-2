@@ -53,10 +53,17 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover),
+            child: Image.asset(
+              'assets/gif/fondo2.gif',
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.low,
+            ),
           ),
           Positioned.fill(
-            child: Container(color: Colors.black.withOpacity(0.6)),
+            child: Container(
+              color: Colors.black.withOpacity(0.3),
+            ),
           ),
           Center(
             child: SingleChildScrollView(

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mundicam/core/notifications/notification_service.dart';
 
 class UserState {
   final String email;
@@ -33,6 +34,7 @@ class AuthNotifier extends StateNotifier<UserState> {
 
   // Borra la sesión del disco
   Future<void> logout() async {
+    await NotificationService().clearDeviceRegistration();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_email');
     state = UserState(email: "", isLoggedIn: false);
