@@ -44,112 +44,103 @@ class BusquedaResultadosPage extends ConsumerStatefulWidget {
 }
 
 class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage> {
+  static const int _searchPageSize = 60;
+  static const int _initialVisibleTarget = 30;
+
   final ApiService _api = ApiService();
+  final ScrollController _scrollController = ScrollController();
   late String _cleanedQuery;
   bool _loading = true;
+  bool _loadingMore = false;
   Object? _error;
   List<Product> _productos = const <Product>[];
   List<_SearchFacet> _availableCategoryFacets = const <_SearchFacet>[];
   List<_SearchFacet> _availableBrandFacets = const <_SearchFacet>[];
   int _totalItems = 0;
+  int _currentPage = 1;
+  int _totalPages = 1;
   int _selectedCategoryId = 0;
   String _selectedCategoryName = '';
   String _selectedBrand = '';
   String _orderBy = '';
   int _requestToken = 0;
 
-  final ScrollController _scrollController = ScrollController();
-  bool _loadingMore = false;
-  bool _hasMore = false;
-  int _currentPage = 1;
-
-  static const int _firstPageSize = 10;
-  static const int _nextPageSize = 10;
-
   bool get _hasActiveFilters =>
       _selectedCategoryId > 0 || _selectedBrand.trim().isNotEmpty || _orderBy.trim().isNotEmpty;
+
+  bool get _hasMoreResults =>
+      !_loading &&
+      !_loadingMore &&
+      (_currentPage < _totalPages || (_totalItems > _productos.length && _productos.isNotEmpty));
 
   @override
   void initState() {
     super.initState();
     _cleanedQuery = _SearchEngine.cleanQuery(widget.query);
-    _scrollController.addListener(_onScroll);
+    _scrollController.addListener(_onScrollNearBottom);
     _loadResults();
   }
 
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
+    _scrollController.removeListener(_onScrollNearBottom);
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    if (_loading || _loadingMore || !_hasMore) return;
-
+  void _onScrollNearBottom() {
+    if (!_scrollController.hasClients || !_hasMoreResults) return;
     final position = _scrollController.position;
-    if (position.pixels >= position.maxScrollExtent - 700) {
-      _loadMoreResults();
+    if (position.pixels >= position.maxScrollExtent - 720) {
+      _loadMoreResults(autoTriggered: true);
     }
   }
 
+  void _scheduleAutoLoadUntilUseful() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_productos.length < _initialVisibleTarget && _hasMoreResults) {
+        _loadMoreResults(autoTriggered: true);
+      }
+    });
+  }
+
   Future<void> _loadResults({bool forceRefresh = false}) async {
-    // forceRefresh se mantiene para llamadas explícitas de UI; la API ya evita caché de filtros por query.
-    if (forceRefresh) {
-      // La recarga manual invalida el ciclo visual aunque el endpoint use la misma query.
-    }
     final token = ++_requestToken;
     setState(() {
       _loading = true;
       _loadingMore = false;
-      _hasMore = false;
-      _currentPage = 1;
       _error = null;
-      _productos = const <Product>[];
+      _currentPage = 1;
+      _totalPages = 1;
     });
 
     try {
-      var result = await _api.getProductosCatalogoFiltrado(
+      final result = await _api.getProductosCatalogoFiltrado(
         categoryId: _selectedCategoryId > 0 ? _selectedCategoryId : null,
         brandName: _selectedBrand.trim().isEmpty ? null : _selectedBrand.trim(),
         search: _cleanedQuery,
         page: 1,
-        perPage: _firstPageSize,
+        perPage: _searchPageSize,
         orderBy: _orderBy.trim().isEmpty ? null : _orderBy.trim(),
       );
 
-      // Evita pantallas vacías con endpoints antiguos cuando la búsqueda lleva
-      // varias palabras: si "dahua 6mp" no devuelve nada, hacemos un único
-      // fallback ligero con el término más fuerte, sin volver al context-search.
-      if (result.products.isEmpty && !_hasActiveFilters) {
-        final fallbackQuery = _fallbackSearchQuery(_cleanedQuery);
-        if (fallbackQuery != null) {
-          result = await _api.getProductosCatalogoFiltrado(
-            search: fallbackQuery,
-            page: 1,
-            perPage: _firstPageSize,
-            orderBy: _orderBy.trim().isEmpty ? null : _orderBy.trim(),
-          );
-        }
-      }
-
       if (!mounted || token != _requestToken) return;
-      final sorted = _SearchEngine.sortByRelevance(result.products, _cleanedQuery);
+      final sorted = _SearchEngine.sortByRelevance(
+        _SearchEngine.filterForSearchIntent(result.products, _cleanedQuery),
+        _cleanedQuery,
+      );
       final localCategoryFacets = _categoryFacets(sorted, onlyMainLike: true);
       final brandFacets = _brandFacets(_SearchEngine.productsForFilterFacets(sorted, _cleanedQuery));
 
-      // Mostramos los primeros 10 resultados en cuanto llegan. El resto entra
-      // después por paginación/caché del ApiService.
       setState(() {
         _productos = sorted;
         _availableCategoryFacets = localCategoryFacets;
         _availableBrandFacets = brandFacets;
-        _totalItems = result.totalItems > 0 ? result.totalItems : sorted.length;
+        _totalItems = _SearchEngine.hasStrictIntent(_cleanedQuery) ? sorted.length : (result.totalItems > 0 ? result.totalItems : sorted.length);
         _currentPage = result.currentPage <= 0 ? 1 : result.currentPage;
-        _hasMore = result.hasNextPage;
+        _totalPages = result.totalPages <= 0 ? 1 : result.totalPages;
         _loading = false;
-        _loadingMore = false;
         _error = null;
       });
 
@@ -160,36 +151,30 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         });
       });
 
-      if (_hasMore) {
-        _loadMoreResults(automatic: true, requestToken: token);
-      }
+      _scheduleAutoLoadUntilUseful();
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
         _loading = false;
         _loadingMore = false;
-        _hasMore = false;
         _error = e;
         _productos = const <Product>[];
         _availableCategoryFacets = const <_SearchFacet>[];
         _availableBrandFacets = const <_SearchFacet>[];
         _totalItems = 0;
+        _currentPage = 1;
+        _totalPages = 1;
       });
     }
   }
 
-  Future<void> _loadMoreResults({
-    bool automatic = false,
-    int? requestToken,
-  }) async {
-    if (_loading || _loadingMore || !_hasMore) return;
-
-    final token = requestToken ?? _requestToken;
+  Future<void> _loadMoreResults({bool autoTriggered = false}) async {
+    if (_loading || _loadingMore || !_hasMoreResults) return;
+    final token = _requestToken;
     final nextPage = _currentPage + 1;
 
     setState(() {
       _loadingMore = true;
-      _error = null;
     });
 
     try {
@@ -198,67 +183,47 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         brandName: _selectedBrand.trim().isEmpty ? null : _selectedBrand.trim(),
         search: _cleanedQuery,
         page: nextPage,
-        perPage: _nextPageSize,
+        perPage: _searchPageSize,
         orderBy: _orderBy.trim().isEmpty ? null : _orderBy.trim(),
       );
 
       if (!mounted || token != _requestToken) return;
 
-      final merged = _dedupeProducts(<Product>[
-        ..._productos,
-        ...result.products,
-      ]);
-      final sorted = _SearchEngine.sortByRelevance(merged, _cleanedQuery);
-      final localCategoryFacets = _categoryFacets(sorted, onlyMainLike: true);
-      final brandFacets = _brandFacets(_SearchEngine.productsForFilterFacets(sorted, _cleanedQuery));
+      final merged = <Product>[];
+      final seen = <int>{};
+      for (final product in <Product>[..._productos, ...result.products]) {
+        if (product.id <= 0 || seen.contains(product.id)) continue;
+        seen.add(product.id);
+        merged.add(product);
+      }
 
+      final sorted = _SearchEngine.sortByRelevance(
+        _SearchEngine.filterForSearchIntent(merged, _cleanedQuery),
+        _cleanedQuery,
+      );
       setState(() {
         _productos = sorted;
-        _availableCategoryFacets = localCategoryFacets.isNotEmpty
-            ? localCategoryFacets
-            : _availableCategoryFacets;
-        _availableBrandFacets = brandFacets.isNotEmpty
-            ? brandFacets
-            : _availableBrandFacets;
-        _totalItems = result.totalItems > 0 ? result.totalItems : _totalItems;
-        _currentPage = result.currentPage <= _currentPage
-            ? nextPage
-            : result.currentPage;
-        _hasMore = result.hasNextPage && result.products.isNotEmpty;
+        _totalItems = _SearchEngine.hasStrictIntent(_cleanedQuery) ? sorted.length : (result.totalItems > 0 ? result.totalItems : _totalItems);
+        _currentPage = result.currentPage <= 0 ? nextPage : result.currentPage;
+        _totalPages = result.totalPages <= 0 ? _totalPages : result.totalPages;
         _loadingMore = false;
       });
 
-      // Carga una segunda página automática solo cuando el usuario acaba de entrar.
-      // Así la pantalla enseña 10 rápido y acto seguido deja más resultados listos.
-      if (automatic && _hasMore && mounted && token == _requestToken) {
-        Future<void>.delayed(const Duration(milliseconds: 120), () {
-          if (!mounted || token != _requestToken) return;
-          _loadMoreResults(requestToken: token);
-        });
-      }
+      _scheduleAutoLoadUntilUseful();
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
         _loadingMore = false;
-        if (!automatic) _error = e;
       });
-      if (kDebugMode) {
-        debugPrint('⚠️ Error cargando más resultados de búsqueda: $e');
+      if (!autoTriggered) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudieron cargar más productos.'),
+          ),
+        );
       }
     }
   }
-
-  List<Product> _dedupeProducts(Iterable<Product> products) {
-    final seen = <int>{};
-    final output = <Product>[];
-    for (final product in products) {
-      if (product.id <= 0 || seen.contains(product.id)) continue;
-      seen.add(product.id);
-      output.add(product);
-    }
-    return output;
-  }
-
 
   void _openFilters() {
     final categories = _availableCategoryFacets.isNotEmpty ? _availableCategoryFacets : _categoryFacets(_productos);
@@ -440,16 +405,7 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         onBack: () => Navigator.of(context).pop(),
       ),
       body: _loading && _productos.isEmpty
-          ? const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(color: AppColors.primary),
-            SizedBox(height: 16),
-            Text('Buscando productos...', style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      )
+          ? _buildInitialLoadingState()
           : _error != null
           ? _buildErrorState(context, _error!)
           : _productos.isEmpty
@@ -458,7 +414,7 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         children: [
           _SearchResultsHeader(
             query: _cleanedQuery,
-            totalItems: _totalItems > 0 ? _totalItems : _productos.length,
+            totalItems: _productos.length,
             loadedItems: _productos.length,
             selectedCategoryName: _selectedCategoryName,
             selectedBrand: _selectedBrand,
@@ -477,19 +433,7 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
                 itemCount: _productos.length + (_loadingMore ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index >= _productos.length) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 18),
-                      child: Center(
-                        child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    );
+                    return _buildLoadMoreFooter();
                   }
                   return ProductTileBusqueda(
                     p: _productos[index],
@@ -501,6 +445,80 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
                 },
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInitialLoadingState() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 16),
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFE7E7E7)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Buscando productos...',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: 'Oswald',
+                ),
+              ),
+              SizedBox(height: 12),
+              LinearProgressIndicator(
+                color: AppColors.primary,
+                minHeight: 3,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoadMoreFooter() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(0, 10, 0, 18),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE7E7E7)),
+      ),
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              color: AppColors.primary,
+              strokeWidth: 2.2,
+            ),
+          ),
+          SizedBox(width: 12),
+          Text(
+            'Cargando más productos...',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
         ],
       ),
@@ -1207,6 +1225,99 @@ class _SearchEngine {
     return value.trim().replaceAll(RegExp(r'\s+'), ' ');
   }
 
+
+  static bool hasStrictIntent(String query) {
+    final normalized = _normalize(query);
+    return _containsAny(normalized, ['camara', 'camaras', 'camera', 'cameras', 'cctv', 'ipc', 'domo', 'dome', 'turret', 'bullet', 'tubular', 'ptz']) ||
+        _containsAny(normalized, ['nvr', 'xvr', 'dvr', 'grabador', 'videograbador']);
+  }
+
+  static List<Product> filterForSearchIntent(List<Product> products, String query) {
+    final normalized = _normalize(query);
+    if (normalized.isEmpty || products.isEmpty) return products;
+
+    final brand = _brandInQuery(normalized);
+    final wantsCamera = _containsAny(normalized, ['camara', 'camaras', 'camera', 'cameras', 'cctv', 'ipc', 'domo', 'dome', 'turret', 'bullet', 'tubular', 'ptz']);
+    final wantsRecorder = _containsAny(normalized, ['nvr', 'xvr', 'dvr', 'grabador', 'videograbador']);
+
+    final filtered = products.where((product) {
+      final text = _productFilterText(product);
+      final sku = _normalize(product.sku);
+
+      if (brand != null && !text.contains(brand)) return false;
+      if (wantsCamera && !_isRealCameraProduct(product)) return false;
+      if (wantsRecorder && !_isRecorderProduct(product)) return false;
+
+      if (sku.isNotEmpty && normalized.replaceAll(' ', '').contains(sku)) return true;
+
+      final terms = _meaningfulTerms(query);
+      if (terms.isEmpty) return true;
+      var hits = 0;
+      for (final term in terms) {
+        if (text.contains(term)) hits++;
+      }
+      return hits >= 1;
+    }).toList();
+
+    if (wantsCamera || wantsRecorder || brand != null) {
+      return filtered;
+    }
+    return filtered.isEmpty ? products : filtered;
+  }
+
+  static String? _brandInQuery(String normalizedQuery) {
+    for (final brand in _knownBrands) {
+      final clean = _normalize(brand);
+      if (clean.isNotEmpty && normalizedQuery.contains(clean)) return clean;
+    }
+    return null;
+  }
+
+  static bool _isRealCameraProduct(Product product) {
+    final sku = _normalize(product.sku).replaceAll(' ', '');
+    final name = _normalize(product.name).replaceAll(' ', '');
+    final description = _normalize(product.shortDescription).replaceAll(' ', '');
+    final categories = _normalize('${product.categoryNames.join(' ')} ${product.categorySlugs.join(' ')}').replaceAll(' ', '');
+    final attributes = _normalize(product.attributes.map((a) => '${a.name} ${a.options.join(' ')}').join(' ')).replaceAll(' ', '');
+    final text = '$sku $name $description $categories $attributes';
+
+    final accessory = _containsAny(text, [
+      'junctionbox', 'cajadeconexiones', 'cajasdeconexiones', 'cajaconexiones',
+      'cajapara', 'paracamara', 'paracamaras', 'soporte', 'bracket', 'adaptador',
+      'basepared', 'montaje', 'carcasa', 'contenedor', 'tarjeta', 'microsd',
+      'discoduro', 'hdd', 'fuente', 'alimentacion', 'cable', 'conector',
+      'plataforma', 'gestionred', 'servidor', 'licencia', 'repuesto', 'recambio',
+    ]);
+
+    final recorder = _isRecorderProduct(product);
+    if (recorder && !name.contains('camara') && !name.contains('camera')) return false;
+    if (accessory) return false;
+
+    final cameraSku = sku.startsWith('ipc') || sku.startsWith('hac') || sku.startsWith('hdbw') ||
+        sku.startsWith('hdw') || sku.startsWith('hfw') || sku.contains('ipchdw') ||
+        sku.contains('ipchfw') || sku.contains('tioc') || sku.contains('indoorcam') ||
+        sku.contains('outdoorcam') || sku.contains('motioncam') || sku.contains('doorbell');
+
+    final cameraName = _containsAny(name, [
+      'camara', 'camera', 'domoip', 'domo', 'dome', 'turret', 'bullet', 'tubular',
+      'ptz', 'minidomo', 'eyeball', 'motioncam', 'indoorcam', 'outdoorcam', 'doorbell',
+    ]);
+
+    final technicalCamera = _containsAny(text, [
+      'sensorcmos', 'starlight', 'smartwdr', 'irinteligente', 'lente', 'optica',
+      'tioc', 'fullcolor', 'colorvu', 'wizsense', 'wizmind',
+    ]);
+
+    return cameraSku || cameraName || (technicalCamera && !accessory);
+  }
+
+  static bool _isRecorderProduct(Product product) {
+    final sku = _normalize(product.sku).replaceAll(' ', '');
+    final text = _productFilterText(product).replaceAll(' ', '');
+    return sku.startsWith('nvr') || sku.startsWith('xvr') || sku.startsWith('dvr') ||
+        text.contains('grabador') || text.contains('videograbador') || text.contains('recorder');
+  }
+
   static List<Product> sortByRelevance(List<Product> products, String query) {
     final terms = _expandedTerms(query);
     final scored = products
@@ -1235,6 +1346,10 @@ class _SearchEngine {
     final fullText = '$name $sku $description';
 
     int score = 0;
+
+    if (hasStrictIntent(query) && !filterForSearchIntent([product], query).contains(product)) {
+      score -= 10000;
+    }
 
     if (sku.isNotEmpty && sku == normalizedQuery) score += 500;
     if (sku.isNotEmpty && sku.contains(normalizedQuery)) score += 300;
@@ -2179,21 +2294,19 @@ class ProductImageBusqueda extends StatelessWidget {
       height: 96,
       padding: const EdgeInsets.all(7),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFFF8F9FB),
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE7E7E7)),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-        child: ColoredBox(
-          color: Colors.white,
-          child: CachedNetworkImage(
-            imageUrl: p.imageUrl,
-            fit: BoxFit.contain,
-            placeholder: (context, url) => const ColoredBox(color: Colors.white),
-            errorWidget: (context, url, error) => const Icon(
-              Icons.broken_image,
-              color: Colors.grey,
-            ),
+        child: CachedNetworkImage(
+          imageUrl: p.imageUrl,
+          fit: BoxFit.contain,
+          placeholder: (context, url) => Container(color: Colors.grey[100]),
+          errorWidget: (context, url, error) => const Icon(
+            Icons.broken_image,
+            color: Colors.grey,
           ),
         ),
       ),

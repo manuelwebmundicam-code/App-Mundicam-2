@@ -100,7 +100,7 @@ class ChatBox extends ConsumerWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         Text(
-                          '¿Dudas?',
+                          'Ayuda y buscador',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -113,7 +113,7 @@ class ChatBox extends ConsumerWidget {
                         ),
                         SizedBox(height: 3),
                         Text(
-                          'Yo te ayudo',
+                          'Te ayudo',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(

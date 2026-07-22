@@ -532,19 +532,21 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
   }) {
     final primaryText = '$name $sku $categories $attributes';
 
-    final hasStrongCameraSignal =
-        name.contains('camara') ||
+    final strongCameraSku = sku.startsWith('ipc') ||
+        sku.startsWith('hac') ||
+        sku.contains('hdw') ||
+        sku.contains('hfw');
+    final strongCameraName = name.contains('camara') ||
         name.contains('camaras') ||
         name.contains('camera') ||
+        name.contains('motioncam') ||
         name.contains('minidomo') ||
         name.contains('domo') ||
         name.contains('turret') ||
         name.contains('bullet') ||
-        name.contains('tubular') ||
-        sku.startsWith('ipc') ||
-        sku.startsWith('hac') ||
-        sku.contains('hdw') ||
-        sku.contains('hfw') ||
+        name.contains('tubular');
+    final hasStrongCameraSignal = strongCameraSku ||
+        strongCameraName ||
         categories.contains('camara') ||
         categories.contains('camaras') ||
         categories.contains('videoip') ||
@@ -556,6 +558,19 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
         attributes.contains('resolucion');
 
     if (!hasStrongCameraSignal) return false;
+
+    final accessoryOnly = name.contains('junctionbox') ||
+        name.contains('junction box') ||
+        name.contains('caja de conexiones') ||
+        name.contains('caja conexiones') ||
+        name.contains('caja para') ||
+        name.contains('soporte') ||
+        name.contains('base') ||
+        name.contains('bracket') ||
+        name.contains('adaptador') ||
+        name.contains('montaje') ||
+        name.contains('carcasa');
+    if (accessoryOnly && !strongCameraSku && !name.contains('motioncam')) return false;
 
     final looksLikeAlarmAccessory =
         primaryText.contains('kitalarma') ||

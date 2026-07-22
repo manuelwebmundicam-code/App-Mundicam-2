@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:mundicam/core/network/api_service.dart';
-import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 
@@ -59,9 +57,8 @@ class BlockedPage extends StatelessWidget {
                   ),
                 ),
                 onPressed: () async {
-                  await NotificationService().clearDeviceRegistration();
+                  // Cerramos sesión en Firebase para limpiar el rastro
                   await FirebaseAuth.instance.signOut();
-                  await ApiService().clearWordPressSession();
 
                   // Volvemos al Login borrando todo el historial de navegación
                   if (context.mounted) {

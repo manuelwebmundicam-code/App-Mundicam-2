@@ -1,43 +1,42 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
 
-/// Obtiene los pedidos del usuario autenticado.
-/// La fuente principal es la sesión WordPress/MundiCam App API.
+/// Provider que obtiene los pedidos del usuario
 final ordersProvider = FutureProvider<List<OrderMundicam>>((ref) async {
   final apiService = ref.read(apiServiceProvider);
 
+  // La sesión principal es WordPress/MundiCam App API. Firebase queda como apoyo.
   String? email = await apiService.currentSessionEmail();
 
-  // Respaldo local sin consulta adicional a Firestore.
-  if (email == null || email.trim().isEmpty) {
-    final user = FirebaseAuth.instance.currentUser;
-    email = user?.email ?? user?.providerData.firstOrNull?.email;
-  }
+  final user = FirebaseAuth.instance.currentUser;
 
-  final normalizedEmail = email?.trim().toLowerCase() ?? '';
-
-  if (normalizedEmail.isEmpty) {
-    if (kDebugMode) {
-      debugPrint('[ORDERS] Email de sesión no disponible | END');
+  if ((email == null || email.isEmpty) && user != null) {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (userDoc.exists && userDoc.data() != null) {
+        email = userDoc.get('email') as String?;
+      }
+    } catch (e) {
+      debugPrint('Error al leer email de Firestore: $e');
     }
-    return <OrderMundicam>[];
+    email ??= user.email;
+    email ??= user.providerData.firstOrNull?.email;
   }
 
-  if (kDebugMode) {
-    debugPrint(
-      '[ORDERS] Buscando para email="$normalizedEmail" | '
-      'length=${normalizedEmail.length} | END',
-    );
+  if (email == null || email.isEmpty) {
+    debugPrint('❌ No se encontró email para buscar pedidos');
+    return [];
   }
 
-  final pedidos = await apiService.getOrders(normalizedEmail);
-
-  if (kDebugMode) {
-    debugPrint('[ORDERS] Encontrados=${pedidos.length} | END');
-  }
-
+  debugPrint('🔍 Buscando pedidos para: $email');
+  final pedidos = await apiService.getOrders(email);
+  debugPrint('📦 Pedidos encontrados: ${pedidos.length}');
   return pedidos;
 });

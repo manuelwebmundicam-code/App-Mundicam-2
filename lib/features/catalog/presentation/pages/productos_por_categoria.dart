@@ -3546,29 +3546,27 @@ class ProductImage extends StatelessWidget {
       height: 96,
       padding: const EdgeInsets.all(7),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFFF8F9FB),
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE7E7E7)),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-        child: ColoredBox(
-          color: Colors.white,
-          child: CachedNetworkImage(
-            imageUrl: p.imageUrl,
-            fit: BoxFit.contain,
-            cacheManager: ImageCacheService.cacheManager,
-            memCacheWidth: 192,
-            memCacheHeight: 192,
-            cacheKey: p.imageUrl,
-            placeholder: (_, _) => const ColoredBox(color: Colors.white),
-            errorWidget: (_, _, _) => const Icon(
-              Icons.broken_image,
-              color: Colors.grey,
-              size: 30,
-            ),
-            fadeOutDuration: const Duration(milliseconds: 150),
-            fadeInDuration: const Duration(milliseconds: 150),
+        child: CachedNetworkImage(
+          imageUrl: p.imageUrl,
+          fit: BoxFit.contain,
+          cacheManager: ImageCacheService.cacheManager,
+          memCacheWidth: 192,
+          memCacheHeight: 192,
+          cacheKey: p.imageUrl,
+          placeholder: (_, _) => Container(color: Colors.grey[100]),
+          errorWidget: (_, _, _) => const Icon(
+            Icons.broken_image,
+            color: Colors.grey,
+            size: 30,
           ),
+          fadeOutDuration: const Duration(milliseconds: 150),
+          fadeInDuration: const Duration(milliseconds: 150),
         ),
       ),
     );

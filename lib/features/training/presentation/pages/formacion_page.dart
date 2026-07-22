@@ -38,6 +38,7 @@ class FormacionPage extends ConsumerWidget {
       appBar: ProfessionalPageAppBar(
         title: 'MUNDICAM ACADEMY',
         onBack: () => Navigator.of(context).maybePop(),
+        onRefresh: () => ref.invalidate(academyProvider),
       ),
       body: academyAsync.when(
         loading: () => const Center(

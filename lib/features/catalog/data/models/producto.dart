@@ -424,9 +424,9 @@ class Product {
             json['final_price'] ??
             json['role_price'] ??
             json['display_price'] ??
+            json['sale_price'] ??
             json['price'] ??
             pricesMap['price'] ??
-            json['sale_price'] ??
             json['raw_price'],
         minorUnit: minorUnit,
         fromMinorUnits: json['customer_price'] == null &&
@@ -436,9 +436,9 @@ class Product {
             json['final_price'] == null &&
             json['role_price'] == null &&
             json['display_price'] == null &&
+            json['sale_price'] == null &&
             json['price'] == null &&
-            pricesMap.containsKey('price') &&
-            json['sale_price'] == null,
+            pricesMap.containsKey('price'),
       ),
       regularPrice: _extractPrice(
         json['display_regular_price'] ??

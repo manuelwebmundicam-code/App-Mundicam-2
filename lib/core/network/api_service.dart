@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -175,7 +174,6 @@ class OrderPreviewResult {
   final double total;
   final double expectedTotal;
   final String cartHash;
-  final String shippingHash;
   final String selectedShippingMethodId;
   final String shippingLabel;
   final String destinationLabel;
@@ -191,7 +189,6 @@ class OrderPreviewResult {
     required this.total,
     required this.expectedTotal,
     required this.cartHash,
-    required this.shippingHash,
     required this.selectedShippingMethodId,
     required this.shippingLabel,
     required this.destinationLabel,
@@ -213,18 +210,13 @@ class OrderPreviewResult {
     return OrderPreviewResult(
       currency: json['currency']?.toString().trim() ?? 'EUR',
       subtotal: _parseDouble(totals['subtotal']),
-      shipping: _parseDouble(totals['shipping_total'] ?? totals['shipping']),
+      shipping: _parseDouble(totals['shipping']),
       taxTotal: _parseDouble(totals['tax_total']),
       total: total,
       expectedTotal: _parseDouble(json['expected_total'], fallback: total),
       cartHash: json['cart_hash']?.toString().trim() ?? '',
-      shippingHash: json['shipping_hash']?.toString().trim() ?? '',
       selectedShippingMethodId:
-          _firstNonEmptyString([
-                shipping['selected_method_id'],
-                shipping['selected_option_id'],
-              ]) ??
-              '',
+          shipping['selected_method_id']?.toString().trim() ?? '',
       shippingLabel: shipping['label']?.toString().trim() ?? '',
       destinationLabel: json['destination_label']?.toString().trim() ?? '',
       destination: _asMap(json['destination']),
@@ -338,12 +330,6 @@ class ApiService {
   static const String _appNamespace = '/wp-json/mundicam-app/v1';
   static const String _filtersNamespace = '/wp-json/mundicam/v1';
 
-  // Sensación de velocidad del buscador:
-  // primera pantalla pequeña y páginas siguientes precargadas en segundo plano.
-  static const int _fastSearchFirstPageSize = 10;
-  static const int _fastSearchNextPageSize = 10;
-  static const int _fastSearchMaxBackgroundPages = 3;
-
   static const String _wpSessionCookiePrefsKey = 'mundicam_wp_session_cookie';
   static const String _wpNoncePrefsKey = 'mundicam_wp_nonce';
   static const String _wpCartTokenPrefsKey = 'mundicam_wp_cart_token';
@@ -365,7 +351,6 @@ class ApiService {
 
   List<Map<String, dynamic>>? _cachedBrandTerms;
   final Map<String, _CatalogFiltersCacheEntry> _catalogFiltersCache = {};
-  final Set<String> _backgroundSearchPrefetchRunning = <String>{};
 
   ApiService._internal() {
     _dio = Dio(
@@ -416,14 +401,13 @@ class ApiService {
 
       if (kDebugMode) {
         debugPrint(
-          '[SESSION] MundiCam App API cargada: '
-          'token=${_appToken.isNotEmpty} | END',
+          '✅ Sesión MundiCam App API cargada: token=${_appToken.isNotEmpty}',
         );
       }
     } catch (e) {
       _sessionLoaded = true;
       if (kDebugMode) {
-        debugPrint('[SESSION] No se pudo cargar sesión App API: $e | END');
+        debugPrint('⚠️ No se pudo cargar sesión App API: $e');
       }
     }
   }
@@ -526,7 +510,7 @@ class ApiService {
     final lastRefresh = _lastSessionContextRefresh;
     if (!force &&
         lastRefresh != null &&
-        DateTime.now().difference(lastRefresh) < const Duration(seconds: 25)) {
+        DateTime.now().difference(lastRefresh) < const Duration(minutes: 5)) {
       return;
     }
 
@@ -572,12 +556,12 @@ class ApiService {
         _catalogFiltersCache.clear();
         _cachedBrandTerms = null;
         if (kDebugMode) {
-          debugPrint(' Caché limpiada por roles/permisos actualizados desde PHP v1.8.0');
+          debugPrint('🧹 Caché limpiada por roles/permisos actualizados desde PHP v1.8.0');
         }
       }
     } catch (e) {
       // No bloqueamos catálogo ni login si /me falla puntualmente.
-      if (kDebugMode) debugPrint(' No se pudo refrescar contexto de sesión: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo refrescar contexto de sesión: $e');
     }
   }
 
@@ -681,10 +665,9 @@ class ApiService {
 
     if (kDebugMode) {
       debugPrint(
-        '[SESSION] MundiCam App API guardada: '
-        'token=${_appToken.isNotEmpty} | END',
+        '✅ Sesión MundiCam App API guardada: token=${_appToken.isNotEmpty}',
       );
-      debugPrint('[CACHE] Productos limpiados por cambio de sesión/rol | END');
+      debugPrint('🧹 Caché de productos limpiada por cambio de sesión/rol');
     }
   }
 
@@ -737,116 +720,31 @@ class ApiService {
   Future<bool> registerFcmToken({
     required String token,
     required String platform,
-    String? apnsToken,
   }) async {
     await _ensureInitialized();
 
     final cleanToken = token.trim();
     if (_appToken.trim().isEmpty || cleanToken.isEmpty) return false;
 
-    final cleanPlatform = platform.trim().isEmpty ? 'android' : platform.trim();
-    final email = await currentSessionEmail();
-    final wordpressId = await currentSessionWordPressId();
-    final roles = await currentSessionRoles();
+    try {
+      final email = await currentSessionEmail();
+      final wordpressId = await currentSessionWordPressId();
+      final roles = await currentSessionRoles();
 
-    final payload = <String, dynamic>{
-      'fcm_token': cleanToken,
-      'token': cleanToken,
-      'platform': cleanPlatform,
-      if ((apnsToken ?? '').trim().isNotEmpty) 'apns_token': apnsToken!.trim(),
-      if (email != null && email.isNotEmpty) 'email': email,
-      if (wordpressId != null && wordpressId > 0) 'wordpress_id': wordpressId,
-      if (roles.isNotEmpty) 'roles': roles,
-    };
+      final response = await _appPost('/notifications/register-device', data: {
+        'fcm_token': cleanToken,
+        'platform': platform.trim().isEmpty ? 'android' : platform.trim(),
+        if (email != null && email.isNotEmpty) 'email': email,
+        if (wordpressId != null && wordpressId > 0) 'wordpress_id': wordpressId,
+        if (roles.isNotEmpty) 'roles': roles,
+      });
 
-    for (final endpoint in const [
-      '/fcm/register',
-      '/notifications/register-device',
-    ]) {
-      try {
-        final response = await _appPost(endpoint, data: payload);
-        final data = _responseMap(response.data);
-        final ok = response.statusCode != null &&
-            response.statusCode! >= 200 &&
-            response.statusCode! < 300 &&
-            data['success'] != false;
-
-        if (ok) {
-          if (kDebugMode) {
-            debugPrint('[FCM] Endpoint registrado: $endpoint | END');
-          }
-          return true;
-        }
-
-        if (kDebugMode) {
-          debugPrint('[FCM] Endpoint $endpoint respondió=${response.data} | END');
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[FCM] Error registrando en $endpoint: $e | END');
-        }
-      }
+      final data = _responseMap(response.data);
+      return data['success'] != false;
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ registerFcmToken: $e');
+      return false;
     }
-
-    return false;
-  }
-
-  Future<bool> unregisterFcmToken({
-    required String token,
-    required String platform,
-  }) async {
-    await _ensureInitialized();
-
-    final cleanToken = token.trim();
-    if (_appToken.trim().isEmpty || cleanToken.isEmpty) return false;
-
-    const configuredEndpoint = String.fromEnvironment(
-      'MUNDICAM_FCM_UNREGISTER_PATH',
-      defaultValue: '',
-    );
-
-    final endpoints = <String>{
-      if (configuredEndpoint.trim().isNotEmpty) configuredEndpoint.trim(),
-      '/fcm/unregister',
-      '/notifications/unregister-device',
-    };
-
-    final payload = <String, dynamic>{
-      'fcm_token': cleanToken,
-      'token': cleanToken,
-      'platform': platform.trim().isEmpty ? 'android' : platform.trim(),
-    };
-
-    for (final endpoint in endpoints) {
-      try {
-        final response = await _appPost(endpoint, data: payload);
-        final data = _responseMap(response.data);
-        final ok = response.statusCode != null &&
-            response.statusCode! >= 200 &&
-            response.statusCode! < 300 &&
-            data['success'] != false;
-
-        if (ok) {
-          if (kDebugMode) {
-            debugPrint('[FCM] Desregistrado en $endpoint | END');
-          }
-          return true;
-        }
-
-        if (kDebugMode) {
-          debugPrint(
-            '[FCM] Endpoint de desregistro $endpoint '
-            'respondió=${response.data} | END',
-          );
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[FCM] Error desregistrando en $endpoint: $e | END');
-        }
-      }
-    }
-
-    return false;
   }
 
   Future<void> clearWordPressSession() async {
@@ -871,7 +769,7 @@ class ApiService {
     _cachedBrandTerms = null;
 
     if (kDebugMode) {
-      debugPrint('[SESSION] MundiCam App API borrada | END');
+      debugPrint('🧹 Sesión MundiCam App API borrada');
     }
   }
 
@@ -954,7 +852,7 @@ class ApiService {
       if (user.isEmpty) return null;
       return _customerMapFromUser(user, _asMap(me['permissions']));
     } catch (e) {
-      if (kDebugMode) debugPrint(' getCustomerByEmail: $e');
+      if (kDebugMode) debugPrint('⚠️ getCustomerByEmail: $e');
       return null;
     }
   }
@@ -968,7 +866,7 @@ class ApiService {
       if (id > 0 && userId > 0 && id != userId) return null;
       return _customerMapFromUser(user, _asMap(me['permissions']));
     } catch (e) {
-      if (kDebugMode) debugPrint(' getCustomerById: $e');
+      if (kDebugMode) debugPrint('⚠️ getCustomerById: $e');
       return null;
     }
   }
@@ -1200,156 +1098,26 @@ class ApiService {
   }) async {
     await refreshSessionContextFromBackend();
 
-    final requestedPage = page <= 0 ? 1 : page;
-    final requestedPerPage = perPage <= 0 ? 30 : perPage;
-    final cleanBrandName = (brandName ?? '').trim();
-    final cleanSearch = (search ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
-    final mappedOrderBy = _mapOrderByForApp(orderBy);
-
     final effectiveBrandId = brandId ?? await getMarcaIdPorNombre(brandName);
 
-    // Si la búsqueda es amplia, no bloqueamos la pantalla esperando 60/80/100 productos.
-    // Devolvemos 10 rápido y dejamos preparadas las páginas siguientes en caché.
-    final useFastFirstPage = cleanSearch.isNotEmpty &&
-        requestedPage == 1 &&
-        requestedPerPage > _fastSearchFirstPageSize &&
-        !_looksLikeSku(cleanSearch);
-    final effectivePerPage = useFastFirstPage
-        ? _fastSearchFirstPageSize
-        : requestedPerPage;
-
-    final cacheKey = _catalogProductsCacheKey(
-      categoryId: categoryId,
-      brandId: effectiveBrandId,
-      brandName: cleanBrandName,
-      search: cleanSearch,
-      page: requestedPage,
-      perPage: effectivePerPage,
-      orderBy: mappedOrderBy,
-      attributeTermIds: attributeTermIds,
-    );
-
-    final ttl = cleanSearch.isNotEmpty
-        ? ProductCacheService.searchTtl
-        : ProductCacheService.defaultTtl;
-
-    final result = await ProductCacheService().getOrLoadMemory<CatalogProductsResult>(
-      cacheKey,
-      ttl: ttl,
-      loader: () {
-        return _requestCatalogProductsPage(
-          categoryId: categoryId,
-          brandId: effectiveBrandId,
-          brandName: cleanBrandName,
-          search: cleanSearch,
-          page: requestedPage,
-          perPage: effectivePerPage,
-          orderBy: mappedOrderBy,
-          attributeTermIds: attributeTermIds,
-          attributeLabels: attributeLabels,
-        );
-      },
-    );
-
-    if (useFastFirstPage && result.hasNextPage) {
-      _startBackgroundSearchPrefetch(
-        categoryId: categoryId,
-        brandId: effectiveBrandId,
-        brandName: cleanBrandName,
-        search: cleanSearch,
-        orderBy: mappedOrderBy,
-        attributeTermIds: attributeTermIds,
-        attributeLabels: attributeLabels,
-        startPage: 2,
-      );
-    }
-
-    return result;
-  }
-
-  Future<CatalogProductsResult?> _requestContextSearchPage({
-    required String search,
-    required int perPage,
-  }) async {
-    final clean = search.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (clean.length < 2 || _looksLikeSku(clean)) return null;
-
-    try {
-      final params = <String, dynamic>{
-        'search': clean,
-        'q': clean,
-        'per_page': perPage <= 0 ? 30 : perPage,
-        'limit': perPage <= 0 ? 30 : perPage,
-        'smart_search': 1,
-        'search_mode': 'relevance',
-        ..._buildSmartSearchParams(clean),
-      };
-
-      final response = await _appGet('/context-search', queryParameters: params);
-      final result = _catalogResultFromResponse(
-        response.data,
-        requestedPage: 1,
-        logPrefix: '✅ Context-search MundiCam',
-      );
-
-      if (result.products.isEmpty) return null;
-      return _applyClientSearchRanking(
-        result,
-        clean,
-        requestedPerPage: perPage,
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint(' Context-search no disponible para "$clean": $e');
-      }
-      return null;
-    }
-  }
-
-  Future<CatalogProductsResult> _requestCatalogProductsPage({
-    required int? categoryId,
-    required int? brandId,
-    required String brandName,
-    required String search,
-    required int page,
-    required int perPage,
-    required String? orderBy,
-    required Map<String, int>? attributeTermIds,
-    required Map<String, String>? attributeLabels,
-  }) async {
-    final smartSearchParams = _buildSmartSearchParams(search);
-    final canUseContextSearch = search.trim().isNotEmpty &&
-        !_looksLikeSku(search) &&
-        page <= 1 &&
-        (categoryId == null || categoryId <= 0) &&
-        (brandId == null || brandId <= 0) &&
-        brandName.trim().isEmpty &&
-        (attributeTermIds == null || attributeTermIds.isEmpty) &&
-        (orderBy == null || orderBy.trim().isEmpty);
-
-    if (canUseContextSearch) {
-      final contextResult = await _requestContextSearchPage(
-        search: search,
-        perPage: perPage,
-      );
-      if (contextResult != null && contextResult.products.isNotEmpty) {
-        return contextResult;
-      }
-    }
+    final cleanBrandName = (brandName ?? '').trim();
+    final cleanSearch = (search ?? '').trim();
+    final mappedOrderBy = _mapOrderByForApp(orderBy);
+    final smartSearchParams = _buildSmartSearchParams(cleanSearch);
 
     final params = <String, dynamic>{
       'page': page <= 0 ? 1 : page,
       'per_page': perPage <= 0 ? 30 : perPage,
       if (categoryId != null && categoryId > 0) 'category': categoryId,
       if (categoryId != null && categoryId > 0) 'category_id': categoryId,
-      if (brandId != null && brandId > 0) 'brand_id': brandId,
-      if (brandId != null && brandId > 0) 'brandId': brandId,
-      if (brandName.isNotEmpty) 'brand': brandName,
-      if (brandName.isNotEmpty) 'brand_name': brandName,
-      if (search.isNotEmpty) 'search': search,
-      if (search.isNotEmpty && _looksLikeSku(search)) 'sku': search,
-      if ((orderBy ?? '').trim().isNotEmpty) 'orderby': orderBy,
-      if ((orderBy ?? '').trim().isNotEmpty) 'orderBy': orderBy,
+      if (effectiveBrandId != null && effectiveBrandId > 0) 'brand_id': effectiveBrandId,
+      if (effectiveBrandId != null && effectiveBrandId > 0) 'brandId': effectiveBrandId,
+      if (cleanBrandName.isNotEmpty) 'brand': cleanBrandName,
+      if (cleanBrandName.isNotEmpty) 'brand_name': cleanBrandName,
+      if (cleanSearch.isNotEmpty) 'search': cleanSearch,
+      if (cleanSearch.isNotEmpty && _looksLikeSku(cleanSearch)) 'sku': cleanSearch,
+      if ((orderBy ?? '').trim().isNotEmpty) 'orderby': mappedOrderBy,
+      if ((orderBy ?? '').trim().isNotEmpty) 'orderBy': mappedOrderBy,
       ...smartSearchParams,
     };
 
@@ -1360,130 +1128,21 @@ class ApiService {
       params['attributeTerms'] = encodedAttributes;
     }
 
+    // BÚSQUEDA RÁPIDA: no usamos /context-search aquí.
+    // Ese endpoint era demasiado pesado para la experiencia móvil porque podía
+    // disparar búsqueda contextual amplia, payload grande y resultados lentos.
+    // El search de app debe ser una sola llamada a /products, paginada y ligera.
     final response = await _appGet('/products', queryParameters: params);
     final result = _catalogResultFromResponse(
       response.data,
       requestedPage: page,
-      logPrefix: search.isNotEmpty
-          ? '✅ Búsqueda rápida MundiCam App API'
-          : '✅ Productos MundiCam App API',
+      logPrefix: '✅ Productos MundiCam App API',
     );
-
     return _applyClientSearchRanking(
       result,
-      search,
+      cleanSearch,
       requestedPerPage: perPage,
     );
-  }
-
-  String _catalogProductsCacheKey({
-    required int? categoryId,
-    required int? brandId,
-    required String brandName,
-    required String search,
-    required int page,
-    required int perPage,
-    required String? orderBy,
-    required Map<String, int>? attributeTermIds,
-  }) {
-    final attrPayload = _buildAttributeTermsPayload(attributeTermIds);
-    final attrKey = attrPayload.isEmpty ? '' : jsonEncode(attrPayload);
-    return [
-      'api_products|$catalogCacheIdentity',
-      'cat:${categoryId ?? 0}',
-      'brandId:${brandId ?? 0}',
-      'brand:${brandName.toLowerCase().trim()}',
-      'search:${_normalizeText(search)}',
-      'order:${orderBy ?? ''}',
-      'attrs:$attrKey',
-      'page:$page',
-      'perPage:$perPage',
-    ].join('|');
-  }
-
-  void _startBackgroundSearchPrefetch({
-    required int? categoryId,
-    required int? brandId,
-    required String brandName,
-    required String search,
-    required String? orderBy,
-    required Map<String, int>? attributeTermIds,
-    required Map<String, String>? attributeLabels,
-    required int startPage,
-  }) {
-    final cleanSearch = search.trim();
-    if (cleanSearch.length < 2) return;
-
-    final prefetchKey = [
-      'prefetch',
-      catalogCacheIdentity,
-      categoryId ?? 0,
-      brandId ?? 0,
-      _normalizeText(brandName),
-      _normalizeText(cleanSearch),
-      orderBy ?? '',
-      jsonEncode(_buildAttributeTermsPayload(attributeTermIds)),
-    ].join('|');
-
-    final cache = ProductCacheService();
-    if (!cache.shouldPrewarm(prefetchKey, ttl: const Duration(seconds: 45))) {
-      return;
-    }
-    if (_backgroundSearchPrefetchRunning.contains(prefetchKey)) return;
-
-    _backgroundSearchPrefetchRunning.add(prefetchKey);
-    cache.markPrewarmRun(prefetchKey);
-
-    unawaited(Future<void>(() async {
-      try {
-        for (var page = startPage;
-            page < startPage + _fastSearchMaxBackgroundPages;
-            page++) {
-          final cacheKey = _catalogProductsCacheKey(
-            categoryId: categoryId,
-            brandId: brandId,
-            brandName: brandName,
-            search: cleanSearch,
-            page: page,
-            perPage: _fastSearchNextPageSize,
-            orderBy: orderBy,
-            attributeTermIds: attributeTermIds,
-          );
-
-          final result = await cache.getOrLoadMemory<CatalogProductsResult>(
-            cacheKey,
-            ttl: ProductCacheService.searchTtl,
-            loader: () {
-              return _requestCatalogProductsPage(
-                categoryId: categoryId,
-                brandId: brandId,
-                brandName: brandName,
-                search: cleanSearch,
-                page: page,
-                perPage: _fastSearchNextPageSize,
-                orderBy: orderBy,
-                attributeTermIds: attributeTermIds,
-                attributeLabels: attributeLabels,
-              );
-            },
-          );
-
-          if (kDebugMode) {
-            debugPrint(
-              ' Precarga buscador "$cleanSearch": page=$page · ${result.products.length} productos',
-            );
-          }
-
-          if (!result.hasNextPage || result.products.isEmpty) break;
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint(' Precarga buscador "$cleanSearch" cancelada: $e');
-        }
-      } finally {
-        _backgroundSearchPrefetchRunning.remove(prefetchKey);
-      }
-    }));
   }
 
 
@@ -1505,6 +1164,12 @@ class ApiService {
       'include_relevance': 1,
       'stock_authority': 'woocommerce',
       'search_fields': 'sku,title,excerpt,content,brand,categories,attributes,tags',
+      'strict_intent': cameraIntent || recorderIntent ? 1 : 0,
+      if (cameraIntent) 'require_product_type': 'camera',
+      if (cameraIntent) 'product_type': 'camera',
+      if (cameraIntent) 'exclude_accessories': 1,
+      if (cameraIntent) 'exclude_terms': 'junctionbox,caja,soporte,bracket,adaptador,base,carcasa,contenedor,microsd,tarjeta,plataforma,servidor,grabador,nvr,xvr,dvr',
+      if (recorderIntent) 'require_product_type': 'recorder',
       'token_operator': 'and_or',
       'allow_partial_tokens': 1,
       'normalize_accents': 1,
@@ -1538,12 +1203,16 @@ class ApiService {
     final ranked = _sortSuggestionsForQuery(result.products, clean);
     final filtered = _filterWeakSearchMatches(ranked, clean);
 
-    // Si el filtro local fuese demasiado agresivo por una respuesta especial del
-    // backend, nunca dejamos la pantalla vacía: mantenemos la respuesta original
-    // ordenada por relevancia local.
-    final safeProducts = filtered.isEmpty ? ranked : filtered;
+    // En búsquedas con intención clara de producto no mostramos basura solo por
+    // no dejar la pantalla vacía. Ejemplo: "camaras ajax" no debe enseñar kits,
+    // hubs ni cajas de conexiones si no son cámaras reales.
+    final strictIntent = _queryHasCameraIntent(clean) || _queryHasRecorderIntent(clean);
+    final safeProducts = filtered.isEmpty && !strictIntent ? ranked : filtered;
 
-    return result.copyWith(products: safeProducts);
+    return result.copyWith(
+      products: safeProducts,
+      totalItems: strictIntent ? safeProducts.length : result.totalItems,
+    );
   }
 
   List<Product> _filterWeakSearchMatches(List<Product> products, String query) {
@@ -1553,9 +1222,14 @@ class ApiService {
         .where((product) => _productMatchesOriginalSearchIntent(product, query))
         .toList();
 
-    // No dejamos pantallas vacías por culpa del filtro local si el backend nuevo
-    // devuelve datos con campos que no vienen en el payload reducido.
-    if (filtered.isEmpty) return products;
+    // En búsquedas con intención clara, si todo lo devuelto es basura,
+    // preferimos mostrar vacío antes que kits, hubs o accesorios no solicitados.
+    if (filtered.isEmpty) {
+      if (_queryHasCameraIntent(query) || _queryHasRecorderIntent(query)) {
+        return const <Product>[];
+      }
+      return products;
+    }
     return filtered;
   }
 
@@ -1726,7 +1400,7 @@ class ApiService {
       return _sortSuggestionsForQuery(result.products, clean).take(perPage).toList();
     } catch (e) {
       if (kDebugMode) {
-        debugPrint(' Predictivo rápido falló: $e');
+        debugPrint('⚠️ Predictivo rápido falló: $e');
       }
       return const <Product>[];
     }
@@ -1849,57 +1523,91 @@ class ApiService {
   }
 
   bool _isCameraProduct(Product product) {
-    final haystack = _productSearchHaystack(product);
     final sku = _normalizeText(product.sku);
     final name = _normalizeText(product.name);
+    final description = _normalizeText(product.shortDescription);
     final categories = _normalizeText('${product.categoryNames.join(' ')} ${product.categorySlugs.join(' ')}');
     final attributes = _normalizeText(product.attributes.map((a) => '${a.name} ${a.options.join(' ')}').join(' '));
-    final primary = '$sku $name $categories $attributes';
+    final text = '$sku $name $description $categories $attributes';
 
-    final hasCameraSignal = primary.contains('camara') ||
-        primary.contains('camera') ||
-        primary.contains('cctv') ||
-        primary.contains('videovigilancia') ||
-        primary.contains('domo') ||
-        primary.contains('dome') ||
-        primary.contains('turret') ||
-        primary.contains('bullet') ||
-        primary.contains('tubular') ||
-        primary.contains('ptz') ||
-        sku.startsWith('ipc') ||
-        sku.startsWith('hac') ||
-        sku.contains('hdw') ||
-        sku.contains('hfw') ||
-        sku.contains('hdbw') ||
-        attributes.contains('lente') ||
-        attributes.contains('resolucion');
+    bool containsAny(String source, Iterable<String> values) {
+      return values.any((value) => source.contains(_normalizeText(value)));
+    }
 
-    if (!hasCameraSignal) return false;
+    final accessoryOnly = containsAny(text, const <String>[
+      'junctionbox',
+      'junction box',
+      'caja de conexiones',
+      'cajas de conexiones',
+      'caja conexiones',
+      'caja para',
+      'para camara',
+      'para camaras',
+      'soporte',
+      'bracket',
+      'adaptador',
+      'base pared',
+      'montaje',
+      'carcasa',
+      'contenedor',
+      'tarjeta',
+      'micro sd',
+      'microsd',
+      'disco duro',
+      'hdd',
+      'fuente alimentacion',
+      'alimentacion',
+      'cable',
+      'conector',
+      'plataforma',
+      'gestion de red',
+      'servidor',
+      'licencia',
+      'repuesto',
+      'recambio',
+    ]);
+    if (accessoryOnly) return false;
 
-    final looksLikeRecorder = haystack.contains('grabador') ||
-        haystack.contains('videograbador') ||
-        sku.startsWith('nvr') ||
+    final recorderOnly = sku.startsWith('nvr') ||
         sku.startsWith('xvr') ||
-        sku.startsWith('dvr');
-    if (looksLikeRecorder &&
-        !name.contains('camara') &&
-        !name.contains('camera') &&
-        !name.contains('domo') &&
-        !name.contains('turret') &&
-        !name.contains('bullet')) {
+        sku.startsWith('dvr') ||
+        containsAny(text, const <String>['grabador', 'videograbador', 'recorder']);
+    if (recorderOnly && !containsAny(name, const <String>['camara', 'camera'])) {
       return false;
     }
 
-    final looksLikeAlarmOnly = haystack.contains('alarma') ||
-        haystack.contains('hub') ||
-        haystack.contains('detector') ||
-        haystack.contains('sirena') ||
-        haystack.contains('teclado');
-    if (looksLikeAlarmOnly && !sku.startsWith('ipc') && !sku.startsWith('hac')) {
-      return name.contains('camara') || name.contains('camera') || categories.contains('camara');
+    final alarmOnly = containsAny(text, const <String>[
+      'alarma', 'alarmas', 'hub', 'detector', 'sirena', 'teclado', 'jeweller', 'fibra',
+    ]);
+    if (alarmOnly && !sku.startsWith('ipc') && !sku.startsWith('hac') &&
+        !containsAny(name, const <String>['camara', 'camera', 'motioncam', 'indoorcam', 'outdoorcam', 'doorbell'])) {
+      return false;
     }
 
-    return true;
+    final strongCameraSku = sku.startsWith('ipc') ||
+        sku.startsWith('hac') ||
+        sku.startsWith('hdbw') ||
+        sku.startsWith('hdw') ||
+        sku.startsWith('hfw') ||
+        sku.contains('ipchdw') ||
+        sku.contains('ipchfw') ||
+        sku.contains('tioc') ||
+        sku.contains('indoorcam') ||
+        sku.contains('outdoorcam') ||
+        sku.contains('motioncam') ||
+        sku.contains('doorbell');
+
+    final strongCameraName = containsAny(name, const <String>[
+      'camara', 'camera', 'domo ip', 'domo', 'dome', 'turret', 'bullet', 'tubular',
+      'ptz', 'minidomo', 'eyeball', 'motioncam', 'indoorcam', 'outdoorcam', 'doorbell',
+    ]);
+
+    final technicalCamera = containsAny(text, const <String>[
+      'sensor cmos', 'starlight', 'smart wdr', 'ir inteligente', 'lente', 'optica',
+      'tioc', 'full color', 'colorvu', 'wizsense', 'wizmind', 'resolucion',
+    ]);
+
+    return strongCameraSku || strongCameraName || technicalCamera;
   }
 
   bool _productMatchesOriginalSearchIntent(Product product, String query) {
@@ -2016,6 +1724,8 @@ class ApiService {
       final text = '$sku $name $brandName $description $categories $attributes';
       var value = 0;
 
+      if (cameraIntent && !_isCameraProduct(product)) value -= 100000;
+
       if (sku.isNotEmpty && sku == q) value += 3000;
       if (sku.isNotEmpty && sku.startsWith(q)) value += 2200;
       if (sku.isNotEmpty && sku.contains(q)) value += 1700;
@@ -2069,46 +1779,19 @@ class ApiService {
     final clean = query.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (clean.isEmpty) return const <Product>[];
 
-    // Respuesta rápida para chat, home y buscadores simples: primera página pequeña.
-    // El resto queda precargándose desde getProductosCatalogoFiltrado().
-    final primary = await getProductosCatalogoFiltrado(
+    // Búsqueda rápida móvil: una sola llamada. El fallback con varias llamadas
+    // secuenciales hacía que búsquedas generales como "camaras dahua" o
+    // "camaras ajax" tardasen 5-10 segundos y cargasen productos de más.
+    final result = await getProductosCatalogoFiltrado(
       search: clean,
       page: 1,
-      perPage: 12,
+      perPage: _looksLikeSku(clean) ? 12 : 48,
     );
 
-    if (primary.products.isNotEmpty) {
-      final ranked = _sortSuggestionsForQuery(primary.products, clean);
-      final filtered = _filterWeakSearchMatches(ranked, clean);
-      return _dedupeProductsById(filtered).take(12).toList();
-    }
-
-    // Solo si la primera búsqueda viene vacía hacemos fallback. No esperamos 7
-    // búsquedas pesadas como antes: eso daba sensación de lentitud.
-    if (_shouldRunExpandedSearch(clean, primary.products)) {
-      for (final expandedQuery in _expandedSearchQueries(clean).take(3)) {
-        try {
-          final extra = await getProductosCatalogoFiltrado(
-            search: expandedQuery,
-            page: 1,
-            perPage: 10,
-          );
-          if (extra.products.isNotEmpty) {
-            final ranked = _sortSuggestionsForQuery(extra.products, clean);
-            final filtered = _filterWeakSearchMatches(ranked, clean);
-            return _dedupeProductsById(filtered).take(12).toList();
-          }
-        } catch (e) {
-          if (kDebugMode) {
-            debugPrint(' Fallback búsqueda "$expandedQuery" falló: $e');
-          }
-        }
-      }
-    }
-
-    return const <Product>[];
+    // No hidratamos producto por producto en búsquedas. Esa hidratación hacía una
+    // llamada extra por cada resultado y era el principal cuello de botella.
+    return _dedupeProductsById(result.products).take(_looksLikeSku(clean) ? 12 : 48).toList();
   }
-
 
   Future<List<Product>> _hydrateInternalStockDetailsIfAllowed(
     List<Product> products,
@@ -2161,7 +1844,7 @@ class ApiService {
       if (productMap.isEmpty) return null;
       return Product.fromJson(productMap);
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getProductoById($id): $e');
+      if (kDebugMode) debugPrint('❌ Error getProductoById($id): $e');
       return null;
     }
   }
@@ -2242,7 +1925,7 @@ class ApiService {
 
       return groups;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error cargando filtros catálogo: $e');
+      if (kDebugMode) debugPrint('⚠️ Error cargando filtros catálogo: $e');
       return [];
     }
   }
@@ -2262,7 +1945,7 @@ class ApiService {
       });
       return _responseMap(response.data)['success'] != false;
     } catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo sincronizar carrito remoto: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo sincronizar carrito remoto: $e');
       return false;
     }
   }
@@ -2296,21 +1979,20 @@ class ApiService {
           .toList();
 
       if (kDebugMode) {
+        final rootDestination = _asMap(root['destination']);
+        final nestedDestination = _asMap(nested['destination']);
+        final destination = rootDestination.isNotEmpty ? rootDestination : nestedDestination;
         debugPrint(
-          '[SHIPPING] Métodos recibidos=${options.length} | END',
+          '🚚 Métodos de envío recibidos: ${options.length}. Destino: $destination',
         );
       }
 
       return options;
     } on DioException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[SHIPPING] Error Dio: ${_mapDioError(e)} | END');
-      }
+      if (kDebugMode) debugPrint('⚠️ No se pudieron cargar métodos de envío: ${_mapDioError(e)}');
       return <ShippingOption>[];
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[SHIPPING] Error: $e | END');
-      }
+      if (kDebugMode) debugPrint('⚠️ No se pudieron cargar métodos de envío: $e');
       return <ShippingOption>[];
     }
   }
@@ -2327,10 +2009,8 @@ class ApiService {
       final response = await _appPost('/order/preview', data: {
         'line_items': cleanItems,
         'shipping_address': shippingAddress,
-        if ((shippingMethodId ?? '').trim().isNotEmpty) ...{
+        if ((shippingMethodId ?? '').trim().isNotEmpty)
           'shipping_method_id': shippingMethodId!.trim(),
-          'shipping_option_id': shippingMethodId!.trim(),
-        },
       });
       final root = _responseMap(response.data);
       final nested = _asMap(root['data']);
@@ -2338,17 +2018,17 @@ class ApiService {
       if (data['success'] == false) return null;
       return OrderPreviewResult.fromJson(data);
     } on DioException catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo calcular resumen de pedido: ${_mapDioError(e)}');
+      if (kDebugMode) debugPrint('⚠️ No se pudo calcular resumen de pedido: ${_mapDioError(e)}');
       return null;
     } catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo calcular resumen de pedido: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo calcular resumen de pedido: $e');
       return null;
     }
   }
 
   Future<OrderCreateResult> crearPedidoConResultado(
     Map<String, dynamic> orderData, {
-    bool forceProcessingIfPending = false,
+    bool forceProcessingIfPending = true,
   }) async {
     try {
       final lineItems = _sanitizeLineItems(orderData['line_items']);
@@ -2359,6 +2039,9 @@ class ApiService {
       final response = await _appPost('/order/create', data: {
         ...orderData,
         'line_items': lineItems,
+        if (forceProcessingIfPending &&
+            (orderData['status']?.toString().trim().isEmpty ?? true))
+          'status': 'processing',
       });
 
       final data = _responseMap(response.data);
@@ -2400,7 +2083,7 @@ class ApiService {
         data['redirect_url'],
       ]);
     } catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo obtener URL segura de pago: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo obtener URL segura de pago: $e');
       return null;
     }
   }
@@ -2437,7 +2120,7 @@ class ApiService {
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error crearPresupuesto: $e');
+      if (kDebugMode) debugPrint('❌ Error crearPresupuesto: $e');
       return false;
     }
   }
@@ -2484,7 +2167,7 @@ class ApiService {
           .map((item) => OrderMundicam.fromJson(Map<String, dynamic>.from(item)))
           .toList();
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getOrders: $e');
+      if (kDebugMode) debugPrint('❌ Error getOrders: $e');
       return [];
     }
   }
@@ -2506,7 +2189,7 @@ class ApiService {
       if (data['success'] == false) return null;
       return data;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getOrderStatus: $e');
+      if (kDebugMode) debugPrint('❌ Error getOrderStatus: $e');
       return null;
     }
   }
@@ -2530,7 +2213,7 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getOrdenCompleta: $e');
+      if (kDebugMode) debugPrint('❌ Error getOrdenCompleta: $e');
       return null;
     }
   }
@@ -2545,7 +2228,7 @@ class ApiService {
           .map((item) => QuoteMundicam.fromJson(Map<String, dynamic>.from(item)))
           .toList();
     } catch (e) {
-      if (kDebugMode) debugPrint(' Presupuestos App API no disponibles: $e');
+      if (kDebugMode) debugPrint('⚠️ Presupuestos App API no disponibles: $e');
       return [];
     }
   }
@@ -2574,7 +2257,7 @@ class ApiService {
       final data = _responseMap(response.data);
       return response.statusCode == 200 || response.statusCode == 201 || data['success'] != false;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error crearRma: $e');
+      if (kDebugMode) debugPrint('❌ Error crearRma: $e');
       return false;
     }
   }
@@ -2588,7 +2271,7 @@ class ApiService {
       final raw = _firstList([data['rma'], data['requests'], data['data'], response.data]);
       return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getRmaRequests: $e');
+      if (kDebugMode) debugPrint('⚠️ Error getRmaRequests: $e');
       return [];
     }
   }

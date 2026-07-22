@@ -38,7 +38,7 @@ class MenuBarWidget extends ConsumerWidget {
         MaterialPageRoute(
           builder: (context) => ProductosPorCategoriaScreen(
             categoryId: outletId,
-            categoryName: "OUTLET",
+            categoryName: "OFERTAS",
           ),
         ),
       );
@@ -81,7 +81,7 @@ class MenuBarWidget extends ConsumerWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _MenuPillButton(
-              title: 'Outlet',
+              title: 'Ofertas',
               icon: Icons.local_offer_outlined,
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,

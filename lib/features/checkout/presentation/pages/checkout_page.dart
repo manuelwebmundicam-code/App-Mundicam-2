@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -86,14 +85,14 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       id: 'bacs',
       title: 'Transferencia bancaria',
       description:
-      'Pago por transferencia bancaria. Usa el número de pedido como concepto. El pedido queda en espera hasta validar el pago.',
+      'Pago mediante transferencia bancaria. El pedido será procesado por MundiCam.',
       icon: Icons.account_balance_outlined,
     ),
     _CheckoutPaymentMethod(
       id: 'cheque',
       title: 'Giro / pago aplazado',
       description:
-      'Forma de pago vinculada a condiciones comerciales y crédito disponible. Se bloquea si supera tu crédito.',
+      'Forma de pago vinculada a condiciones comerciales y crédito aprobado.',
       icon: Icons.receipt_long_outlined,
       requiresCredit: true,
     ),
@@ -101,7 +100,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       id: 'redsys',
       title: 'Pago con tarjeta',
       description:
-      'Pago seguro con tarjeta mediante Redsys. La app no guarda datos de tarjeta y el pedido queda pendiente hasta confirmación bancaria.',
+      'Pago seguro con tarjeta bancaria mediante pasarela segura.',
       icon: Icons.credit_card_outlined,
     ),
   ];
@@ -362,12 +361,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'country': country,
     };
 
-    if (kDebugMode) {
-      debugPrint(
-        '[CHECKOUT] Dirección envío preparada | '
-        'country=$country | state=$state | postcode=$postcode | END',
-      );
-    }
+    debugPrint('🚚 Dirección enviada para envío: $payload');
     return payload;
   }
 
@@ -477,7 +471,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       });
       return preview;
     } catch (e) {
-      debugPrint(' Error actualizando envío/resumen: $e');
+      debugPrint('❌ Error actualizando envío/resumen: $e');
       if (!mounted) return null;
       setState(() {
         _loadingShipping = false;
@@ -509,7 +503,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         shippingMethodId: option.id,
       );
     } catch (e) {
-      debugPrint(' Error seleccionando envío: $e');
+      debugPrint('❌ Error seleccionando envío: $e');
     }
 
     if (!mounted) return;
@@ -752,7 +746,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         await _refreshShippingAndPreview();
       }
     } catch (e) {
-      debugPrint(' Error cargando datos: $e');
+      debugPrint('❌ Error cargando datos: $e');
       setState(() {
         _loadingProfile = false;
         _errorMessage = 'Error al cargar datos. Intenta de nuevo.';
@@ -780,7 +774,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         }
       }
     } catch (e) {
-      debugPrint(' Error en _getMetaValue: $e');
+      debugPrint('⚠️ Error en _getMetaValue: $e');
     }
     return null;
   }
@@ -968,8 +962,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'shipping_address': shippingAddress,
       'shipping_method_id': _selectedShippingOption!.id,
       if (preview.cartHash.isNotEmpty) 'cart_hash': preview.cartHash,
-      if (preview.shippingHash.isNotEmpty) 'shipping_hash': preview.shippingHash,
-      'shipping_option_id': _selectedShippingOption!.id,
       'line_items': lineItems,
       'expected_subtotal': preview.subtotal.toStringAsFixed(2),
       'expected_shipping_total': preview.shipping.toStringAsFixed(2),
@@ -1058,7 +1050,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       ref.invalidate(ordersProvider);
       _irAlInicio(mensaje: '✅ Pedido confirmado. Te llevamos al inicio.');
     } catch (e) {
-      debugPrint(' Error creando pedido: $e');
+      debugPrint('❌ Error creando pedido: $e');
       _mostrarError(
           'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.');
     } finally {
@@ -1934,7 +1926,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Subtotal'),
+              const Text('Base Imponible'),
               Text(_formatMoney(subtotal)),
             ],
           ),
@@ -1942,13 +1934,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Text(
-                  _selectedShippingOption?.title ?? 'Envío',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
+              const Text('Envío'),
               Text(shipping <= 0 ? 'Gratis' : _formatMoney(shipping)),
             ],
           ),
@@ -2004,9 +1990,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    _orderPreview?.destinationLabel.trim().isNotEmpty == true
-                        ? 'Envío a ${_orderPreview!.destinationLabel}'
-                        : 'Método: ${_selectedShippingOption!.title}',
+                    'Envío: ${_selectedShippingOption!.title}',
                     style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey.shade700,

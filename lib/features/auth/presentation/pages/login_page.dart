@@ -8,13 +8,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/network/api_service.dart';
-import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/features/auth/presentation/pages/forgot_password_page.dart';
+import 'package:mundicam/shared/pages/mundicam_web_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -81,12 +80,9 @@ class _LoginPageState extends State<LoginPage> {
     if (hasWpSession) {
       if (kDebugMode) {
         debugPrint(
-          '[SESSION] WordPress/WooCommerce detectada | END',
+          '✅ Sesión WordPress/WooCommerce detectada. Entrando a la app.',
         );
       }
-
-      await NotificationService().syncAfterLogin(maxAttempts: 2);
-      if (!mounted) return;
 
       _abrirPantallaPrincipal();
       return;
@@ -99,14 +95,11 @@ class _LoginPageState extends State<LoginPage> {
     if (currentUser != null) {
       if (kDebugMode) {
         debugPrint(
-          '[SESSION] Firebase activa sin sesión App API. '
+          '⚠️ Firebase tenía sesión activa, pero no había sesión WordPress/WooCommerce. '
               'Se fuerza login limpio.',
         );
       }
 
-      // No borrar el token FCM aquí: todavía no es un logout del usuario,
-      // solo estamos corrigiendo una sesión Firebase sin sesión App API.
-      // El token se conservará y se registrará tras completar el login.
       await FirebaseAuth.instance.signOut();
       await ApiService().clearWordPressSession();
     }
@@ -124,11 +117,10 @@ class _LoginPageState extends State<LoginPage> {
 
     if (kDebugMode) {
       debugPrint(
-        '[SESSION] WP guardada: '
-        'cookie=${cookie.isNotEmpty} | '
-        'nonce=${nonce.isNotEmpty} | '
-        'appToken=${appToken.isNotEmpty} | '
-        'cartToken=${cartToken.isNotEmpty} | END',
+        '🔐 Sesión WP guardada en login: '
+            'cookie=${cookie.isNotEmpty} '
+            'nonce=${nonce.isNotEmpty} '
+            'appToken=${appToken.isNotEmpty} cartToken=${cartToken.isNotEmpty}',
       );
     }
 
@@ -157,11 +149,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  LaunchMode get _webAuthLaunchMode =>
-      defaultTargetPlatform == TargetPlatform.iOS
-          ? LaunchMode.inAppBrowserView
-          : LaunchMode.externalApplication;
-
   void _abrirPantallaPrincipal() {
     if (!mounted) return;
 
@@ -169,38 +156,26 @@ class _LoginPageState extends State<LoginPage> {
       builder: (_) => const MainScreen(),
     );
 
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-        route,
-        (_) => false,
-      );
-      return;
-    }
-
-    Navigator.pushReplacement(context, route);
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      route,
+      (_) => false,
+    );
   }
 
   Future<void> _abrirRegistro() async {
-    final url = Uri.parse(_registroUrl);
+    FocusScope.of(context).unfocus();
 
-    try {
-      final abierto = await launchUrl(
-        url,
-        mode: _webAuthLaunchMode,
-      );
-
-      if (!abierto) {
-        _showSnackBar(
-          'No se pudo abrir la página de registro.',
-          isError: true,
-        );
-      }
-    } catch (_) {
-      _showSnackBar(
-        'No se pudo abrir la página de registro.',
-        isError: true,
-      );
-    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const MundicamWebPage(
+          title: 'Alta profesional',
+          url: _registroUrl,
+          headerTitle: 'Registro profesional MundiCam',
+          headerMessage:
+              'Completa el alta desde la app. Cuando MundiCam valide tu cuenta, podrás iniciar sesión con el correo y contraseña aprobados.',
+        ),
+      ),
+    );
   }
 
   String? _firstNonEmptyString(List<dynamic> values) {
@@ -365,8 +340,8 @@ class _LoginPageState extends State<LoginPage> {
 
     if (kDebugMode) {
       debugPrint(
-        '[SESSION] Respuesta login App API: '
-        'appToken=${appToken != null && appToken.isNotEmpty} | END',
+        '🔐 Datos sesión recibidos login MundiCam App API: '
+            'appToken=${appToken != null && appToken.isNotEmpty}',
       );
     }
 
@@ -413,12 +388,12 @@ class _LoginPageState extends State<LoginPage> {
         );
 
         if (kDebugMode) {
-          debugPrint('[LOGIN] HTTP=${response.statusCode} | END');
+          debugPrint('Status MundiCam App API login: ${response.statusCode}');
           if (response.statusCode >= 500) {
             final preview = response.body.length > 250
                 ? response.body.substring(0, 250)
                 : response.body;
-            debugPrint('[LOGIN] Respuesta servidor="$preview" | END');
+            debugPrint('Respuesta login servidor preview: $preview');
           }
         }
 
@@ -459,8 +434,7 @@ class _LoginPageState extends State<LoginPage> {
             break;
           case 403:
             publicMessage =
-                'Tu solicitud de alta está pendiente de validación. '
-                'Podrás iniciar sesión cuando recibas el correo de aprobación de MundiCam.';
+                'Tu solicitud de alta está pendiente de validación. Podrás iniciar sesión cuando recibas el correo de aprobación de MundiCam.';
             break;
           case 429:
             publicMessage =
@@ -477,7 +451,7 @@ class _LoginPageState extends State<LoginPage> {
       } catch (e) {
         lastError = e;
         if (kDebugMode) {
-          debugPrint('[LOGIN] Error App API: $e | END');
+          debugPrint('Error MundiCam App API login: $e');
         }
       }
     }
@@ -501,21 +475,16 @@ class _LoginPageState extends State<LoginPage> {
         return FirebaseAuth.instance.currentUser;
       }
 
-      // WordPress/App API es la fuente de verdad. No se intenta acceso anónimo:
-      // si el backend no entrega custom token, Firebase Auth se omite sin error.
       final current = FirebaseAuth.instance.currentUser;
       if (kDebugMode) {
         debugPrint(
-          '[FIREBASE] Custom token no disponible; sesión opcional '
-          'omitida | existing=${current != null} | END',
+          '[FIREBASE] Custom token no disponible; Firebase queda como apoyo opcional | existing=${current != null} | END',
         );
       }
       return current;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint(
-          '[FIREBASE] Inicio opcional no disponible: $e | END',
-        );
+        debugPrint('[FIREBASE] Inicio opcional no disponible: $e | END');
       }
       return null;
     }
@@ -532,10 +501,7 @@ class _LoginPageState extends State<LoginPage> {
           ? Map<String, dynamic>.from(wpUser)
           : <String, dynamic>{};
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
         {
           'email': email,
           'uid': user.uid,
@@ -612,19 +578,8 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
 
-      // 4. La sesión App API ya está guardada. Registrar ahora el token FCM
-      // del dispositivo y reintentar brevemente si el backend aún está cargando.
-      // Este paso no bloquea el acceso si Firebase o el endpoint fallan.
-      final fcmRegistered = await NotificationService().syncAfterLogin();
-      if (kDebugMode) {
-        debugPrint(
-          '[FCM] Sincronización posterior al login: '
-          'registered=$fcmRegistered | END',
-        );
-      }
-
-      // 5. Firestore es apoyo opcional y no debe bloquear la navegación.
-      // El backend WordPress ya valida usuarios bloqueados durante /login.
+      // 4. Firestore es apoyo opcional y no debe bloquear la navegación.
+      // El backend WordPress/App API es quien valida el acceso real.
       if (user != null) {
         unawaited(
           _syncFirebaseProfileInBackground(
@@ -656,7 +611,6 @@ class _LoginPageState extends State<LoginPage> {
       final hasWpSession = await _hasStoredWordPressSession();
 
       if (hasWpSession) {
-        await NotificationService().syncAfterLogin();
         if (!mounted) return;
         _abrirPantallaPrincipal();
         return;
@@ -704,7 +658,7 @@ class _LoginPageState extends State<LoginPage> {
         lower.contains('exception:');
 
     if (esTecnico) {
-      debugPrint('[LOGIN] Mensaje técnico ocultado="$limpio" | END');
+      debugPrint('Login mensaje interno ocultado al cliente: $limpio');
       return 'No se pudo iniciar sesión. Revisa tus datos o inténtalo de nuevo en unos minutos.';
     }
 
@@ -753,8 +707,6 @@ class _LoginPageState extends State<LoginPage> {
             child: Image.asset(
               'assets/gif/fondo2.gif',
               fit: BoxFit.cover,
-              gaplessPlayback: true,
-              filterQuality: FilterQuality.low,
             ),
           ),
           Positioned.fill(
@@ -956,13 +908,13 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             const SizedBox(height: 10),
                             const Text(
-                              'Las altas profesionales requieren validación. '
-                              'Podrás iniciar sesión cuando recibas el correo de aprobación.',
+                              'Las altas profesionales requieren validación. Podrás iniciar sesión cuando recibas el correo de aprobación.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: AppColors.textSecondary,
                                 fontFamily: 'Oswald',
                                 fontSize: 12,
+                                height: 1.2,
                               ),
                             ),
                           ],
