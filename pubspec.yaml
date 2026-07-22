@@ -2,7 +2,7 @@ name: mundicam
 description: "App oficial de Mundicam"
 publish_to: "none"
 
-version: 1.0.4+6
+version: 1.0.4+7
 
 environment:
   sdk: ">=3.9.2 <4.0.0"
