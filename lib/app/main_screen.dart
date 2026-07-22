@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -33,6 +34,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _lastIndexBeforeCart = 0;
   bool _loadBadges = false;
   bool _showingOrderNotificationDialog = false;
+  final ListQueue<MundiCamOrderNotification> _notificationDialogQueue =
+      ListQueue<MundiCamOrderNotification>();
   StreamSubscription<MundiCamOrderNotification>? _orderNotificationSub;
 
   final Set<String> _confirmedQuoteIds = <String>{};
@@ -60,7 +63,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
     _loadConfirmedQuoteIdsFromPrefs();
     _listenOrderNotifications();
-    NotificationService().syncCurrentTokenWithBackend();
 
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
@@ -78,12 +80,27 @@ class _MainScreenState extends ConsumerState<MainScreen>
     super.dispose();
   }
 
-  void _listenOrderNotifications() {
-    final pending = NotificationService().takePendingOrderNotification();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
 
-    if (pending != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _handleOrderNotification(pending);
+    // Al volver manualmente desde una notificación del sistema, refrescamos los
+    // pedidos aunque el usuario no haya pulsado directamente sobre el aviso.
+    ref.invalidate(ordersProvider);
+    unawaited(() async {
+      await NotificationService().syncCurrentTokenWithBackend();
+    }());
+  }
+
+  void _listenOrderNotifications() {
+    final pending = NotificationService().takePendingOrderNotifications();
+
+    if (pending.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        for (final notification in pending) {
+          if (!mounted) return;
+          await _handleOrderNotification(notification);
+        }
       });
     }
 
@@ -93,114 +110,135 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   Future<void> _handleOrderNotification(
-      MundiCamOrderNotification notification,
-      ) async {
+    MundiCamOrderNotification notification,
+  ) async {
     if (!mounted) return;
 
-    final bool isGeneralNotification = notification.isGeneralNotification;
+    final isGeneralNotification = notification.isGeneralNotification;
 
     if (!isGeneralNotification) {
       ref.invalidate(ordersProvider);
       ref.read(newOrderBadgeProvider.notifier).state++;
     }
 
-    if (!notification.showPopup) {
+    if (notification.openedByUser) {
       if (!isGeneralNotification) {
         _openOrdersFromNotification();
       }
       return;
     }
 
-    if (_showingOrderNotificationDialog) return;
-    _showingOrderNotificationDialog = true;
+    // En primer plano el servicio ya muestra también la notificación superior.
+    // Aquí se mantiene el popup interno. Si llegan varios mensajes seguidos no se
+    // descartan: se encolan y se presentan uno detrás de otro.
+    if (!notification.showPopup) return;
 
+    _notificationDialogQueue.addLast(notification);
+    await _drainNotificationDialogQueue();
+  }
+
+  Future<void> _drainNotificationDialogQueue() async {
+    if (_showingOrderNotificationDialog || !mounted) return;
+
+    _showingOrderNotificationDialog = true;
     try {
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: true,
-        builder: (dialogContext) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-            ),
-            titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
-            contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
-            actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            title: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _NotificationLogoIcon(
-                  isGeneralNotification: isGeneralNotification,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    notification.title,
-                    style: const TextStyle(
-                      fontFamily: 'Oswald',
-                      fontWeight: FontWeight.w900,
-                      fontSize: 18,
-                      height: 1.05,
-                      color: Color(0xFF111827),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            content: Text(
-              notification.body,
-              style: const TextStyle(
-                fontSize: 13.5,
-                height: 1.35,
-                color: Color(0xFF374151),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            actions: isGeneralNotification
-                ? [
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: const Text('Entendido'),
-              ),
-            ]
-                : [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cerrar'),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  _openOrdersFromNotification();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                icon: const Icon(Icons.visibility_outlined, size: 17),
-                label: const Text('Ver pedidos'),
-              ),
-            ],
-          );
-        },
-      );
+      while (mounted && _notificationDialogQueue.isNotEmpty) {
+        final notification = _notificationDialogQueue.removeFirst();
+        await _showNotificationDialog(notification);
+      }
     } finally {
       _showingOrderNotificationDialog = false;
     }
+  }
+
+  Future<void> _showNotificationDialog(
+    MundiCamOrderNotification notification,
+  ) async {
+    if (!mounted) return;
+
+    final isGeneralNotification = notification.isGeneralNotification;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+          contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          title: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _NotificationLogoIcon(
+                isGeneralNotification: isGeneralNotification,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  notification.title,
+                  style: const TextStyle(
+                    fontFamily: 'Oswald',
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                    height: 1.05,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            notification.body,
+            style: const TextStyle(
+              fontSize: 13.5,
+              height: 1.35,
+              color: Color(0xFF374151),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          actions: isGeneralNotification
+              ? [
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text('Entendido'),
+                  ),
+                ]
+              : [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Cerrar'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                      _openOrdersFromNotification();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    icon: const Icon(Icons.visibility_outlined, size: 17),
+                    label: const Text('Ver pedidos'),
+                  ),
+                ],
+        );
+      },
+    );
   }
 
   void _openOrdersFromNotification() {
@@ -451,7 +489,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
+                  color: Colors.black.withValues(alpha: 0.06),
                   blurRadius: 10,
                   offset: const Offset(0, -2),
                 ),
@@ -538,36 +576,41 @@ class _NotificationLogoIcon extends StatelessWidget {
       width: 42,
       height: 42,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.primary,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: AppColors.primary.withOpacity(0.14),
-          width: 1,
+          color: Colors.white.withValues(alpha: 0.85),
+          width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: AppColors.primary.withValues(alpha: 0.22),
+            blurRadius: 9,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(5),
-        child: Image.asset(
-          'assets/images/mundicam_notification_logo.png',
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) {
-            return Icon(
-              isGeneralNotification
-                  ? Icons.notifications_active_outlined
-                  : Icons.local_shipping_outlined,
-              color: AppColors.primary,
-              size: 22,
-            );
-          },
-        ),
-      ),
+      alignment: Alignment.center,
+      child: isGeneralNotification
+          ? Padding(
+              padding: const EdgeInsets.all(8),
+              child: Image.asset(
+                'assets/images/mundicam_notification_logo.png',
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Icon(
+                    Icons.notifications_active_rounded,
+                    color: Colors.white,
+                    size: 23,
+                  );
+                },
+              ),
+            )
+          : const Icon(
+              Icons.local_shipping_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
     );
   }
 }
@@ -599,8 +642,8 @@ class _BottomTabItem extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          splashColor: AppColors.primary.withOpacity(0.08),
-          highlightColor: AppColors.primary.withOpacity(0.04),
+          splashColor: AppColors.primary.withValues(alpha: 0.08),
+          highlightColor: AppColors.primary.withValues(alpha: 0.04),
           child: SizedBox(
             height: 58,
             child: Column(

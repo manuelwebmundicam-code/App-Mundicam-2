@@ -1,4 +1,5 @@
 // pages/login_page.dart
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/features/auth/presentation/pages/forgot_password_page.dart';
 
@@ -79,14 +81,14 @@ class _LoginPageState extends State<LoginPage> {
     if (hasWpSession) {
       if (kDebugMode) {
         debugPrint(
-          '✅ Sesión WordPress/WooCommerce detectada. Entrando a la app.',
+          '[SESSION] WordPress/WooCommerce detectada | END',
         );
       }
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-      );
+      await NotificationService().syncAfterLogin(maxAttempts: 2);
+      if (!mounted) return;
+
+      _abrirPantallaPrincipal();
       return;
     }
 
@@ -97,11 +99,14 @@ class _LoginPageState extends State<LoginPage> {
     if (currentUser != null) {
       if (kDebugMode) {
         debugPrint(
-          '⚠️ Firebase tenía sesión activa, pero no había sesión WordPress/WooCommerce. '
+          '[SESSION] Firebase activa sin sesión App API. '
               'Se fuerza login limpio.',
         );
       }
 
+      // No borrar el token FCM aquí: todavía no es un logout del usuario,
+      // solo estamos corrigiendo una sesión Firebase sin sesión App API.
+      // El token se conservará y se registrará tras completar el login.
       await FirebaseAuth.instance.signOut();
       await ApiService().clearWordPressSession();
     }
@@ -119,10 +124,11 @@ class _LoginPageState extends State<LoginPage> {
 
     if (kDebugMode) {
       debugPrint(
-        '🔐 Sesión WP guardada en login: '
-            'cookie=${cookie.isNotEmpty} '
-            'nonce=${nonce.isNotEmpty} '
-            'appToken=${appToken.isNotEmpty} cartToken=${cartToken.isNotEmpty}',
+        '[SESSION] WP guardada: '
+        'cookie=${cookie.isNotEmpty} | '
+        'nonce=${nonce.isNotEmpty} | '
+        'appToken=${appToken.isNotEmpty} | '
+        'cartToken=${cartToken.isNotEmpty} | END',
       );
     }
 
@@ -151,12 +157,49 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  LaunchMode get _webAuthLaunchMode =>
+      defaultTargetPlatform == TargetPlatform.iOS
+          ? LaunchMode.inAppBrowserView
+          : LaunchMode.externalApplication;
+
+  void _abrirPantallaPrincipal() {
+    if (!mounted) return;
+
+    final route = MaterialPageRoute<void>(
+      builder: (_) => const MainScreen(),
+    );
+
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        route,
+        (_) => false,
+      );
+      return;
+    }
+
+    Navigator.pushReplacement(context, route);
+  }
+
   Future<void> _abrirRegistro() async {
     final url = Uri.parse(_registroUrl);
-    final abierto = await launchUrl(url, mode: LaunchMode.externalApplication);
 
-    if (!abierto) {
-      _showSnackBar('No se pudo abrir la página de registro.', isError: true);
+    try {
+      final abierto = await launchUrl(
+        url,
+        mode: _webAuthLaunchMode,
+      );
+
+      if (!abierto) {
+        _showSnackBar(
+          'No se pudo abrir la página de registro.',
+          isError: true,
+        );
+      }
+    } catch (_) {
+      _showSnackBar(
+        'No se pudo abrir la página de registro.',
+        isError: true,
+      );
     }
   }
 
@@ -322,8 +365,8 @@ class _LoginPageState extends State<LoginPage> {
 
     if (kDebugMode) {
       debugPrint(
-        '🔐 Datos sesión recibidos login MundiCam App API: '
-            'appToken=${appToken != null && appToken.isNotEmpty}',
+        '[SESSION] Respuesta login App API: '
+        'appToken=${appToken != null && appToken.isNotEmpty} | END',
       );
     }
 
@@ -370,12 +413,12 @@ class _LoginPageState extends State<LoginPage> {
         );
 
         if (kDebugMode) {
-          debugPrint('Status MundiCam App API login: ${response.statusCode}');
+          debugPrint('[LOGIN] HTTP=${response.statusCode} | END');
           if (response.statusCode >= 500) {
             final preview = response.body.length > 250
                 ? response.body.substring(0, 250)
                 : response.body;
-            debugPrint('Respuesta login servidor preview: $preview');
+            debugPrint('[LOGIN] Respuesta servidor="$preview" | END');
           }
         }
 
@@ -403,18 +446,38 @@ class _LoginPageState extends State<LoginPage> {
         final dataMap = body['data'] is Map
             ? Map<String, dynamic>.from(body['data'] as Map)
             : <String, dynamic>{};
-        final status = dataMap['status'] ?? response.statusCode;
-        final message = body['message']?.toString().trim();
+        final rawStatus = dataMap['status'] ?? response.statusCode;
+        final status = rawStatus is int
+            ? rawStatus
+            : int.tryParse(rawStatus.toString()) ?? response.statusCode;
+        final serverMessage = body['message']?.toString().trim();
 
-        throw Exception(
-          (message != null && message.isNotEmpty)
-              ? message
-              : 'No se pudo iniciar sesión. Revisa tus datos e inténtalo de nuevo.',
-        );
+        String publicMessage;
+        switch (status) {
+          case 401:
+            publicMessage = 'Usuario o contraseña incorrectos.';
+            break;
+          case 403:
+            publicMessage =
+                'Tu solicitud de alta está pendiente de validación. '
+                'Podrás iniciar sesión cuando recibas el correo de aprobación de MundiCam.';
+            break;
+          case 429:
+            publicMessage =
+                'Demasiados intentos de acceso. Espera unos minutos antes de volver a intentarlo.';
+            break;
+          default:
+            publicMessage =
+                (serverMessage != null && serverMessage.isNotEmpty)
+                    ? serverMessage
+                    : 'No se pudo iniciar sesión. Revisa tus datos e inténtalo de nuevo.';
+        }
+
+        throw Exception(publicMessage);
       } catch (e) {
         lastError = e;
         if (kDebugMode) {
-          debugPrint('Error MundiCam App API login: $e');
+          debugPrint('[LOGIN] Error App API: $e | END');
         }
       }
     }
@@ -424,8 +487,6 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<User?> _tryLoginFirebaseForAppSession({
-    required String email,
-    required String password,
     required Map<String, dynamic> wpResponse,
   }) async {
     final String? firebaseToken =
@@ -434,39 +495,64 @@ class _LoginPageState extends State<LoginPage> {
     try {
       if (firebaseToken != null && firebaseToken.isNotEmpty) {
         await FirebaseAuth.instance.signInWithCustomToken(firebaseToken);
+        if (kDebugMode) {
+          debugPrint('[FIREBASE] Sesión iniciada con custom token | END');
+        }
         return FirebaseAuth.instance.currentUser;
       }
 
-      // v1.7.6: no usar la contraseña WordPress contra Firebase.
-      // WordPress/App API es la fuente de verdad. Firebase queda como apoyo opcional.
+      // WordPress/App API es la fuente de verdad. No se intenta acceso anónimo:
+      // si el backend no entrega custom token, Firebase Auth se omite sin error.
       final current = FirebaseAuth.instance.currentUser;
-      if (current != null) return current;
-
-      try {
-        final credential = await FirebaseAuth.instance.signInAnonymously();
-        if (kDebugMode) {
-          debugPrint(
-            '✅ Firebase anónimo activado como apoyo. uid=${credential.user?.uid}',
-          );
-        }
-        return credential.user;
-      } catch (anonError) {
-        if (kDebugMode) {
-          debugPrint(
-            '⚠️ Firebase anónimo no disponible. '
-            'No bloquea acceso porque WordPress ya validó sesión. Error: $anonError',
-          );
-        }
-        return null;
+      if (kDebugMode) {
+        debugPrint(
+          '[FIREBASE] Custom token no disponible; sesión opcional '
+          'omitida | existing=${current != null} | END',
+        );
       }
+      return current;
     } catch (e) {
       if (kDebugMode) {
         debugPrint(
-          '⚠️ Error no crítico iniciando Firebase. '
-          'La sesión WordPress seguirá siendo válida. Error: $e',
+          '[FIREBASE] Inicio opcional no disponible: $e | END',
         );
       }
       return null;
+    }
+  }
+
+  Future<void> _syncFirebaseProfileInBackground({
+    required User user,
+    required String email,
+    required Map<String, dynamic> wpResponse,
+  }) async {
+    try {
+      final wpUser = wpResponse['user'];
+      final wpUserMap = wpUser is Map
+          ? Map<String, dynamic>.from(wpUser)
+          : <String, dynamic>{};
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set(
+        {
+          'email': email,
+          'uid': user.uid,
+          'wordpress_id': wpUserMap['id'] ?? '',
+          'wordpress_roles': wpUserMap['roles'] ?? const <dynamic>[],
+          'lastLogin': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      if (kDebugMode) {
+        debugPrint('[FIRESTORE] Perfil sincronizado en segundo plano | END');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[FIRESTORE] Sincronización opcional omitida: $e | END');
+      }
     }
   }
 
@@ -511,8 +597,6 @@ class _LoginPageState extends State<LoginPage> {
       // Si Firebase falla pero WordPress/MundiCam App API ha validado usuario
       // y ha guardado app_token, no se bloquea el acceso.
       final User? user = await _tryLoginFirebaseForAppSession(
-        email: email,
-        password: password,
         wpResponse: wpResponse,
       );
 
@@ -528,75 +612,27 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
 
-      // 4. Crear/actualizar documento en Firestore solo si Firebase está disponible.
-      // La sesión válida para entrar es WordPress/MundiCam App API.
+      // 4. La sesión App API ya está guardada. Registrar ahora el token FCM
+      // del dispositivo y reintentar brevemente si el backend aún está cargando.
+      // Este paso no bloquea el acceso si Firebase o el endpoint fallan.
+      final fcmRegistered = await NotificationService().syncAfterLogin();
+      if (kDebugMode) {
+        debugPrint(
+          '[FCM] Sincronización posterior al login: '
+          'registered=$fcmRegistered | END',
+        );
+      }
+
+      // 5. Firestore es apoyo opcional y no debe bloquear la navegación.
+      // El backend WordPress ya valida usuarios bloqueados durante /login.
       if (user != null) {
-        try {
-          final wpId = wpResponse['user']?['id']?.toString();
-          final expectedUid = wpId != null && wpId.isNotEmpty ? 'wp_$wpId' : '';
-
-          if (expectedUid.isNotEmpty && kDebugMode) {
-            debugPrint(
-              '👤 Firebase UID actual=${user.uid} | esperado=$expectedUid',
-            );
-
-            if (user.uid != expectedUid) {
-              debugPrint(
-                '⚠️ UID Firebase no coincide con WordPress ID. '
-                'No es bloqueo: la sesión válida es MundiCam App API.',
-              );
-            }
-          }
-
-          final userRef =
-              FirebaseFirestore.instance.collection('users').doc(user.uid);
-
-          final userDoc = await userRef.get();
-
-          if (!userDoc.exists) {
-            await userRef.set({
-              'email': email,
-              'uid': user.uid,
-              'createdAt': FieldValue.serverTimestamp(),
-              'isBlocked': false,
-              'wordpress_id': wpResponse['user']?['id'] ?? '',
-              'wordpress_roles': wpResponse['user']?['roles'] ?? [],
-              'lastLogin': FieldValue.serverTimestamp(),
-            });
-          } else {
-            await userRef.update({
-              'lastLogin': FieldValue.serverTimestamp(),
-              'email': email,
-              'wordpress_id': wpResponse['user']?['id'] ?? '',
-              'wordpress_roles': wpResponse['user']?['roles'] ?? [],
-            });
-          }
-
-          final doc = await userRef.get();
-
-          if (doc.data()?['isBlocked'] == true) {
-            _showSnackBar('Cuenta pendiente de validación fiscal.', isError: true);
-
-            await FirebaseAuth.instance.signOut();
-            await ApiService().clearWordPressSession();
-
-            if (mounted) {
-              setState(() {
-                _isLoading = false;
-                _isAutoLogin = false;
-              });
-            }
-
-            return;
-          }
-        } catch (e) {
-          if (kDebugMode) {
-            debugPrint(
-              '⚠️ Firestore no disponible durante login. '
-              'No se bloquea acceso porque WordPress ya validó sesión. Error: $e',
-            );
-          }
-        }
+        unawaited(
+          _syncFirebaseProfileInBackground(
+            user: user,
+            email: email,
+            wpResponse: wpResponse,
+          ),
+        );
       }
 
       // 8. Guardar email si Recuérdame. Nunca guardar contraseña.
@@ -613,21 +649,16 @@ class _LoginPageState extends State<LoginPage> {
       // 9. Entrar a la app.
       if (!mounted) return;
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-      );
+      _abrirPantallaPrincipal();
     } on FirebaseAuthException catch (e) {
       // No debería llegar aquí porque Firebase se maneja como apoyo, pero si llega
       // no borramos una sesión WordPress válida por un fallo de Firebase.
       final hasWpSession = await _hasStoredWordPressSession();
 
       if (hasWpSession) {
+        await NotificationService().syncAfterLogin();
         if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-        );
+        _abrirPantallaPrincipal();
         return;
       }
 
@@ -673,7 +704,7 @@ class _LoginPageState extends State<LoginPage> {
         lower.contains('exception:');
 
     if (esTecnico) {
-      debugPrint('Login mensaje interno ocultado al cliente: $limpio');
+      debugPrint('[LOGIN] Mensaje técnico ocultado="$limpio" | END');
       return 'No se pudo iniciar sesión. Revisa tus datos o inténtalo de nuevo en unos minutos.';
     }
 
@@ -722,6 +753,8 @@ class _LoginPageState extends State<LoginPage> {
             child: Image.asset(
               'assets/gif/fondo2.gif',
               fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.low,
             ),
           ),
           Positioned.fill(
@@ -919,6 +952,17 @@ class _LoginPageState extends State<LoginPage> {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                 ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Las altas profesionales requieren validación. '
+                              'Podrás iniciar sesión cuando recibas el correo de aprobación.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontFamily: 'Oswald',
+                                fontSize: 12,
                               ),
                             ),
                           ],

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
 import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
@@ -1193,11 +1194,22 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           ),
           TextButton(
             onPressed: () async {
+              await NotificationService().clearDeviceRegistration();
               await FirebaseAuth.instance.signOut();
+              await ApiService().clearWordPressSession();
               final prefs = await SharedPreferences.getInstance();
               await prefs.clear();
-              if (ctx.mounted) Navigator.pop(ctx);
-              SystemNavigator.pop();
+
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+              }
+
+              if (!context.mounted) return;
+
+              Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const LoginPage()),
+                    (_) => false,
+              );
             },
             child: const Text(
               "CERRAR SESIÓN",

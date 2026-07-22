@@ -1,14 +1,16 @@
 name: mundicam
 description: "App oficial de Mundicam"
-publish_to: 'none'
+publish_to: "none"
 
-version: 1.0.3+4
+version: 1.0.4+7
+
 environment:
-  sdk: ^3.9.2
+  sdk: ">=3.9.2 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
+
   equatable: ^2.0.5
   cached_network_image: ^3.4.1
   flutter_riverpod: ^2.5.1
@@ -23,12 +25,13 @@ dependencies:
   # Diseño
   cupertino_icons: ^1.0.8
 
-  # Firebase
+  # Firebase / notificaciones push
   firebase_core: ^3.15.1
   cloud_firestore: ^5.6.5
   firebase_auth: ^5.4.2
   firebase_remote_config: ^5.4.7
   firebase_messaging: ^15.2.10
+  flutter_local_notifications: 19.5.0
 
   # Caché / utilidades
   shared_preferences: ^2.5.5
@@ -39,6 +42,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
 
@@ -48,11 +52,8 @@ flutter:
   assets:
     - assets/logo.png
     - assets/gif/
-    - assets/banners/
     - assets/brands/
     - assets/images/
-    - assets/noticias/
-    - assets/productos/
     - assets/categorias/
 
   fonts:
@@ -72,6 +73,7 @@ flutter_launcher_icons:
 flutter_native_splash:
   color: "#FFFFFF"
   image: "assets/images/mundicamlogo.png"
+
   android_12:
     image: "assets/images/mundicamlogo.png"
     color: "#FFFFFF"

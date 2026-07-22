@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -361,7 +362,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'country': country,
     };
 
-    debugPrint('🚚 Dirección enviada para envío: $payload');
+    if (kDebugMode) {
+      debugPrint(
+        '[CHECKOUT] Dirección envío preparada | '
+        'country=$country | state=$state | postcode=$postcode | END',
+      );
+    }
     return payload;
   }
 
@@ -471,7 +477,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       });
       return preview;
     } catch (e) {
-      debugPrint('❌ Error actualizando envío/resumen: $e');
+      debugPrint(' Error actualizando envío/resumen: $e');
       if (!mounted) return null;
       setState(() {
         _loadingShipping = false;
@@ -503,7 +509,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         shippingMethodId: option.id,
       );
     } catch (e) {
-      debugPrint('❌ Error seleccionando envío: $e');
+      debugPrint(' Error seleccionando envío: $e');
     }
 
     if (!mounted) return;
@@ -746,7 +752,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         await _refreshShippingAndPreview();
       }
     } catch (e) {
-      debugPrint('❌ Error cargando datos: $e');
+      debugPrint(' Error cargando datos: $e');
       setState(() {
         _loadingProfile = false;
         _errorMessage = 'Error al cargar datos. Intenta de nuevo.';
@@ -774,7 +780,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         }
       }
     } catch (e) {
-      debugPrint('⚠️ Error en _getMetaValue: $e');
+      debugPrint(' Error en _getMetaValue: $e');
     }
     return null;
   }
@@ -1052,7 +1058,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       ref.invalidate(ordersProvider);
       _irAlInicio(mensaje: '✅ Pedido confirmado. Te llevamos al inicio.');
     } catch (e) {
-      debugPrint('❌ Error creando pedido: $e');
+      debugPrint(' Error creando pedido: $e');
       _mostrarError(
           'No se pudo crear el pedido. Puede que algún producto ya no tenga stock disponible.');
     } finally {

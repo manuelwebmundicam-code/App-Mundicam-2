@@ -1,4 +1,4 @@
-import 'dart:io' show Platform;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -15,8 +15,6 @@ import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/app/main_screen.dart';
-import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
-import 'package:mundicam/features/training/presentation/providers/academy_provider.dart';
 
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
@@ -26,7 +24,7 @@ Future<void> ensureFirebaseReady() async {
   try {
     if (Firebase.apps.isNotEmpty) {
       Firebase.app();
-      debugPrint('✅ Firebase ya estaba inicializado');
+      debugPrint('[FIREBASE] Ya estaba inicializado | END');
       return;
     }
 
@@ -41,11 +39,11 @@ Future<void> ensureFirebaseReady() async {
       await Firebase.initializeApp();
     }
 
-    debugPrint('✅ Firebase inicializado correctamente');
+    debugPrint('[FIREBASE] Inicializado correctamente | END');
   } on FirebaseException catch (e) {
     if (e.code == 'duplicate-app') {
       Firebase.app();
-      debugPrint('✅ Firebase ya estaba inicializado');
+      debugPrint('[FIREBASE] Ya estaba inicializado | END');
       return;
     }
     rethrow;
@@ -57,12 +55,18 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
     await ensureFirebaseReady();
   } catch (e) {
-    debugPrint('⚠️ Firebase background init ignorado: $e');
+    debugPrint('[FCM_BG] Inicialización Firebase omitida: $e | END');
   }
 
-  debugPrint('📩 FCM background title: ${message.notification?.title}');
-  debugPrint('📩 FCM background body: ${message.notification?.body}');
-  debugPrint('📩 FCM background data: ${message.data}');
+  debugPrint('[FCM_BG] title="${message.notification?.title ?? ''}" | END');
+  debugPrint('[FCM_BG] body="${message.notification?.body ?? ''}" | END');
+  debugPrint('[FCM_BG] data=${message.data} | END');
+
+  try {
+    await NotificationService.handleBackgroundRemoteMessage(message);
+  } catch (e) {
+    debugPrint('[FCM_BG] Error procesando mensaje: $e | END');
+  }
 }
 
 void main() async {
@@ -70,15 +74,32 @@ void main() async {
 
   try {
     await ensureFirebaseReady();
-
-    if (!Platform.isIOS) {
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    } else {
-      debugPrint('ℹ️ Notificaciones FCM desactivadas en iOS de momento.');
-    }
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    debugPrint('[BOOT] Handler FCM background registrado para Android/iOS | END');
   } catch (e) {
-    debugPrint('❌ Error al conectar Firebase: $e');
+    debugPrint('[BOOT] Error conectando Firebase: $e | END');
   }
+
+  runApp(const ProviderScope(child: MyApp()));
+
+  // Las notificaciones se inicializan inmediatamente, pero sin bloquear la UI.
+  unawaited(_initializeNotifications());
+
+  // Remote Config y precargas no deben competir con el primer frame.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_initializeDeferredServices());
+  });
+}
+
+Future<void> _initializeDeferredServices() async {
+  await Future.wait(<Future<void>>[
+    _initializeRemoteConfig(),
+    _preloadProtectedDataIfNeeded(),
+  ]);
+}
+
+Future<void> _initializeRemoteConfig() async {
+  if (Firebase.apps.isEmpty) return;
 
   try {
     final remoteConfig = FirebaseRemoteConfig.instance;
@@ -95,31 +116,33 @@ void main() async {
     });
 
     await remoteConfig.fetchAndActivate();
-    debugPrint('✅ Remote Config inicializado correctamente');
+    debugPrint('[REMOTE_CONFIG] Inicializado correctamente | END');
   } catch (e) {
-    debugPrint('⚠️ Error al inicializar Remote Config: $e');
+    debugPrint('[REMOTE_CONFIG] Inicialización omitida: $e | END');
+  }
+}
+
+Future<void> _initializeNotifications() async {
+  if (Firebase.apps.isEmpty) {
+    debugPrint('[FCM] Firebase no inicializado; notificaciones omitidas | END');
+    return;
   }
 
-  if (Firebase.apps.isNotEmpty && !Platform.isIOS) {
-    try {
-      await NotificationService().initialize();
-    } catch (e) {
-      debugPrint('⚠️ Error inicializando notificaciones: $e');
-    }
-  } else if (Platform.isIOS) {
-    debugPrint('ℹ️ Notificaciones omitidas en iOS. Se activarán más adelante con APNs.');
-  } else {
-    debugPrint('⚠️ Firebase no está inicializado. Se omiten notificaciones FCM.');
+  try {
+    await NotificationService().initialize();
+    debugPrint('[FCM] Servicio de notificaciones inicializado | END');
+  } catch (e) {
+    debugPrint('[FCM] Error inicializando notificaciones: $e | END');
   }
+}
 
+Future<void> _preloadProtectedDataIfNeeded() async {
   final api = ApiService();
   if (await api.hasStoredWordPressSession()) {
-    _precargarDatos();
+    await _precargarDatos();
   } else {
-    debugPrint('ℹ️ Sin sesión MundiCam App API. Se omite precarga protegida.');
+    debugPrint('[SESSION] Sin sesión App API; precarga protegida omitida | END');
   }
-
-  runApp(const ProviderScope(child: MyApp()));
 }
 
 Future<void> _precargarDatos() async {
@@ -130,12 +153,12 @@ Future<void> _precargarDatos() async {
     final catDisco = await StorageCacheService.getCachedData('categorias');
 
     if (catDisco != null) {
-      debugPrint('⚡ Categorías desde disco');
+      debugPrint('[CACHE] Categorías cargadas desde disco | END');
       return;
     }
 
     if (cache.getCachedCategories() == null) {
-      debugPrint('📦 Precargando categorías App API...');
+      debugPrint('[CACHE] Precargando categorías App API | END');
 
       final categorias = await apiService.getCategorias();
 
@@ -154,12 +177,12 @@ Future<void> _precargarDatos() async {
         }).toList(),
       );
 
-      debugPrint('✅ Categorías precargadas: ${categorias.length}');
+      debugPrint('[CACHE] Categorías precargadas=${categorias.length} | END');
     } else {
-      debugPrint('📦 Categorías ya en caché');
+      debugPrint('[CACHE] Categorías ya disponibles | END');
     }
   } catch (e) {
-    debugPrint('⚠️ Error precargando: $e');
+    debugPrint('[CACHE] Error durante precarga: $e | END');
   }
 }
 
@@ -198,21 +221,23 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
     final hasAppSession = await api.hasStoredWordPressSession();
 
     if (!hasAppSession) {
+      // No se elimina el token FCM al arrancar sin sesión. El mismo dispositivo
+      // debe conservarlo para poder registrarlo justo después del login.
+      // clearDeviceRegistration() queda reservado para un cierre de sesión real.
+      debugPrint(
+        '[FCM] Sin sesión App API al arrancar: token local conservado | END',
+      );
+
       if (Firebase.apps.isNotEmpty) {
         try {
           await FirebaseAuth.instance.signOut();
         } catch (e) {
-          debugPrint('⚠️ No se pudo cerrar sesión Firebase: $e');
+          debugPrint('[FIREBASE] No se pudo cerrar sesión opcional: $e | END');
         }
       }
       await api.clearWordPressSession();
       return false;
     }
-
-    try {
-      ref.read(categoriesProvider.future);
-      ref.read(academyProvider.future);
-    } catch (_) {}
 
     return true;
   }

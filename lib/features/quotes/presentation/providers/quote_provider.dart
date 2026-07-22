@@ -1,6 +1,5 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
@@ -21,51 +20,23 @@ final hiddenQuoteIdsProvider = StateProvider<Set<String>>((ref) => <String>{});
 /// 3. providerData.first.email
 Future<String?> _resolveCurrentUserEmail() async {
   final apiEmail = await ApiService().currentSessionEmail();
-  if (apiEmail != null && apiEmail.isNotEmpty) {
-    return apiEmail;
+  if (apiEmail != null && apiEmail.trim().isNotEmpty) {
+    return apiEmail.trim().toLowerCase();
   }
 
+  // Respaldo local sin realizar una lectura de red a Firestore.
   final user = FirebaseAuth.instance.currentUser;
+  final fallback = user?.email ?? user?.providerData.firstOrNull?.email;
+  final clean = fallback?.trim().toLowerCase() ?? '';
 
-  if (user == null) {
-    debugPrint('❌ No hay usuario Firebase y la sesión App API no tiene email');
+  if (clean.isEmpty) {
+    if (kDebugMode) {
+      debugPrint('[QUOTES] Email de sesión no disponible | END');
+    }
     return null;
   }
 
-  try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-
-    if (userDoc.exists && userDoc.data() != null) {
-      final data = userDoc.data();
-      final email = data?['email']?.toString().trim();
-
-      if (email != null && email.isNotEmpty) {
-        return email;
-      }
-    }
-  } catch (e) {
-    debugPrint('⚠️ Error al leer email de Firestore: $e');
-  }
-
-  final authEmail = user.email?.trim();
-
-  if (authEmail != null && authEmail.isNotEmpty) {
-    return authEmail;
-  }
-
-  if (user.providerData.isNotEmpty) {
-    final providerEmail = user.providerData.first.email?.trim();
-
-    if (providerEmail != null && providerEmail.isNotEmpty) {
-      return providerEmail;
-    }
-  }
-
-  debugPrint('❌ No se encontró email para buscar presupuestos');
-  return null;
+  return clean;
 }
 
 /// Provider auxiliar con el email del usuario actual.
@@ -88,7 +59,11 @@ final quotesProvider = FutureProvider<List<QuoteMundicam>>((ref) async {
     return [];
   }
 
-  debugPrint('🔍 Buscando presupuestos para: $email');
+  if (kDebugMode) {
+    debugPrint(
+      '[QUOTES] Buscando para email="$email" | length=${email.length} | END',
+    );
+  }
 
   try {
     final presupuestos = await apiService.getPresupuestosPorEmail(email);
@@ -106,11 +81,15 @@ final quotesProvider = FutureProvider<List<QuoteMundicam>>((ref) async {
           status == 'presupuesto';
     }).toList();
 
-    debugPrint('📊 Presupuestos encontrados: ${filtered.length}');
+    if (kDebugMode) {
+      debugPrint('[QUOTES] Encontrados=${filtered.length} | END');
+    }
 
     return filtered;
   } catch (e) {
-    debugPrint('❌ Error cargando presupuestos: $e');
+    if (kDebugMode) {
+      debugPrint('[QUOTES] Error cargando presupuestos: $e | END');
+    }
     rethrow;
   }
 });

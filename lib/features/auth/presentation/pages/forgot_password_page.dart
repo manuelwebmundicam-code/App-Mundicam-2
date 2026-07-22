@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
@@ -32,7 +33,16 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     final url = Uri.parse('https://www.mundicam.com/my-account/lost-password/');
 
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      final abierto = await launchUrl(
+        url,
+        mode: defaultTargetPlatform == TargetPlatform.iOS
+            ? LaunchMode.inAppBrowserView
+            : LaunchMode.externalApplication,
+      );
+
+      if (!abierto) {
+        throw Exception('No se pudo abrir la página de recuperación.');
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -53,10 +63,17 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover),
+            child: Image.asset(
+              'assets/gif/fondo2.gif',
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.low,
+            ),
           ),
           Positioned.fill(
-            child: Container(color: Colors.black.withOpacity(0.6)),
+            child: Container(
+              color: Colors.black.withOpacity(0.3),
+            ),
           ),
           Center(
             child: SingleChildScrollView(

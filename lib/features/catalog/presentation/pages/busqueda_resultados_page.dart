@@ -2179,19 +2179,21 @@ class ProductImageBusqueda extends StatelessWidget {
       height: 96,
       padding: const EdgeInsets.all(7),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FB),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE7E7E7)),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-        child: CachedNetworkImage(
-          imageUrl: p.imageUrl,
-          fit: BoxFit.contain,
-          placeholder: (context, url) => Container(color: Colors.grey[100]),
-          errorWidget: (context, url, error) => const Icon(
-            Icons.broken_image,
-            color: Colors.grey,
+        child: ColoredBox(
+          color: Colors.white,
+          child: CachedNetworkImage(
+            imageUrl: p.imageUrl,
+            fit: BoxFit.contain,
+            placeholder: (context, url) => const ColoredBox(color: Colors.white),
+            errorWidget: (context, url, error) => const Icon(
+              Icons.broken_image,
+              color: Colors.grey,
+            ),
           ),
         ),
       ),

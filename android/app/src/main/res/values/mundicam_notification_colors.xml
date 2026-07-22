@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Negro: Android muestra el isotipo blanco original sobre acento negro. -->
+    <color name="mundicam_notification_color">#000000</color>
+</resources>

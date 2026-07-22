@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/features/catalog/data/models/category_model.dart';
 import 'package:mundicam/core/network/api_service.dart';
@@ -12,12 +12,16 @@ final categoriesProvider = FutureProvider<List<CategoryModel>>((ref) async {
   // Verificar caché primero
   final cached = cache.getCachedCategories();
   if (cached != null && cached.isNotEmpty) {
-    debugPrint('📦 Categorías desde caché (${cached.length})');
+    if (kDebugMode) {
+      debugPrint('[CATEGORIES] Caché=${cached.length} | END');
+    }
     return cached;
   }
 
   // Si no hay caché, cargar de WooCommerce
-  debugPrint('🌐 Cargando categorías de WooCommerce...');
+  if (kDebugMode) {
+    debugPrint('[CATEGORIES] Cargando desde App API | END');
+  }
   final api = ref.watch(apiServiceProvider);
   final allCategories = await api.getCategorias();
 
@@ -37,7 +41,9 @@ final categoriesProvider = FutureProvider<List<CategoryModel>>((ref) async {
   // Guardar en caché
   if (filteredCategories.isNotEmpty) {
     cache.cacheCategories(filteredCategories);
-    debugPrint('✅ ${filteredCategories.length} categorías guardadas en caché');
+    if (kDebugMode) {
+      debugPrint('[CATEGORIES] Guardadas=${filteredCategories.length} | END');
+    }
   }
 
   return filteredCategories;
