@@ -5,7 +5,7 @@
   "packages": [
     {
       "name": "mundicam",
-      "version": "1.0.4+7",
+      "version": "1.0.4+6",
       "dependencies": [
         "cached_network_image",
         "cloud_firestore",
