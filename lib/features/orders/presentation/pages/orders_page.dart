@@ -295,57 +295,6 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                     ),
                   ),
                 ),
-                if (isCompleted) ...[
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: SizedBox(
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final items = await _loadFullOrderItems(order);
-
-                          if (!context.mounted || items.isEmpty) return;
-
-                          final validItems = items
-                              .where((item) => item.productId > 0)
-                              .toList();
-
-                          if (validItems.isEmpty) return;
-
-                          final firstValid = validItems.first;
-
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => RmaFormPage(
-                                orderId: order.id,
-                                productId: firstValid.productId,
-                                productName: firstValid.name,
-                              ),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.build_outlined, size: 17),
-                        label: const Text(
-                          'SOLICITAR RMA',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primary,
-                          side: BorderSide(
-                            color: AppColors.primary.withOpacity(0.70),
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
               ],
             ),
           ],
@@ -414,69 +363,74 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
             children: items.map((item) {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 7),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Container(
-                      constraints: const BoxConstraints(minWidth: 34),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: AppColors.primary.withOpacity(0.08),
-                        ),
-                      ),
-                      child: Text(
-                        '${item.quantity}x',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.name,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          constraints: const BoxConstraints(minWidth: 34),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: AppColors.primary.withOpacity(0.08),
+                            ),
+                          ),
+                          child: Text(
+                            '${item.quantity}x',
+                            textAlign: TextAlign.center,
                             style: const TextStyle(
-                              fontSize: 12.8,
-                              color: _dark,
-                              height: 1.25,
-                              fontWeight: FontWeight.w600,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.primary,
                             ),
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              item.total > 0
-                                  ? '${_formatMoney(item.unitPrice)} / ud · ${_formatMoney(item.total)} total'
-                                  : 'Producto del pedido',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: Colors.grey[500],
-                                fontWeight: FontWeight.w500,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.name,
+                                style: const TextStyle(
+                                  fontSize: 12.8,
+                                  color: _dark,
+                                  height: 1.25,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  item.total > 0
+                                      ? '${_formatMoney(item.unitPrice)} / ud · ${_formatMoney(item.total)} total'
+                                      : 'Producto del pedido',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: Colors.grey[500],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                     if (isCompleted && item.productId > 0) ...[
-                      const SizedBox(width: 8),
+                      const SizedBox(height: 8),
                       SizedBox(
-                        height: 32,
-                        child: OutlinedButton(
+                        height: 36,
+                        child: OutlinedButton.icon(
                           onPressed: () {
                             Navigator.push(
                               context,
@@ -489,6 +443,14 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                               ),
                             );
                           },
+                          icon: const Icon(Icons.build_outlined, size: 16),
+                          label: const Text(
+                            'SOLICITAR RMA',
+                            style: TextStyle(
+                              fontSize: 10.8,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.primary,
                             side: BorderSide(
@@ -499,13 +461,6 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                             padding: const EdgeInsets.symmetric(horizontal: 10),
-                          ),
-                          child: const Text(
-                            'RMA',
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w900,
-                            ),
                           ),
                         ),
                       ),

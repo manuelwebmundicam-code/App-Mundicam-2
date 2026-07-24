@@ -31,6 +31,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   String _roleLabel = 'Cliente';
   IconData _roleIcon = Icons.person_outline_rounded;
   String? _errorMessage;
+  bool _testingNotifications = false;
 
   Color get _roleColor {
     final label = _roleLabel.toLowerCase();
@@ -543,6 +544,33 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         "Tickets Técnicos",
                         "Habla con soporte",
                         const SupportTicketsPage(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  _buildMenuCard(
+                    context,
+                    title: "NOTIFICACIONES",
+                    items: [
+                      _buildActionMenuItem(
+                        icon: Icons.notifications_active_outlined,
+                        title: "Comprobar notificaciones",
+                        subtitle: _testingNotifications
+                            ? "Enviando prueba..."
+                            : "Envía una prueba real desde el servidor",
+                        onTap: _testingNotifications
+                            ? null
+                            : _testNotifications,
+                        trailing: _testingNotifications
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: _brandColor,
+                                ),
+                              )
+                            : null,
                       ),
                     ],
                   ),
@@ -1178,6 +1206,98 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         color: Color(0xFF9CA3AF),
       ),
     );
+  }
+
+  Widget _buildActionMenuItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback? onTap,
+    Widget? trailing,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      onTap: onTap,
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: _brandColor.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(icon, color: _brandColor, size: 21),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: 14.5,
+          fontFamily: 'Oswald',
+          color: _dark,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(
+          fontSize: 12,
+          color: _muted,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      trailing: trailing ??
+          const Icon(
+            Icons.chevron_right_rounded,
+            color: Color(0xFF9CA3AF),
+          ),
+    );
+  }
+
+  Future<void> _testNotifications() async {
+    if (_testingNotifications) return;
+
+    setState(() => _testingNotifications = true);
+
+    try {
+      // Asegura primero que el dispositivo actual esté registrado en el PHP.
+      await NotificationService().syncCurrentTokenWithBackend();
+
+      final result = await ApiService().testFcmNotification();
+      final sent = int.tryParse(result['sent']?.toString() ?? '') ?? 0;
+      final failed = int.tryParse(result['failed']?.toString() ?? '') ?? 0;
+      final tokens =
+          int.tryParse(result['tokens_found']?.toString() ?? '') ?? 0;
+
+      if (!mounted) return;
+
+      final message = sent > 0
+          ? 'Prueba enviada correctamente a $sent dispositivo(s).'
+          : tokens == 0
+              ? 'No hay dispositivos registrados. Cierra sesión, vuelve a entrar y repite la prueba.'
+              : 'La prueba no se pudo enviar. Enviados: $sent · Fallidos: $failed.';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: sent > 0 ? _brandColor : Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      final clean = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error de prueba: $clean'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _testingNotifications = false);
+      }
+    }
   }
 
   void _confirmSignOut(BuildContext context) {

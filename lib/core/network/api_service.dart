@@ -416,14 +416,13 @@ class ApiService {
 
       if (kDebugMode) {
         debugPrint(
-          '[SESSION] MundiCam App API cargada: '
-          'token=${_appToken.isNotEmpty} | END',
+          '✅ Sesión MundiCam App API cargada: token=${_appToken.isNotEmpty}',
         );
       }
     } catch (e) {
       _sessionLoaded = true;
       if (kDebugMode) {
-        debugPrint('[SESSION] No se pudo cargar sesión App API: $e | END');
+        debugPrint('⚠️ No se pudo cargar sesión App API: $e');
       }
     }
   }
@@ -459,6 +458,79 @@ class ApiService {
   }
 
   Future<bool> hasStoredAppSession() => hasStoredWordPressSession();
+
+  /// Comprueba la sesión guardada contra /me.
+  ///
+  /// Un token presente en SharedPreferences no garantiza que siga siendo válido:
+  /// puede haber caducado, haberse revocado o pertenecer a una instalación antigua.
+  /// En 401/403 se limpia la sesión para evitar entrar en la app con pantallas vacías.
+  /// Los fallos temporales de red no cierran la sesión.
+  Future<bool> validateStoredAppSession() async {
+    await _ensureInitialized();
+
+    if (_appToken.trim().isEmpty) {
+      return false;
+    }
+
+    try {
+      final response = await _appGet('/me');
+      final statusCode = response.statusCode ?? 0;
+      final data = _responseMap(response.data);
+
+      final valid = statusCode >= 200 &&
+          statusCode < 300 &&
+          data['success'] != false;
+
+      if (!valid && (statusCode == 401 || statusCode == 403)) {
+        await clearWordPressSession();
+        return false;
+      }
+
+      if (valid) {
+        final nestedData = _asMap(data['data']);
+        final user = _asMap(data['user'] ?? nestedData['user']);
+        final permissions = _asMap(
+          data['permissions'] ?? nestedData['permissions'],
+        );
+        if (user.isNotEmpty || permissions.isNotEmpty) {
+          await saveWordPressSession(
+            user: user,
+            permissions: permissions,
+          );
+        }
+      }
+
+      return valid;
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode ?? 0;
+
+      if (statusCode == 401 || statusCode == 403) {
+        if (kDebugMode) {
+          debugPrint(
+            '🔒 Sesión App API rechazada por el servidor ($statusCode).',
+          );
+        }
+        await clearWordPressSession();
+        return false;
+      }
+
+      // Sin conexión, timeout o error 5xx: no expulsamos al usuario. Las
+      // pantallas podrán reintentar cuando vuelva la conectividad.
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ No se pudo validar /me temporalmente. Se conserva la sesión: $e',
+        );
+      }
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ Validación de sesión no concluyente. Se conserva la sesión: $e',
+        );
+      }
+      return true;
+    }
+  }
 
   Future<Map<String, dynamic>> currentSessionUser() async {
     await _ensureInitialized();
@@ -572,12 +644,12 @@ class ApiService {
         _catalogFiltersCache.clear();
         _cachedBrandTerms = null;
         if (kDebugMode) {
-          debugPrint(' Caché limpiada por roles/permisos actualizados desde PHP v1.8.0');
+          debugPrint('🧹 Caché limpiada por roles/permisos actualizados desde PHP v1.8.0');
         }
       }
     } catch (e) {
       // No bloqueamos catálogo ni login si /me falla puntualmente.
-      if (kDebugMode) debugPrint(' No se pudo refrescar contexto de sesión: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo refrescar contexto de sesión: $e');
     }
   }
 
@@ -681,10 +753,9 @@ class ApiService {
 
     if (kDebugMode) {
       debugPrint(
-        '[SESSION] MundiCam App API guardada: '
-        'token=${_appToken.isNotEmpty} | END',
+        '✅ Sesión MundiCam App API guardada: token=${_appToken.isNotEmpty}',
       );
-      debugPrint('[CACHE] Productos limpiados por cambio de sesión/rol | END');
+      debugPrint('🧹 Caché de productos limpiada por cambio de sesión/rol');
     }
   }
 
@@ -772,19 +843,15 @@ class ApiService {
             data['success'] != false;
 
         if (ok) {
-          if (kDebugMode) {
-            debugPrint('[FCM] Endpoint registrado: $endpoint | END');
-          }
+          if (kDebugMode) debugPrint('✅ FCM registrado en $endpoint');
           return true;
         }
 
         if (kDebugMode) {
-          debugPrint('[FCM] Endpoint $endpoint respondió=${response.data} | END');
+          debugPrint('⚠️ FCM endpoint $endpoint respondió: ${response.data}');
         }
       } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[FCM] Error registrando en $endpoint: $e | END');
-        }
+        if (kDebugMode) debugPrint('⚠️ registerFcmToken $endpoint: $e');
       }
     }
 
@@ -800,16 +867,16 @@ class ApiService {
     final cleanToken = token.trim();
     if (_appToken.trim().isEmpty || cleanToken.isEmpty) return false;
 
-    const configuredEndpoint = String.fromEnvironment(
+    final configuredEndpoint = const String.fromEnvironment(
       'MUNDICAM_FCM_UNREGISTER_PATH',
       defaultValue: '',
-    );
+    ).trim();
 
-    final endpoints = <String>{
-      if (configuredEndpoint.trim().isNotEmpty) configuredEndpoint.trim(),
+    final endpoints = <String>[
+      if (configuredEndpoint.isNotEmpty) configuredEndpoint,
       '/fcm/unregister',
       '/notifications/unregister-device',
-    };
+    ];
 
     final payload = <String, dynamic>{
       'fcm_token': cleanToken,
@@ -817,7 +884,7 @@ class ApiService {
       'platform': platform.trim().isEmpty ? 'android' : platform.trim(),
     };
 
-    for (final endpoint in endpoints) {
+    for (final endpoint in endpoints.toSet()) {
       try {
         final response = await _appPost(endpoint, data: payload);
         final data = _responseMap(response.data);
@@ -827,26 +894,42 @@ class ApiService {
             data['success'] != false;
 
         if (ok) {
-          if (kDebugMode) {
-            debugPrint('[FCM] Desregistrado en $endpoint | END');
-          }
+          if (kDebugMode) debugPrint('✅ FCM desregistrado en $endpoint');
           return true;
         }
 
         if (kDebugMode) {
-          debugPrint(
-            '[FCM] Endpoint de desregistro $endpoint '
-            'respondió=${response.data} | END',
-          );
+          debugPrint('⚠️ FCM unregister $endpoint: ${response.data}');
         }
       } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[FCM] Error desregistrando en $endpoint: $e | END');
-        }
+        if (kDebugMode) debugPrint('⚠️ unregisterFcmToken $endpoint: $e');
       }
     }
 
     return false;
+  }
+
+  /// Llama al diagnóstico real del PHP 1.9.22.
+  ///
+  /// El servidor envía la prueba mediante la misma cuenta de servicio, los
+  /// mismos tokens y la misma función FCM HTTP v1 usada para los pedidos.
+  Future<Map<String, dynamic>> testFcmNotification() async {
+    await _ensureInitialized();
+    _ensureHasAppToken();
+
+    try {
+      final response = await _appPost('/fcm/test');
+      return _responseMap(response.data);
+    } on DioException catch (e) {
+      final data = _responseMap(e.response?.data);
+      final message = data['message']?.toString().trim() ?? '';
+
+      throw Exception(
+        message.isNotEmpty
+            ? message
+            : 'El servidor no pudo ejecutar la prueba FCM.',
+      );
+    }
   }
 
   Future<void> clearWordPressSession() async {
@@ -871,7 +954,7 @@ class ApiService {
     _cachedBrandTerms = null;
 
     if (kDebugMode) {
-      debugPrint('[SESSION] MundiCam App API borrada | END');
+      debugPrint('🧹 Sesión MundiCam App API borrada');
     }
   }
 
@@ -954,7 +1037,7 @@ class ApiService {
       if (user.isEmpty) return null;
       return _customerMapFromUser(user, _asMap(me['permissions']));
     } catch (e) {
-      if (kDebugMode) debugPrint(' getCustomerByEmail: $e');
+      if (kDebugMode) debugPrint('⚠️ getCustomerByEmail: $e');
       return null;
     }
   }
@@ -968,7 +1051,7 @@ class ApiService {
       if (id > 0 && userId > 0 && id != userId) return null;
       return _customerMapFromUser(user, _asMap(me['permissions']));
     } catch (e) {
-      if (kDebugMode) debugPrint(' getCustomerById: $e');
+      if (kDebugMode) debugPrint('⚠️ getCustomerById: $e');
       return null;
     }
   }
@@ -1300,7 +1383,7 @@ class ApiService {
       );
     } catch (e) {
       if (kDebugMode) {
-        debugPrint(' Context-search no disponible para "$clean": $e');
+        debugPrint('⚠️ Context-search no disponible para "$clean": $e');
       }
       return null;
     }
@@ -1470,7 +1553,7 @@ class ApiService {
 
           if (kDebugMode) {
             debugPrint(
-              ' Precarga buscador "$cleanSearch": page=$page · ${result.products.length} productos',
+              '⚡ Precarga buscador "$cleanSearch": page=$page · ${result.products.length} productos',
             );
           }
 
@@ -1478,7 +1561,7 @@ class ApiService {
         }
       } catch (e) {
         if (kDebugMode) {
-          debugPrint(' Precarga buscador "$cleanSearch" cancelada: $e');
+          debugPrint('⚠️ Precarga buscador "$cleanSearch" cancelada: $e');
         }
       } finally {
         _backgroundSearchPrefetchRunning.remove(prefetchKey);
@@ -1726,7 +1809,7 @@ class ApiService {
       return _sortSuggestionsForQuery(result.products, clean).take(perPage).toList();
     } catch (e) {
       if (kDebugMode) {
-        debugPrint(' Predictivo rápido falló: $e');
+        debugPrint('⚠️ Predictivo rápido falló: $e');
       }
       return const <Product>[];
     }
@@ -2100,7 +2183,7 @@ class ApiService {
           }
         } catch (e) {
           if (kDebugMode) {
-            debugPrint(' Fallback búsqueda "$expandedQuery" falló: $e');
+            debugPrint('⚠️ Fallback búsqueda "$expandedQuery" falló: $e');
           }
         }
       }
@@ -2161,7 +2244,7 @@ class ApiService {
       if (productMap.isEmpty) return null;
       return Product.fromJson(productMap);
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getProductoById($id): $e');
+      if (kDebugMode) debugPrint('❌ Error getProductoById($id): $e');
       return null;
     }
   }
@@ -2242,7 +2325,7 @@ class ApiService {
 
       return groups;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error cargando filtros catálogo: $e');
+      if (kDebugMode) debugPrint('⚠️ Error cargando filtros catálogo: $e');
       return [];
     }
   }
@@ -2262,7 +2345,7 @@ class ApiService {
       });
       return _responseMap(response.data)['success'] != false;
     } catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo sincronizar carrito remoto: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo sincronizar carrito remoto: $e');
       return false;
     }
   }
@@ -2296,21 +2379,20 @@ class ApiService {
           .toList();
 
       if (kDebugMode) {
+        final rootDestination = _asMap(root['destination']);
+        final nestedDestination = _asMap(nested['destination']);
+        final destination = rootDestination.isNotEmpty ? rootDestination : nestedDestination;
         debugPrint(
-          '[SHIPPING] Métodos recibidos=${options.length} | END',
+          '🚚 Métodos de envío recibidos: ${options.length}. Destino: $destination',
         );
       }
 
       return options;
     } on DioException catch (e) {
-      if (kDebugMode) {
-        debugPrint('[SHIPPING] Error Dio: ${_mapDioError(e)} | END');
-      }
+      if (kDebugMode) debugPrint('⚠️ No se pudieron cargar métodos de envío: ${_mapDioError(e)}');
       return <ShippingOption>[];
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[SHIPPING] Error: $e | END');
-      }
+      if (kDebugMode) debugPrint('⚠️ No se pudieron cargar métodos de envío: $e');
       return <ShippingOption>[];
     }
   }
@@ -2338,10 +2420,10 @@ class ApiService {
       if (data['success'] == false) return null;
       return OrderPreviewResult.fromJson(data);
     } on DioException catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo calcular resumen de pedido: ${_mapDioError(e)}');
+      if (kDebugMode) debugPrint('⚠️ No se pudo calcular resumen de pedido: ${_mapDioError(e)}');
       return null;
     } catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo calcular resumen de pedido: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo calcular resumen de pedido: $e');
       return null;
     }
   }
@@ -2400,7 +2482,7 @@ class ApiService {
         data['redirect_url'],
       ]);
     } catch (e) {
-      if (kDebugMode) debugPrint(' No se pudo obtener URL segura de pago: $e');
+      if (kDebugMode) debugPrint('⚠️ No se pudo obtener URL segura de pago: $e');
       return null;
     }
   }
@@ -2437,7 +2519,7 @@ class ApiService {
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error crearPresupuesto: $e');
+      if (kDebugMode) debugPrint('❌ Error crearPresupuesto: $e');
       return false;
     }
   }
@@ -2484,7 +2566,7 @@ class ApiService {
           .map((item) => OrderMundicam.fromJson(Map<String, dynamic>.from(item)))
           .toList();
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getOrders: $e');
+      if (kDebugMode) debugPrint('❌ Error getOrders: $e');
       return [];
     }
   }
@@ -2506,7 +2588,7 @@ class ApiService {
       if (data['success'] == false) return null;
       return data;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getOrderStatus: $e');
+      if (kDebugMode) debugPrint('❌ Error getOrderStatus: $e');
       return null;
     }
   }
@@ -2530,7 +2612,7 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getOrdenCompleta: $e');
+      if (kDebugMode) debugPrint('❌ Error getOrdenCompleta: $e');
       return null;
     }
   }
@@ -2545,7 +2627,7 @@ class ApiService {
           .map((item) => QuoteMundicam.fromJson(Map<String, dynamic>.from(item)))
           .toList();
     } catch (e) {
-      if (kDebugMode) debugPrint(' Presupuestos App API no disponibles: $e');
+      if (kDebugMode) debugPrint('⚠️ Presupuestos App API no disponibles: $e');
       return [];
     }
   }
@@ -2574,7 +2656,7 @@ class ApiService {
       final data = _responseMap(response.data);
       return response.statusCode == 200 || response.statusCode == 201 || data['success'] != false;
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error crearRma: $e');
+      if (kDebugMode) debugPrint('❌ Error crearRma: $e');
       return false;
     }
   }
@@ -2588,7 +2670,7 @@ class ApiService {
       final raw = _firstList([data['rma'], data['requests'], data['data'], response.data]);
       return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
     } catch (e) {
-      if (kDebugMode) debugPrint(' Error getRmaRequests: $e');
+      if (kDebugMode) debugPrint('⚠️ Error getRmaRequests: $e');
       return [];
     }
   }

@@ -96,7 +96,7 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
       _debugCart('CARGADO');
     } catch (e) {
-      debugPrint('[CART] Error cargando carrito: $e | END');
+      debugPrint('❌ Error cargando carrito: $e');
       state = [];
     }
   }
@@ -104,24 +104,21 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   void addProduct(Product product, int qty) {
     final safeQty = qty <= 0 ? 1 : qty;
 
-    if (kDebugMode) {
-      debugPrint(
-        '[CART] Añadiendo id=${product.id} | qty=$safeQty | END',
-      );
-    }
+    debugPrint('🛒 AÑADIENDO PRODUCTO AL CARRITO');
+    debugPrint('➡️ ID: ${product.id}');
+    debugPrint('➡️ Nombre: ${product.name}');
+    debugPrint('➡️ Cantidad: $safeQty');
 
     if (product.id <= 0) {
-      debugPrint('[CART] Producto sin ID válido; operación omitida | END');
+      debugPrint('❌ Producto sin ID válido. No se añade al carrito.');
       return;
     }
 
     if (!product.canAddToCart) {
-      if (kDebugMode) {
-        debugPrint(
-          '[CART] Producto bloqueado id=${product.id} | '
-          'estado=${product.commercialStatusLabel} | END',
-        );
-      }
+      debugPrint(
+        '⛔ Producto bloqueado para carrito: ${product.name} · '
+            'estado=${product.commercialStatusLabel}',
+      );
       return;
     }
 
@@ -130,9 +127,9 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     );
 
     if (index != -1) {
-      if (kDebugMode) {
-        debugPrint('[CART] Cantidad acumulada id=${product.id} | END');
-      }
+      debugPrint(
+        '🔁 Producto ya existe en carrito. Se suma cantidad al ID ${product.id}',
+      );
 
       state = [
         for (final item in state)
@@ -145,9 +142,7 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
             item,
       ];
     } else {
-      if (kDebugMode) {
-        debugPrint('[CART] Producto nuevo añadido id=${product.id} | END');
-      }
+      debugPrint('✅ Producto nuevo añadido al carrito');
 
       state = [
         ...state,
@@ -166,11 +161,9 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
         .addProductToRemoteCart(productId: product.id, quantity: safeQty)
         .then((ok) {
       if (kDebugMode) {
-        debugPrint(
-          ok
-              ? '[CART] Sincronización remota completada | END'
-              : '[CART] Sincronización remota pendiente | END',
-        );
+        debugPrint(ok
+            ? '✅ Carrito remoto App API sincronizado'
+            : '⚠️ Carrito remoto App API no sincronizado');
       }
     });
   }
@@ -229,16 +222,16 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   double get total => subtotal + iva;
 
   void _debugCart(String origen) {
-    if (!kDebugMode) return;
+    debugPrint('════════ CARRITO $origen ════════');
+    debugPrint('🧾 Líneas en carrito: ${state.length}');
 
-    final totalUnits = state.fold<int>(
-      0,
-      (total, item) => total + item.quantity,
-    );
+    for (final item in state) {
+      debugPrint(
+        '➡️ ID: ${item.product.id} | Qty: ${item.quantity} | ${item.product.name}',
+      );
+    }
 
-    debugPrint(
-      '[CART] $origen | lines=${state.length} | units=$totalUnits | END',
-    );
+    debugPrint('══════════════════════════════════');
   }
 }
 

@@ -14,16 +14,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mundicam/core/network/api_service.dart';
 
 class MundiCamOrderNotification {
-  static const Set<String> _orderEvents = <String>{
-    'order_created',
-    'new_order',
-    'order_status_changed',
-    'order_refunded',
-    'order_partially_refunded',
-    'order_partial_refund',
-    'refund_created',
-  };
-
   final String event;
   final int? orderId;
   final String? orderNumber;
@@ -48,15 +38,8 @@ class MundiCamOrderNotification {
     required this.data,
   });
 
-  bool get isOrderCreated =>
-      event == 'order_created' || event == 'new_order';
-
-  bool get isRefund => event == 'order_refunded' ||
-      event == 'order_partially_refunded' ||
-      event == 'order_partial_refund' ||
-      event == 'refund_created';
-
-  bool get isStatusChanged => event == 'order_status_changed' || isRefund;
+  bool get isOrderCreated => event == 'order_created';
+  bool get isStatusChanged => event == 'order_status_changed';
 
   bool get isGeneralNotification {
     final type = data['type']?.toString().trim().toLowerCase() ?? '';
@@ -70,16 +53,7 @@ class MundiCamOrderNotification {
         type == 'notificacion';
   }
 
-  bool get isOrderNotification {
-    final type = data['type']?.toString().trim().toLowerCase() ?? '';
-    final screen = data['screen']?.toString().trim().toLowerCase() ?? '';
-
-    return orderId != null ||
-        type == 'order' ||
-        type == 'pedido' ||
-        screen == 'orders' ||
-        _orderEvents.contains(event);
-  }
+  bool get isOrderNotification => !isGeneralNotification;
 
   MundiCamOrderNotification copyWith({
     bool? showPopup,
@@ -185,7 +159,7 @@ class MundiCamOrderNotification {
       );
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[FCM] Payload local inválido: $e | END');
+        debugPrint('⚠️ Payload local inválido: $e');
       }
       return null;
     }
@@ -229,7 +203,8 @@ class MundiCamOrderNotification {
 
     final isOrderNotification = type == 'order' ||
         type == 'pedido' ||
-        _orderEvents.contains(event) ||
+        event == 'order_created' ||
+        event == 'order_status_changed' ||
         hasOrderHint;
 
     if (isOrderNotification) {
@@ -297,7 +272,9 @@ class MundiCamOrderNotification {
       parsedOrderId,
     ]);
 
-    final defaultTitle = _defaultOrderTitle(cleanEvent, status);
+    final defaultTitle = cleanEvent == 'order_created'
+        ? 'Pedido recibido'
+        : 'Pedido actualizado';
 
     final title = _firstNonEmptyString([
           data['title'],
@@ -306,15 +283,13 @@ class MundiCamOrderNotification {
         ]) ??
         defaultTitle;
 
-    final defaultBody = _defaultOrderBody(
-      event: cleanEvent,
-      orderNumber: orderNumber,
-      status: status,
-      refundAmount: _firstNonEmptyString([
-        data['refund_amount'],
-        data['amount'],
-      ]),
-    );
+    final defaultBody = orderNumber == null
+        ? 'Hay una novedad en tus pedidos.'
+        : cleanEvent == 'order_created'
+            ? 'Tu pedido #$orderNumber se ha registrado correctamente.'
+            : status == null
+                ? 'Tu pedido #$orderNumber ha cambiado de estado.'
+                : 'Tu pedido #$orderNumber ha cambiado a $status.';
 
     final body = _firstNonEmptyString([
           data['body'],
@@ -374,94 +349,6 @@ class MundiCamOrderNotification {
     );
   }
 
-  static String _defaultOrderTitle(String event, String? status) {
-    if (event == 'order_created' || event == 'new_order') {
-      return 'Pedido recibido';
-    }
-    if (event == 'order_refunded' ||
-        event == 'order_partially_refunded' ||
-        event == 'order_partial_refund' ||
-        event == 'refund_created') {
-      return 'Reembolso del pedido';
-    }
-
-    switch (_normalizeStatus(status)) {
-      case 'pending':
-        return 'Pedido pendiente de pago';
-      case 'on-hold':
-        return 'Pedido en espera';
-      case 'processing':
-        return 'Pedido en preparación';
-      case 'completed':
-        return 'Pedido completado';
-      case 'cancelled':
-        return 'Pedido cancelado';
-      case 'refunded':
-        return 'Pedido reembolsado';
-      case 'failed':
-        return 'Pago del pedido fallido';
-      default:
-        return 'Pedido actualizado';
-    }
-  }
-
-  static String _defaultOrderBody({
-    required String event,
-    required String? orderNumber,
-    required String? status,
-    required String? refundAmount,
-  }) {
-    final orderText = orderNumber == null ? 'Tu pedido' : 'Tu pedido #$orderNumber';
-
-    if (event == 'order_created' || event == 'new_order') {
-      return '$orderText se ha registrado correctamente.';
-    }
-
-    if (event == 'order_refunded' ||
-        event == 'order_partially_refunded' ||
-        event == 'order_partial_refund' ||
-        event == 'refund_created') {
-      final amountText = refundAmount == null ? '' : ' por $refundAmount';
-      return 'Se ha realizado un reembolso$amountText en $orderText.';
-    }
-
-    final label = _statusLabel(status);
-    if (label == null) {
-      return '$orderText ha cambiado de estado.';
-    }
-    return '$orderText ahora está $label.';
-  }
-
-  static String _normalizeStatus(String? status) {
-    return (status ?? '')
-        .trim()
-        .toLowerCase()
-        .replaceFirst(RegExp(r'^wc-'), '')
-        .replaceAll('_', '-');
-  }
-
-  static String? _statusLabel(String? status) {
-    switch (_normalizeStatus(status)) {
-      case 'pending':
-        return 'pendiente de pago';
-      case 'on-hold':
-        return 'en espera';
-      case 'processing':
-        return 'en preparación';
-      case 'completed':
-        return 'completado';
-      case 'cancelled':
-        return 'cancelado';
-      case 'refunded':
-        return 'reembolsado';
-      case 'failed':
-        return 'con el pago fallido';
-      default:
-        final clean = status?.trim() ?? '';
-        return clean.isEmpty ? null : clean;
-    }
-  }
-
   static int? _parseInt(dynamic value) {
     if (value == null) return null;
     if (value is int) return value;
@@ -510,122 +397,62 @@ class NotificationService {
 
   bool _initialized = false;
   bool _localNotificationsInitialized = false;
-  Future<void>? _initializationFuture;
-  Future<bool>? _activeTokenSync;
-  StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
-  StreamSubscription<RemoteMessage>? _openedMessageSubscription;
-  StreamSubscription<String>? _tokenRefreshSubscription;
 
   Stream<MundiCamOrderNotification> get orderNotifications =>
       _orderController.stream;
 
   Future<void> initialize() async {
     if (_initialized) {
-      unawaited(() async {
-        await syncCurrentTokenWithBackend();
-      }());
+      await syncCurrentTokenWithBackend();
       return;
     }
 
-    final activeInitialization = _initializationFuture;
-    if (activeInitialization != null) {
-      await activeInitialization;
-      return;
+    _initialized = true;
+
+    await _initializeLocalNotifications();
+
+    final settings = await _messaging.requestPermission(
+      alert: true,
+      announcement: false,
+      badge: true,
+      carPlay: false,
+      criticalAlert: false,
+      provisional: false,
+      sound: true,
+    );
+
+    if (kDebugMode) {
+      debugPrint('🔔 Permiso notificaciones: ${settings.authorizationStatus}');
     }
 
-    final operation = _initializeInternal();
-    _initializationFuture = operation;
+    // FCM no muestra avisos en primer plano en Android. En iOS se desactiva
+    // la presentación automática para evitar duplicados, porque el aviso visible
+    // se crea con flutter_local_notifications en ambas plataformas.
+    await _messaging.setForegroundNotificationPresentationOptions(
+      alert: false,
+      badge: false,
+      sound: false,
+    );
 
-    try {
-      await operation;
-    } finally {
-      if (identical(_initializationFuture, operation)) {
-        _initializationFuture = null;
-      }
+    await syncCurrentTokenWithBackend();
+
+    FirebaseMessaging.onMessage.listen((message) {
+      unawaited(_handleForegroundRemoteMessage(message));
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      _handleRemoteMessageOpenedByUser(message);
+    });
+
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      _handleRemoteMessageOpenedByUser(initialMessage);
     }
-  }
 
-  Future<void> _initializeInternal() async {
-    try {
-      await _messaging.setAutoInitEnabled(true);
-      await _initializeLocalNotifications();
-
-      final settings = await _messaging.requestPermission(
-        alert: true,
-        announcement: false,
-        badge: true,
-        carPlay: false,
-        criticalAlert: false,
-        provisional: false,
-        sound: true,
-      );
-
-      if (kDebugMode) {
-        debugPrint('[FCM] Permiso=${settings.authorizationStatus} | END');
-      }
-
-      // El aviso visible en primer plano se crea de forma local tanto en Android
-      // como en iOS. Desactivamos la presentación remota automática de iOS para
-      // evitar duplicados y mantener el mismo comportamiento en ambos sistemas.
-      await _messaging.setForegroundNotificationPresentationOptions(
-        alert: false,
-        badge: false,
-        sound: false,
-      );
-
-      await _cancelMessagingSubscriptions();
-
-      _foregroundMessageSubscription =
-          FirebaseMessaging.onMessage.listen((message) {
-        unawaited(_handleForegroundRemoteMessage(message));
-      });
-
-      _openedMessageSubscription =
-          FirebaseMessaging.onMessageOpenedApp.listen((message) {
-        _handleRemoteMessageOpenedByUser(message);
-      });
-
-      _tokenRefreshSubscription = _messaging.onTokenRefresh.listen((token) {
-        unawaited(_handleTokenRefresh(token));
-      });
-
-      final initialMessage = await _messaging.getInitialMessage();
-      if (initialMessage != null) {
-        _handleRemoteMessageOpenedByUser(initialMessage);
-      }
-
-      _initialized = true;
-
-      // Guardar el token no debe retrasar la activación de los listeners ni la
-      // apertura de una notificación que lanzó la aplicación.
-      unawaited(() async {
-        await syncCurrentTokenWithBackend();
-      }());
-    } catch (e) {
-      _initialized = false;
-      await _cancelMessagingSubscriptions();
-      rethrow;
-    }
-  }
-
-  Future<void> _handleTokenRefresh(String token) async {
-    try {
+    _messaging.onTokenRefresh.listen((token) async {
       final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
       await _saveToken(token, apnsToken: apnsToken);
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[FCM] Error guardando token renovado: $e | END');
-      }
-    }
-  }
-
-  Future<void> _cancelMessagingSubscriptions() async {
-    await _foregroundMessageSubscription?.cancel();
-    await _openedMessageSubscription?.cancel();
-    await _tokenRefreshSubscription?.cancel();
-    _foregroundMessageSubscription = null;
-    _openedMessageSubscription = null;
-    _tokenRefreshSubscription = null;
+    });
   }
 
   static Future<void> handleBackgroundRemoteMessage(
@@ -657,7 +484,7 @@ class NotificationService {
     if (_localNotificationsInitialized) return;
 
     const androidSettings = AndroidInitializationSettings(
-      'mundicam_notification_logo',
+      'ic_stat_mundicam',
     );
 
     const darwinSettings = DarwinInitializationSettings(
@@ -696,16 +523,6 @@ class NotificationService {
       ),
     );
 
-    if (Platform.isAndroid) {
-      try {
-        await androidPlugin?.requestNotificationsPermission();
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[FCM] Permiso local Android no solicitado: $e | END');
-        }
-      }
-    }
-
     _localNotificationsInitialized = true;
 
     final launchDetails =
@@ -723,30 +540,31 @@ class NotificationService {
 
     final notification = MundiCamOrderNotification.fromRemoteMessage(
       message,
-      showPopup: true,
+      showPopup: false,
       openedByUser: false,
     );
 
     if (notification == null) {
       if (kDebugMode) {
-        debugPrint('[FCM] Notificación ignorada data=${message.data} | END');
+        debugPrint('ℹ️ Notificación ignorada: ${message.data}');
       }
       return;
     }
 
-    // Con la app abierta mostramos las dos capas solicitadas:
-    // 1) notificación superior del sistema y 2) popup interno de MundiCam.
-    // En iOS la presentación remota automática está desactivada, por lo que no
-    // se duplica el aviso al crear esta notificación local.
     try {
       await _showLocalNotification(notification);
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[FCM] No se pudo mostrar el aviso superior: $e | END');
+        debugPrint('⚠️ No se pudo mostrar aviso local: $e');
       }
     }
 
-    _emitNotification(notification);
+    // En primer plano mostramos también el aviso interno MundiCam.
+    // De este modo el usuario ve el mensaje dentro de la app y, además,
+    // conserva la notificación del sistema en la bandeja de Android.
+    _emitNotification(
+      notification.copyWith(showPopup: true),
+    );
   }
 
   void _handleRemoteMessageOpenedByUser(RemoteMessage message) {
@@ -778,8 +596,11 @@ class NotificationService {
     final androidDetails = AndroidNotificationDetails(
       androidChannelId,
       androidChannelName,
-      icon: 'mundicam_notification_logo',
-      color: const Color(0xFF000000),
+      icon: 'ic_stat_mundicam',
+      largeIcon: const DrawableResourceAndroidBitmap(
+        'ic_mundicam_notification_large',
+      ),
+      color: const Color(0xFFB00000),
       channelDescription: androidChannelDescription,
       importance: Importance.max,
       priority: Priority.high,
@@ -820,12 +641,13 @@ class NotificationService {
   }
 
   int _notificationId(MundiCamOrderNotification notification) {
-    // Cada evento conserva su propio aviso en la bandeja. Si Firebase entrega un
-    // messageId lo usamos como clave; en su ausencia se combinan pedido, evento,
-    // estado y contenido. Así processing, completed o refunded no se pisan.
+    final orderId = notification.orderId;
+    if (orderId != null && orderId > 0) {
+      return orderId & 0x7fffffff;
+    }
+
     final source = notification.messageId ??
-        '${notification.orderId ?? ''}|${notification.event}|'
-        '${notification.status ?? ''}|${notification.title}|${notification.body}';
+        '${notification.event}|${notification.title}|${notification.body}';
 
     var hash = 0x811c9dc5;
     for (final codeUnit in source.codeUnits) {
@@ -838,10 +660,13 @@ class NotificationService {
   void _emitNotification(MundiCamOrderNotification notification) {
     if (kDebugMode) {
       debugPrint(
-        '[FCM] Recibida type=${notification.isGeneralNotification ? 'general' : 'order'} | '
-        'event=${notification.event} | order=${notification.orderId ?? '-'} | '
-        'opened=${notification.openedByUser} | popup=${notification.showPopup} | END',
+        notification.isGeneralNotification
+            ? '📩 Notificación general: ${notification.title}'
+            : '📩 Notificación pedido: ${notification.title}',
       );
+      debugPrint('   Body: ${notification.body}');
+      debugPrint('   Opened by user: ${notification.openedByUser}');
+      debugPrint('   Data: ${notification.data}');
     }
 
     if (_orderController.hasListener) {
@@ -878,7 +703,7 @@ class NotificationService {
           <String>[];
 
       if (keys.contains(key)) {
-        if (kDebugMode) debugPrint('[FCM] Duplicado ignorado key=$key | END');
+        if (kDebugMode) debugPrint('ℹ️ FCM duplicado ignorado: $key');
         return false;
       }
 
@@ -891,14 +716,19 @@ class NotificationService {
       return true;
     } catch (e) {
       // La deduplicación no debe bloquear una notificación válida.
-      if (kDebugMode) debugPrint('[FCM] Deduplicación omitida: $e | END');
+      if (kDebugMode) debugPrint('⚠️ No se pudo deduplicar FCM: $e');
       return true;
     }
   }
 
   String _remoteMessageDeduplicationKey(RemoteMessage message) {
     final data = message.data;
-    final explicitId = message.messageId?.trim() ??
+    // PHP 1.9.22 envía event_id estable para cada alta, cambio de estado o
+    // reembolso. Se prioriza frente al messageId de FCM, que puede cambiar en
+    // reintentos y provocar avisos duplicados del mismo evento.
+    final explicitId = data['event_id']?.toString().trim() ??
+        data['eventId']?.toString().trim() ??
+        message.messageId?.trim() ??
         data['message_id']?.toString().trim() ??
         data['notification_id']?.toString().trim() ??
         '';
@@ -921,21 +751,7 @@ class NotificationService {
     ].map((value) => value?.toString() ?? '').join('|');
   }
 
-  Future<bool> syncCurrentTokenWithBackend() {
-    final active = _activeTokenSync;
-    if (active != null) return active;
-
-    final operation = _syncCurrentTokenWithBackendInternal();
-    _activeTokenSync = operation;
-
-    return operation.whenComplete(() {
-      if (identical(_activeTokenSync, operation)) {
-        _activeTokenSync = null;
-      }
-    });
-  }
-
-  Future<bool> _syncCurrentTokenWithBackendInternal() async {
+  Future<void> syncCurrentTokenWithBackend() async {
     try {
       String? apnsToken;
 
@@ -944,82 +760,19 @@ class NotificationService {
         if ((apnsToken ?? '').isEmpty) {
           if (kDebugMode) {
             debugPrint(
-              '[FCM] APNs token no disponible todavía; se reintentará | END',
+              '⚠️ APNs token no disponible todavía. FCM se reintentará al refrescar token.',
             );
           }
-          return false;
+          return;
         }
       }
 
       final token = await _messaging.getToken();
-      final cleanToken = token?.trim() ?? '';
-
-      if (cleanToken.isEmpty) {
-        if (kDebugMode) {
-          debugPrint('[FCM] Firebase no devolvió token | END');
-        }
-        return false;
-      }
-
-      if (kDebugMode) {
-        final preview = cleanToken.length > 12
-            ? '${cleanToken.substring(0, 6)}...${cleanToken.substring(cleanToken.length - 6)}'
-            : cleanToken;
-        debugPrint(
-          '[FCM] Token $_platform="$preview" | '
-          'length=${cleanToken.length} | END',
-        );
-      }
-
-      return _saveToken(cleanToken, apnsToken: apnsToken);
+      if (kDebugMode) debugPrint('📱 FCM Token $_platform: $token');
+      await _saveToken(token, apnsToken: apnsToken);
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[FCM] Error obteniendo/guardando token: $e | END');
-      }
-      return false;
+      if (kDebugMode) debugPrint('⚠️ No se pudo obtener/guardar token FCM: $e');
     }
-  }
-
-  /// Se llama justo después de guardar una sesión válida de MundiCam App API.
-  /// Conserva el token generado antes del login y lo vincula al usuario.
-  Future<bool> syncAfterLogin({int maxAttempts = 4}) async {
-    final attempts = maxAttempts < 1 ? 1 : maxAttempts;
-
-    for (var attempt = 1; attempt <= attempts; attempt++) {
-      final hasSession = await ApiService().hasStoredWordPressSession();
-
-      if (!hasSession) {
-        if (kDebugMode) {
-          debugPrint(
-            '[FCM] Registro poslogin intento $attempt/$attempts: '
-            'sesión App API aún no disponible | END',
-          );
-        }
-      } else {
-        final registered = await syncCurrentTokenWithBackend();
-        if (registered) {
-          if (kDebugMode) {
-            debugPrint(
-              '[FCM] Registro poslogin completado en intento '
-              '$attempt/$attempts | END',
-            );
-          }
-          return true;
-        }
-      }
-
-      if (attempt < attempts) {
-        await Future.delayed(Duration(milliseconds: 400 * attempt));
-      }
-    }
-
-    if (kDebugMode) {
-      debugPrint(
-        '[FCM] No se pudo registrar tras el login; '
-        'se reintentará al reiniciar o refrescar el token | END',
-      );
-    }
-    return false;
   }
 
   Future<String?> _waitForApnsToken() async {
@@ -1031,26 +784,21 @@ class NotificationService {
     }
 
     if (apnsToken != null && kDebugMode) {
-      debugPrint(
-        '[FCM] APNs token recibido | length=${apnsToken.length} | END',
-      );
+      debugPrint('🍎 APNs Token: $apnsToken');
     }
 
     return apnsToken;
   }
 
-  Future<bool> _saveToken(String? token, {String? apnsToken}) async {
+  Future<void> _saveToken(String? token, {String? apnsToken}) async {
     final cleanToken = token?.trim() ?? '';
-    if (cleanToken.isEmpty) return false;
+    if (cleanToken.isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_lastFcmTokenPrefsKey, cleanToken);
 
     await _saveTokenInFirestore(cleanToken, apnsToken: apnsToken);
-    return _saveTokenInMundiCamBackend(
-      cleanToken,
-      apnsToken: apnsToken,
-    );
+    await _saveTokenInMundiCamBackend(cleanToken, apnsToken: apnsToken);
   }
 
   Future<void> _saveTokenInFirestore(String token, {String? apnsToken}) async {
@@ -1065,17 +813,13 @@ class NotificationService {
         'fcm_updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      if (kDebugMode) {
-        debugPrint('[FCM] Token guardado en Firestore | END');
-      }
+      if (kDebugMode) debugPrint('✅ Token FCM guardado en Firestore');
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[FCM] Firestore no guardó el token: $e | END');
-      }
+      if (kDebugMode) debugPrint('⚠️ No se pudo guardar FCM en Firestore: $e');
     }
   }
 
-  Future<bool> _saveTokenInMundiCamBackend(
+  Future<void> _saveTokenInMundiCamBackend(
     String token, {
     String? apnsToken,
   }) async {
@@ -1089,16 +833,12 @@ class NotificationService {
       if (kDebugMode) {
         debugPrint(
           saved
-              ? '[FCM] Token registrado en MundiCam App API | END'
-              : '[FCM] Token conservado localmente; pendiente de sesión/endpoint | END',
+              ? '✅ Token FCM registrado en MundiCam App API'
+              : 'ℹ️ Token FCM no registrado todavía: sin sesión App API o endpoint pendiente',
         );
       }
-      return saved;
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[FCM] Error registrando en App API: $e | END');
-      }
-      return false;
+      if (kDebugMode) debugPrint('⚠️ No se pudo registrar FCM en App API: $e');
     }
   }
 
@@ -1121,7 +861,7 @@ class NotificationService {
         );
       } catch (e) {
         if (kDebugMode) {
-          debugPrint('[FCM] Backend no desregistró el token: $e | END');
+          debugPrint('⚠️ Backend aún no desregistró el token FCM: $e');
         }
       }
     }
@@ -1130,11 +870,9 @@ class NotificationService {
 
     try {
       await _messaging.deleteToken();
-      if (kDebugMode) {
-        debugPrint('[FCM] Token eliminado por cierre de sesión real | END');
-      }
+      if (kDebugMode) debugPrint('✅ Token FCM eliminado del dispositivo');
     } catch (e) {
-      if (kDebugMode) debugPrint('[FCM] No se pudo eliminar token local: $e | END');
+      if (kDebugMode) debugPrint('⚠️ No se pudo eliminar token FCM local: $e');
     }
 
     await prefs.remove(_lastFcmTokenPrefsKey);
@@ -1162,10 +900,10 @@ class NotificationService {
         'fcm_updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      if (kDebugMode) debugPrint('[FCM] Token eliminado de Firestore | END');
+      if (kDebugMode) debugPrint('✅ Token FCM eliminado de Firestore');
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[FCM] No se pudo eliminar token de Firestore: $e | END');
+        debugPrint('⚠️ No se pudo eliminar token FCM de Firestore: $e');
       }
     }
   }

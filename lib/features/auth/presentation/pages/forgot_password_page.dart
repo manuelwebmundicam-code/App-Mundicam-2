@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/mundicam_webview_page.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -28,23 +28,20 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
     setState(() => _isLoading = true);
 
-    // Abrir la web de recuperación de WordPress
     final url = Uri.parse('https://www.mundicam.com/my-account/lost-password/');
 
-    try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("No se pudo abrir la página. Inténtalo de nuevo."),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    if (!mounted) return;
+
+    setState(() => _isLoading = false);
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MundiCamWebViewPage(
+          title: 'Recuperar contraseña',
+          initialUri: url,
+        ),
+      ),
+    );
   }
 
   @override
@@ -53,17 +50,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: Image.asset(
-              'assets/gif/fondo2.gif',
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              filterQuality: FilterQuality.low,
-            ),
+            child: Image.asset('assets/gif/fondo.gif', fit: BoxFit.cover),
           ),
           Positioned.fill(
-            child: Container(
-              color: Colors.black.withOpacity(0.3),
-            ),
+            child: Container(color: Colors.black.withOpacity(0.6)),
           ),
           Center(
             child: SingleChildScrollView(
@@ -90,7 +80,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       ),
                       const SizedBox(height: 10),
                       const Text(
-                        'Te redirigiremos a la web de Mundicam para que puedas restablecer tu contraseña.',
+                        'Abriremos el formulario de Mundicam dentro de la app para que puedas restablecer tu contraseña.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.grey, fontSize: 13),
                       ),

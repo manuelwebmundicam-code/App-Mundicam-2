@@ -8,12 +8,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/app/main_screen.dart';
+import 'package:mundicam/shared/widgets/mundicam_webview_page.dart';
 import 'package:mundicam/features/auth/presentation/pages/forgot_password_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -61,57 +61,83 @@ class _LoginPageState extends State<LoginPage> {
   // INICIALIZAR LOGIN
   // ================================================================
   Future<void> _inicializarLogin() async {
-    final prefs = await SharedPreferences.getInstance();
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-    final bool rememberMeGuardado = prefs.getBool(_rememberMeKey) ?? false;
-    final String emailGuardado = prefs.getString(_rememberEmailKey) ?? '';
+      final bool rememberMeGuardado = prefs.getBool(_rememberMeKey) ?? false;
+      final String emailGuardado = prefs.getString(_rememberEmailKey) ?? '';
 
-    if (!mounted) return;
-
-    setState(() {
-      _rememberMe = rememberMeGuardado;
-      _emailController.text = rememberMeGuardado ? emailGuardado : '';
-      _isLoadingSavedCredentials = false;
-    });
-
-    final hasWpSession = await _hasStoredWordPressSession();
-
-    if (!mounted) return;
-
-    if (hasWpSession) {
-      if (kDebugMode) {
-        debugPrint(
-          '[SESSION] WordPress/WooCommerce detectada | END',
-        );
-      }
-
-      await NotificationService().syncAfterLogin(maxAttempts: 2);
       if (!mounted) return;
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-      );
-      return;
-    }
+      setState(() {
+        _rememberMe = rememberMeGuardado;
+        _emailController.text = rememberMeGuardado ? emailGuardado : '';
+        _isLoadingSavedCredentials = false;
+      });
 
-    final currentUser = FirebaseAuth.instance.currentUser;
+      final hasStoredToken = await _hasStoredWordPressSession();
+      final hasWpSession = hasStoredToken
+          ? await ApiService()
+              .validateStoredAppSession()
+              .timeout(const Duration(seconds: 15), onTimeout: () {
+              debugPrint(
+                '⚠️ /me tardó demasiado al abrir login. Se entra con token local.',
+              );
+              return true;
+            })
+          : false;
 
-    // Si Firebase está logueado pero no hay sesión WooCommerce, se fuerza login limpio.
-    // Esto evita entrar como invitado y cargar productos sin precios reales.
-    if (currentUser != null) {
-      if (kDebugMode) {
-        debugPrint(
-          '[SESSION] Firebase activa sin sesión App API. '
-              'Se fuerza login limpio.',
+      if (!mounted) return;
+
+      if (hasWpSession) {
+        unawaited(NotificationService().syncCurrentTokenWithBackend());
+
+        if (kDebugMode) {
+          debugPrint(
+            '✅ Sesión WordPress/WooCommerce detectada. Entrando a la app.',
+          );
+        }
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+          (route) => false,
         );
+        return;
       }
 
-      // No borrar el token FCM aquí: todavía no es un logout del usuario,
-      // solo estamos corrigiendo una sesión Firebase sin sesión App API.
-      // El token se conservará y se registrará tras completar el login.
-      await FirebaseAuth.instance.signOut();
-      await ApiService().clearWordPressSession();
+      User? currentUser;
+      try {
+        currentUser = FirebaseAuth.instance.currentUser;
+      } catch (e) {
+        if (kDebugMode) debugPrint('⚠️ FirebaseAuth no disponible en login: $e');
+      }
+
+      // Si Firebase está logueado pero no hay sesión WooCommerce, se fuerza login limpio.
+      // Esto evita entrar como invitado y cargar productos sin precios reales.
+      if (currentUser != null) {
+        if (kDebugMode) {
+          debugPrint(
+            '⚠️ Firebase tenía sesión activa, pero no había sesión WordPress/WooCommerce. '
+                'Se fuerza login limpio.',
+          );
+        }
+
+        unawaited(NotificationService().clearDeviceRegistration());
+        try {
+          await FirebaseAuth.instance.signOut();
+        } catch (_) {}
+        await ApiService().clearWordPressSession();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Inicialización del login no crítica: $e');
+      }
+      if (mounted) {
+        setState(() {
+          _isLoadingSavedCredentials = false;
+          _isAutoLogin = false;
+        });
+      }
     }
   }
 
@@ -127,11 +153,10 @@ class _LoginPageState extends State<LoginPage> {
 
     if (kDebugMode) {
       debugPrint(
-        '[SESSION] WP guardada: '
-        'cookie=${cookie.isNotEmpty} | '
-        'nonce=${nonce.isNotEmpty} | '
-        'appToken=${appToken.isNotEmpty} | '
-        'cartToken=${cartToken.isNotEmpty} | END',
+        '🔐 Sesión WP guardada en login: '
+            'cookie=${cookie.isNotEmpty} '
+            'nonce=${nonce.isNotEmpty} '
+            'appToken=${appToken.isNotEmpty} cartToken=${cartToken.isNotEmpty}',
       );
     }
 
@@ -161,12 +186,16 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _abrirRegistro() async {
-    final url = Uri.parse(_registroUrl);
-    final abierto = await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!mounted) return;
 
-    if (!abierto) {
-      _showSnackBar('No se pudo abrir la página de registro.', isError: true);
-    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MundiCamWebViewPage(
+          title: 'Solicitud de registro',
+          initialUri: Uri.parse(_registroUrl),
+        ),
+      ),
+    );
   }
 
   String? _firstNonEmptyString(List<dynamic> values) {
@@ -331,8 +360,8 @@ class _LoginPageState extends State<LoginPage> {
 
     if (kDebugMode) {
       debugPrint(
-        '[SESSION] Respuesta login App API: '
-        'appToken=${appToken != null && appToken.isNotEmpty} | END',
+        '🔐 Datos sesión recibidos login MundiCam App API: '
+            'appToken=${appToken != null && appToken.isNotEmpty}',
       );
     }
 
@@ -379,12 +408,12 @@ class _LoginPageState extends State<LoginPage> {
         );
 
         if (kDebugMode) {
-          debugPrint('[LOGIN] HTTP=${response.statusCode} | END');
+          debugPrint('Status MundiCam App API login: ${response.statusCode}');
           if (response.statusCode >= 500) {
             final preview = response.body.length > 250
                 ? response.body.substring(0, 250)
                 : response.body;
-            debugPrint('[LOGIN] Respuesta servidor="$preview" | END');
+            debugPrint('Respuesta login servidor preview: $preview');
           }
         }
 
@@ -423,7 +452,7 @@ class _LoginPageState extends State<LoginPage> {
       } catch (e) {
         lastError = e;
         if (kDebugMode) {
-          debugPrint('[LOGIN] Error App API: $e | END');
+          debugPrint('Error MundiCam App API login: $e');
         }
       }
     }
@@ -433,6 +462,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<User?> _tryLoginFirebaseForAppSession({
+    required String email,
+    required String password,
     required Map<String, dynamic> wpResponse,
   }) async {
     final String? firebaseToken =
@@ -441,63 +472,120 @@ class _LoginPageState extends State<LoginPage> {
     try {
       if (firebaseToken != null && firebaseToken.isNotEmpty) {
         await FirebaseAuth.instance.signInWithCustomToken(firebaseToken);
-        if (kDebugMode) {
-          debugPrint('[FIREBASE] Sesión iniciada con custom token | END');
-        }
         return FirebaseAuth.instance.currentUser;
       }
 
-      // WordPress/App API es la fuente de verdad. No se intenta acceso anónimo:
-      // si el backend no entrega custom token, Firebase Auth se omite sin error.
+      // v1.7.6: no usar la contraseña WordPress contra Firebase.
+      // WordPress/App API es la fuente de verdad. Firebase queda como apoyo opcional.
       final current = FirebaseAuth.instance.currentUser;
-      if (kDebugMode) {
-        debugPrint(
-          '[FIREBASE] Custom token no disponible; sesión opcional '
-          'omitida | existing=${current != null} | END',
-        );
+      if (current != null) return current;
+
+      try {
+        final credential = await FirebaseAuth.instance.signInAnonymously();
+        if (kDebugMode) {
+          debugPrint(
+            '✅ Firebase anónimo activado como apoyo. uid=${credential.user?.uid}',
+          );
+        }
+        return credential.user;
+      } catch (anonError) {
+        if (kDebugMode) {
+          debugPrint(
+            '⚠️ Firebase anónimo no disponible. '
+            'No bloquea acceso porque WordPress ya validó sesión. Error: $anonError',
+          );
+        }
+        return null;
       }
-      return current;
     } catch (e) {
       if (kDebugMode) {
         debugPrint(
-          '[FIREBASE] Inicio opcional no disponible: $e | END',
+          '⚠️ Error no crítico iniciando Firebase. '
+          'La sesión WordPress seguirá siendo válida. Error: $e',
         );
       }
       return null;
     }
   }
 
-  Future<void> _syncFirebaseProfileInBackground({
-    required User user,
+  Future<void> _postLoginBackgroundSync({
     required String email,
+    required String password,
     required Map<String, dynamic> wpResponse,
   }) async {
     try {
-      final wpUser = wpResponse['user'];
-      final wpUserMap = wpUser is Map
-          ? Map<String, dynamic>.from(wpUser)
-          : <String, dynamic>{};
+      final User? user = await _tryLoginFirebaseForAppSession(
+        email: email,
+        password: password,
+        wpResponse: wpResponse,
+      ).timeout(const Duration(seconds: 12), onTimeout: () {
+        debugPrint('⚠️ Firebase tardó demasiado tras login. Se omite bloqueo.');
+        return null;
+      });
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(
-        {
-          'email': email,
-          'uid': user.uid,
-          'wordpress_id': wpUserMap['id'] ?? '',
-          'wordpress_roles': wpUserMap['roles'] ?? const <dynamic>[],
-          'lastLogin': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+      if (user != null) {
+        try {
+          final wpUser = wpResponse['user'];
+          final wpUserMap = wpUser is Map
+              ? Map<String, dynamic>.from(wpUser)
+              : <String, dynamic>{};
+          final wpId = wpUserMap['id']?.toString();
+          final expectedUid = wpId != null && wpId.isNotEmpty ? 'wp_$wpId' : '';
 
-      if (kDebugMode) {
-        debugPrint('[FIRESTORE] Perfil sincronizado en segundo plano | END');
+          if (expectedUid.isNotEmpty && kDebugMode) {
+            debugPrint(
+              '👤 Firebase UID actual=${user.uid} | esperado=$expectedUid',
+            );
+
+            if (user.uid != expectedUid) {
+              debugPrint(
+                '⚠️ UID Firebase no coincide con WordPress ID. No bloquea acceso.',
+              );
+            }
+          }
+
+          final userRef =
+              FirebaseFirestore.instance.collection('users').doc(user.uid);
+
+          final userDoc = await userRef.get().timeout(
+                const Duration(seconds: 10),
+              );
+
+          if (!userDoc.exists) {
+            await userRef.set({
+              'email': email,
+              'uid': user.uid,
+              'createdAt': FieldValue.serverTimestamp(),
+              'isBlocked': false,
+              'wordpress_id': wpUserMap['id'] ?? '',
+              'wordpress_roles': wpUserMap['roles'] ?? [],
+              'lastLogin': FieldValue.serverTimestamp(),
+            }).timeout(const Duration(seconds: 10));
+          } else {
+            await userRef.update({
+              'lastLogin': FieldValue.serverTimestamp(),
+              'email': email,
+              'wordpress_id': wpUserMap['id'] ?? '',
+              'wordpress_roles': wpUserMap['roles'] ?? [],
+            }).timeout(const Duration(seconds: 10));
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint(
+              '⚠️ Firestore no disponible en segundo plano. No bloquea acceso: $e',
+            );
+          }
+        }
       }
+
+      await NotificationService()
+          .syncCurrentTokenWithBackend()
+          .timeout(const Duration(seconds: 12), onTimeout: () {
+        debugPrint('⚠️ FCM tardó demasiado tras login. Se reintentará luego.');
+      });
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[FIRESTORE] Sincronización opcional omitida: $e | END');
+        debugPrint('⚠️ Sincronización post-login no crítica falló: $e');
       }
     }
   }
@@ -539,18 +627,21 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // 2. Firebase es apoyo, no la fuente de verdad del acceso.
-      // Si Firebase falla pero WordPress/MundiCam App API ha validado usuario
-      // y ha guardado app_token, no se bloquea el acceso.
-      final User? user = await _tryLoginFirebaseForAppSession(
-        wpResponse: wpResponse,
-      );
-
-      // 3. Verificar que después del login existe sesión WordPress/WooCommerce.
-      final hasWpSession = await _hasStoredWordPressSession();
+      // 2. Verificar contra /me que el token recién guardado es aceptado por PHP.
+      // En iOS Release no se bloquea la navegación por Firebase/Firestore/FCM:
+      // Apple revisa la app en condiciones reales y cualquier espera externa puede
+      // acabar en pantalla blanca después del login.
+      final hasWpSession = await ApiService()
+          .validateStoredAppSession()
+          .timeout(const Duration(seconds: 15), onTimeout: () {
+        debugPrint('⚠️ /me tardó demasiado tras login. Se conserva sesión recién guardada.');
+        return true;
+      });
 
       if (!hasWpSession) {
-        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signOut();
+        } catch (_) {}
         await ApiService().clearWordPressSession();
 
         throw Exception(
@@ -558,28 +649,13 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
 
-      // 4. La sesión App API ya está guardada. Registrar ahora el token FCM
-      // del dispositivo y reintentar brevemente si el backend aún está cargando.
-      // Este paso no bloquea el acceso si Firebase o el endpoint fallan.
-      final fcmRegistered = await NotificationService().syncAfterLogin();
-      if (kDebugMode) {
-        debugPrint(
-          '[FCM] Sincronización posterior al login: '
-          'registered=$fcmRegistered | END',
-        );
-      }
-
-      // 5. Firestore es apoyo opcional y no debe bloquear la navegación.
-      // El backend WordPress ya valida usuarios bloqueados durante /login.
-      if (user != null) {
-        unawaited(
-          _syncFirebaseProfileInBackground(
-            user: user,
-            email: email,
-            wpResponse: wpResponse,
-          ),
-        );
-      }
+      // Firebase, Firestore y FCM se sincronizan en segundo plano para no dejar
+      // al usuario ni a Apple Review esperando en una pantalla de carga.
+      unawaited(_postLoginBackgroundSync(
+        email: email,
+        password: password,
+        wpResponse: wpResponse,
+      ));
 
       // 8. Guardar email si Recuérdame. Nunca guardar contraseña.
       final prefs = await SharedPreferences.getInstance();
@@ -595,21 +671,26 @@ class _LoginPageState extends State<LoginPage> {
       // 9. Entrar a la app.
       if (!mounted) return;
 
-      Navigator.pushReplacement(
-        context,
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const MainScreen()),
+            (route) => false,
       );
     } on FirebaseAuthException catch (e) {
       // No debería llegar aquí porque Firebase se maneja como apoyo, pero si llega
       // no borramos una sesión WordPress válida por un fallo de Firebase.
-      final hasWpSession = await _hasStoredWordPressSession();
+      final hasStoredToken = await _hasStoredWordPressSession();
+      final hasWpSession = hasStoredToken
+          ? await ApiService()
+              .validateStoredAppSession()
+              .timeout(const Duration(seconds: 15), onTimeout: () => true)
+          : false;
 
       if (hasWpSession) {
-        await NotificationService().syncAfterLogin();
+        unawaited(NotificationService().syncCurrentTokenWithBackend());
         if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const MainScreen()),
+          (route) => false,
         );
         return;
       }
@@ -656,7 +737,7 @@ class _LoginPageState extends State<LoginPage> {
         lower.contains('exception:');
 
     if (esTecnico) {
-      debugPrint('[LOGIN] Mensaje técnico ocultado="$limpio" | END');
+      debugPrint('Login mensaje interno ocultado al cliente: $limpio');
       return 'No se pudo iniciar sesión. Revisa tus datos o inténtalo de nuevo en unos minutos.';
     }
 
@@ -705,8 +786,6 @@ class _LoginPageState extends State<LoginPage> {
             child: Image.asset(
               'assets/gif/fondo2.gif',
               fit: BoxFit.cover,
-              gaplessPlayback: true,
-              filterQuality: FilterQuality.low,
             ),
           ),
           Positioned.fill(

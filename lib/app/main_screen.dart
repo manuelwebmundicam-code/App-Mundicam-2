@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -34,8 +33,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _lastIndexBeforeCart = 0;
   bool _loadBadges = false;
   bool _showingOrderNotificationDialog = false;
-  final ListQueue<MundiCamOrderNotification> _notificationDialogQueue =
-      ListQueue<MundiCamOrderNotification>();
   StreamSubscription<MundiCamOrderNotification>? _orderNotificationSub;
 
   final Set<String> _confirmedQuoteIds = <String>{};
@@ -80,18 +77,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-
-    // Al volver manualmente desde una notificación del sistema, refrescamos los
-    // pedidos aunque el usuario no haya pulsado directamente sobre el aviso.
-    ref.invalidate(ordersProvider);
-    unawaited(() async {
-      await NotificationService().syncCurrentTokenWithBackend();
-    }());
-  }
-
   void _listenOrderNotifications() {
     final pending = NotificationService().takePendingOrderNotifications();
 
@@ -110,11 +95,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   Future<void> _handleOrderNotification(
-    MundiCamOrderNotification notification,
-  ) async {
+      MundiCamOrderNotification notification,
+      ) async {
     if (!mounted) return;
 
-    final isGeneralNotification = notification.isGeneralNotification;
+    final bool isGeneralNotification = notification.isGeneralNotification;
 
     if (!isGeneralNotification) {
       ref.invalidate(ordersProvider);
@@ -128,117 +113,100 @@ class _MainScreenState extends ConsumerState<MainScreen>
       return;
     }
 
-    // En primer plano el servicio ya muestra también la notificación superior.
-    // Aquí se mantiene el popup interno. Si llegan varios mensajes seguidos no se
-    // descartan: se encolan y se presentan uno detrás de otro.
+    // El aviso ya se ha mostrado como notificación del sistema. En primer plano
+    // solo actualizamos pedidos y badges; no abrimos pantallas sin una pulsación.
     if (!notification.showPopup) return;
 
-    _notificationDialogQueue.addLast(notification);
-    await _drainNotificationDialogQueue();
-  }
-
-  Future<void> _drainNotificationDialogQueue() async {
-    if (_showingOrderNotificationDialog || !mounted) return;
-
+    if (_showingOrderNotificationDialog) return;
     _showingOrderNotificationDialog = true;
+
     try {
-      while (mounted && _notificationDialogQueue.isNotEmpty) {
-        final notification = _notificationDialogQueue.removeFirst();
-        await _showNotificationDialog(notification);
-      }
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+            contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
+            actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            title: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _NotificationLogoIcon(
+                  isGeneralNotification: isGeneralNotification,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    notification.title,
+                    style: const TextStyle(
+                      fontFamily: 'Oswald',
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      height: 1.05,
+                      color: Color(0xFF111827),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              notification.body,
+              style: const TextStyle(
+                fontSize: 13.5,
+                height: 1.35,
+                color: Color(0xFF374151),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            actions: isGeneralNotification
+                ? [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text('Entendido'),
+              ),
+            ]
+                : [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cerrar'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _openOrdersFromNotification();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: const Icon(Icons.visibility_outlined, size: 17),
+                label: const Text('Ver pedidos'),
+              ),
+            ],
+          );
+        },
+      );
     } finally {
       _showingOrderNotificationDialog = false;
     }
-  }
-
-  Future<void> _showNotificationDialog(
-    MundiCamOrderNotification notification,
-  ) async {
-    if (!mounted) return;
-
-    final isGeneralNotification = notification.isGeneralNotification;
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
-          contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
-          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          title: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _NotificationLogoIcon(
-                isGeneralNotification: isGeneralNotification,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  notification.title,
-                  style: const TextStyle(
-                    fontFamily: 'Oswald',
-                    fontWeight: FontWeight.w900,
-                    fontSize: 18,
-                    height: 1.05,
-                    color: Color(0xFF111827),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: Text(
-            notification.body,
-            style: const TextStyle(
-              fontSize: 13.5,
-              height: 1.35,
-              color: Color(0xFF374151),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          actions: isGeneralNotification
-              ? [
-                  ElevatedButton(
-                    onPressed: () => Navigator.pop(dialogContext),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: const Text('Entendido'),
-                  ),
-                ]
-              : [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogContext),
-                    child: const Text('Cerrar'),
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(dialogContext);
-                      _openOrdersFromNotification();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    icon: const Icon(Icons.visibility_outlined, size: 17),
-                    label: const Text('Ver pedidos'),
-                  ),
-                ],
-        );
-      },
-    );
   }
 
   void _openOrdersFromNotification() {
