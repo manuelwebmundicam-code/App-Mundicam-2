@@ -33,6 +33,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _lastIndexBeforeCart = 0;
   bool _loadBadges = false;
   bool _showingOrderNotificationDialog = false;
+  bool _mainFrameReady = false;
   StreamSubscription<MundiCamOrderNotification>? _orderNotificationSub;
 
   final Set<String> _confirmedQuoteIds = <String>{};
@@ -58,8 +59,16 @@ class _MainScreenState extends ConsumerState<MainScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _loadConfirmedQuoteIdsFromPrefs();
+    debugPrint('🧭 iOS Review: MainScreen iniciado tras login');
+
+    unawaited(_loadConfirmedQuoteIdsFromPrefs());
     _listenOrderNotifications();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      debugPrint('✅ iOS Review: MainScreen primer frame visible');
+      setState(() => _mainFrameReady = true);
+    });
 
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
@@ -216,20 +225,26 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   Future<void> _loadConfirmedQuoteIdsFromPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedIds = prefs.getStringList(_confirmedQuoteIdsKey) ?? <String>[];
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedIds = prefs.getStringList(_confirmedQuoteIdsKey) ?? <String>[];
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _confirmedQuoteIds
-        ..clear()
-        ..addAll(savedIds);
-      _loadBadges = true;
-    });
+      setState(() {
+        _confirmedQuoteIds
+          ..clear()
+          ..addAll(savedIds);
+        _loadBadges = true;
+      });
 
-    ref.invalidate(quoteBadgeProvider);
-    ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
+      ref.invalidate(quotesProvider);
+    } catch (e) {
+      debugPrint('⚠️ iOS Review: no se pudieron cargar presupuestos confirmados: $e');
+      if (!mounted) return;
+      setState(() => _loadBadges = true);
+    }
   }
 
   Future<void> _registerConfirmedQuotes(Set<String> quoteIds) async {
@@ -381,11 +396,63 @@ class _MainScreenState extends ConsumerState<MainScreen>
     return shouldExit ?? false;
   }
 
+
+  int _safeWatchBadge(ProviderListenable<int> provider, String name) {
+    try {
+      return ref.watch(provider);
+    } catch (e) {
+      debugPrint('⚠️ iOS Review: badge $name no disponible, se muestra 0: $e');
+      return 0;
+    }
+  }
+
+  Widget _buildMainStartupFallback() {
+    return const ColoredBox(
+      color: Color(0xFFF8F9FB),
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: AppColors.primary),
+                SizedBox(height: 16),
+                Text(
+                  'Cargando MundiCam...',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Oswald',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Preparando la pantalla principal',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final int cartItemCount = _loadBadges ? ref.watch(cartBadgeProvider) : 0;
-    final int orderCount = _loadBadges ? ref.watch(newOrderBadgeProvider) : 0;
-    final int rawQuoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
+    final int cartItemCount =
+        _loadBadges ? _safeWatchBadge(cartBadgeProvider, 'carrito') : 0;
+    final int orderCount =
+        _loadBadges ? _safeWatchBadge(newOrderBadgeProvider, 'pedidos') : 0;
+    final int rawQuoteCount =
+        _loadBadges ? _safeWatchBadge(quoteBadgeProvider, 'presupuestos') : 0;
     final int quoteCount =
     _loadBadges ? _visibleQuoteBadgeCount(rawQuoteCount) : 0;
 
@@ -406,9 +473,14 @@ class _MainScreenState extends ConsumerState<MainScreen>
         backgroundColor: const Color(0xFFF8F9FB),
         extendBody: false,
         resizeToAvoidBottomInset: false,
-        body: IndexedStack(
-          index: _selectedIndex,
-          children: [
+        body: !_mainFrameReady
+            ? _buildMainStartupFallback()
+            : SafeArea(
+                top: false,
+                bottom: false,
+                child: IndexedStack(
+                  index: _selectedIndex,
+                  children: [
             _buildTabNavigator(
               index: 0,
               child: HomePage(
@@ -446,8 +518,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
                 onGoBack: _goBackFromCart,
               ),
             ),
-          ],
-        ),
+                  ],
+                ),
+              ),
         bottomNavigationBar: SafeArea(
           top: false,
           minimum: EdgeInsets.zero,
