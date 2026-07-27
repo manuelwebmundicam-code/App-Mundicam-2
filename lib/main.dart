@@ -31,16 +31,9 @@ Future<void> ensureFirebaseReady() async {
       return;
     }
 
-    final firebaseOptions = DefaultFirebaseOptions.currentPlatform;
-
-    if (firebaseOptions != null) {
-      await Firebase.initializeApp(options: firebaseOptions);
-    } else {
-      // En iOS, cuando todavía no se ha generado firebase_options.dart con
-      // FlutterFire CLI, Firebase puede inicializarse desde el archivo nativo:
-      // ios/Runner/GoogleService-Info.plist.
-      await Firebase.initializeApp();
-    }
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
     debugPrint('✅ Firebase inicializado correctamente');
   } on FirebaseException catch (e) {
