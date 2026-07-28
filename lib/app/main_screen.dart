@@ -33,7 +33,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _lastIndexBeforeCart = 0;
   bool _loadBadges = false;
   bool _showingOrderNotificationDialog = false;
-  bool _mainFrameReady = false;
+  bool _didLogFirstBuild = false;
   StreamSubscription<MundiCamOrderNotification>? _orderNotificationSub;
 
   final Set<String> _confirmedQuoteIds = <String>{};
@@ -57,18 +57,22 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   void initState() {
     super.initState();
+    debugPrint('🍎 MAINSCREEN_INIT');
     WidgetsBinding.instance.addObserver(this);
 
-    debugPrint('🧭 iOS Review: MainScreen iniciado tras login');
+    unawaited(
+      _loadConfirmedQuoteIdsFromPrefs().catchError((Object error, StackTrace stack) {
+        debugPrint('⚠️ No se pudieron cargar badges iniciales: $error');
+        debugPrintStack(stackTrace: stack);
+      }),
+    );
 
-    unawaited(_loadConfirmedQuoteIdsFromPrefs());
-    _listenOrderNotifications();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      debugPrint('✅ iOS Review: MainScreen primer frame visible');
-      setState(() => _mainFrameReady = true);
-    });
+    try {
+      _listenOrderNotifications();
+    } catch (error, stack) {
+      debugPrint('⚠️ Listener de notificaciones no crítico: $error');
+      debugPrintStack(stackTrace: stack);
+    }
 
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
@@ -225,26 +229,20 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   Future<void> _loadConfirmedQuoteIdsFromPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedIds = prefs.getStringList(_confirmedQuoteIdsKey) ?? <String>[];
+    final prefs = await SharedPreferences.getInstance();
+    final savedIds = prefs.getStringList(_confirmedQuoteIdsKey) ?? <String>[];
 
-      if (!mounted) return;
+    if (!mounted) return;
 
-      setState(() {
-        _confirmedQuoteIds
-          ..clear()
-          ..addAll(savedIds);
-        _loadBadges = true;
-      });
+    setState(() {
+      _confirmedQuoteIds
+        ..clear()
+        ..addAll(savedIds);
+      _loadBadges = true;
+    });
 
-      ref.invalidate(quoteBadgeProvider);
-      ref.invalidate(quotesProvider);
-    } catch (e) {
-      debugPrint('⚠️ iOS Review: no se pudieron cargar presupuestos confirmados: $e');
-      if (!mounted) return;
-      setState(() => _loadBadges = true);
-    }
+    ref.invalidate(quoteBadgeProvider);
+    ref.invalidate(quotesProvider);
   }
 
   Future<void> _registerConfirmedQuotes(Set<String> quoteIds) async {
@@ -396,63 +394,19 @@ class _MainScreenState extends ConsumerState<MainScreen>
     return shouldExit ?? false;
   }
 
-
-  int _safeWatchBadge(ProviderListenable<int> provider, String name) {
-    try {
-      return ref.watch(provider);
-    } catch (e) {
-      debugPrint('⚠️ iOS Review: badge $name no disponible, se muestra 0: $e');
-      return 0;
-    }
-  }
-
-  Widget _buildMainStartupFallback() {
-    return const ColoredBox(
-      color: Color(0xFFF8F9FB),
-      child: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: AppColors.primary),
-                SizedBox(height: 16),
-                Text(
-                  'Cargando MundiCam...',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontFamily: 'Oswald',
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Preparando la pantalla principal',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final int cartItemCount =
-        _loadBadges ? _safeWatchBadge(cartBadgeProvider, 'carrito') : 0;
-    final int orderCount =
-        _loadBadges ? _safeWatchBadge(newOrderBadgeProvider, 'pedidos') : 0;
-    final int rawQuoteCount =
-        _loadBadges ? _safeWatchBadge(quoteBadgeProvider, 'presupuestos') : 0;
+    if (!_didLogFirstBuild) {
+      _didLogFirstBuild = true;
+      debugPrint('🍎 MAINSCREEN_BUILD');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        debugPrint('🍎 MAINSCREEN_FIRST_FRAME');
+      });
+    }
+
+    final int cartItemCount = _loadBadges ? ref.watch(cartBadgeProvider) : 0;
+    final int orderCount = _loadBadges ? ref.watch(newOrderBadgeProvider) : 0;
+    final int rawQuoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
     final int quoteCount =
     _loadBadges ? _visibleQuoteBadgeCount(rawQuoteCount) : 0;
 
@@ -473,14 +427,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
         backgroundColor: const Color(0xFFF8F9FB),
         extendBody: false,
         resizeToAvoidBottomInset: false,
-        body: !_mainFrameReady
-            ? _buildMainStartupFallback()
-            : SafeArea(
-                top: false,
-                bottom: false,
-                child: IndexedStack(
-                  index: _selectedIndex,
-                  children: [
+        body: IndexedStack(
+          index: _selectedIndex,
+          children: [
             _buildTabNavigator(
               index: 0,
               child: HomePage(
@@ -518,9 +467,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
                 onGoBack: _goBackFromCart,
               ),
             ),
-                  ],
-                ),
-              ),
+          ],
+        ),
         bottomNavigationBar: SafeArea(
           top: false,
           minimum: EdgeInsets.zero,
@@ -592,14 +540,24 @@ class _MainScreenState extends ConsumerState<MainScreen>
       return const SizedBox.shrink();
     }
 
+    Route<void> buildRootRoute(RouteSettings settings) {
+      return MaterialPageRoute<void>(
+        builder: (context) => KeyedSubtree(
+          key: ValueKey<String>('tab_root_$index'),
+          child: child,
+        ),
+        settings: settings,
+      );
+    }
+
     return Navigator(
       key: _navigatorKeys[index],
-      onGenerateRoute: (routeSettings) {
-        return MaterialPageRoute(
-          builder: (context) => child,
-          settings: routeSettings,
-        );
-      },
+      initialRoute: '/tab/$index',
+      onGenerateInitialRoutes: (navigator, initialRoute) => <Route<void>>[
+        buildRootRoute(RouteSettings(name: initialRoute)),
+      ],
+      onGenerateRoute: buildRootRoute,
+      onUnknownRoute: buildRootRoute,
     );
   }
 }

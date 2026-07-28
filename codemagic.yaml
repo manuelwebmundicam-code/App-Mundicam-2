@@ -1,0 +1,75 @@
+workflows:
+  ios-diagnostic:
+    name: MundiCam iOS diagnostic
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+
+    environment:
+      flutter: 3.35.5
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Comprobar entorno
+        script: |
+          set -euxo pipefail
+          mkdir -p build-reports
+          flutter --version 2>&1 | tee build-reports/flutter-version.log
+          dart --version 2>&1 | tee build-reports/dart-version.log
+          xcodebuild -version 2>&1 | tee build-reports/xcode-version.log
+          ruby --version 2>&1 | tee build-reports/ruby-version.log
+          pod --version 2>&1 | tee build-reports/pod-version.log
+          git status --short 2>&1 | tee build-reports/git-status.log
+
+      - name: Validar archivos iOS
+        script: |
+          set -euxo pipefail
+          mkdir -p build-reports
+
+          test -f ios/Runner/GoogleService-Info.plist
+          test -f ios/Runner/Info.plist
+          test -f ios/Runner/Runner.entitlements
+          test -f ios/Runner/PrivacyInfo.xcprivacy
+
+          plutil -lint ios/Runner/GoogleService-Info.plist             2>&1 | tee build-reports/google-service-plist.log
+          plutil -lint ios/Runner/Info.plist             2>&1 | tee build-reports/info-plist.log
+          plutil -lint ios/Runner/Runner.entitlements             2>&1 | tee build-reports/runner-entitlements.log
+          plutil -lint ios/Runner/PrivacyInfo.xcprivacy             2>&1 | tee build-reports/privacy-info.log
+
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy             -c "Print :BUNDLE_ID"             ios/Runner/GoogleService-Info.plist)
+
+          echo "Firebase BUNDLE_ID=$BUNDLE_ID"             | tee build-reports/firebase-bundle-id.log
+
+          test "$BUNDLE_ID" = "com.mundicam.app"
+
+      - name: Obtener dependencias Flutter
+        script: |
+          set -euxo pipefail
+          mkdir -p build-reports
+          flutter clean 2>&1 | tee build-reports/flutter-clean.log
+          flutter pub get 2>&1 | tee build-reports/flutter-pub-get.log
+
+      - name: Analizar código Flutter
+        script: |
+          set -o pipefail
+          mkdir -p build-reports
+          flutter analyze --no-fatal-infos --no-fatal-warnings             2>&1 | tee build-reports/flutter-analyze.log
+
+      - name: Instalar CocoaPods
+        script: |
+          set -o pipefail
+          mkdir -p build-reports
+          cd ios
+          pod install --repo-update --verbose             2>&1 | tee ../build-reports/pod-install.log
+          cd ..
+
+      - name: Compilar iOS Release sin firma
+        script: |
+          set -o pipefail
+          mkdir -p build-reports
+          flutter build ios --release --no-codesign -v             2>&1 | tee build-reports/flutter-ios-release.log
+
+    artifacts:
+      - build-reports/**
+      - build/ios/iphoneos/Runner.app
+      - /tmp/xcodebuild_logs/*.log

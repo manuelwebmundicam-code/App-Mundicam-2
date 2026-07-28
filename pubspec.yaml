@@ -2,7 +2,7 @@ name: mundicam
 description: "App oficial de Mundicam"
 publish_to: "none"
 
-version: 1.0.4+6
+version: 1.0.4+10
 
 environment:
   sdk: ">=3.9.2 <4.0.0"
@@ -55,6 +55,9 @@ flutter:
     - assets/brands/
     - assets/images/
     - assets/categorias/
+    - assets/banners/
+    - assets/noticias/
+    - assets/productos/
 
   fonts:
     - family: Oswald

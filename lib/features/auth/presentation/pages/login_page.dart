@@ -81,26 +81,24 @@ class _LoginPageState extends State<LoginPage> {
               .validateStoredAppSession()
               .timeout(const Duration(seconds: 15), onTimeout: () {
               debugPrint(
-                '⚠️ /me tardó demasiado al abrir login. Se muestra login para evitar pantalla blanca en iOS Review.',
+                '⚠️ /me tardó demasiado al abrir login. Se entra con token local.',
               );
-              return false;
+              return true;
             })
           : false;
 
       if (!mounted) return;
 
       if (hasWpSession) {
-        unawaited(NotificationService().syncCurrentTokenWithBackend());
-
         if (kDebugMode) {
           debugPrint(
             '✅ Sesión WordPress/WooCommerce detectada. Entrando a la app.',
           );
         }
 
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-          (route) => false,
+        _openMainScreen(
+          afterFirstFrame: () =>
+              NotificationService().syncCurrentTokenWithBackend(),
         );
         return;
       }
@@ -405,7 +403,7 @@ class _LoginPageState extends State<LoginPage> {
             'login': email,
             'password': password,
           }),
-        ).timeout(const Duration(seconds: 22));
+        );
 
         if (kDebugMode) {
           debugPrint('Status MundiCam App API login: ${response.statusCode}');
@@ -590,6 +588,45 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  void _openMainScreen({Future<void> Function()? afterFirstFrame}) {
+    if (!mounted) return;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    debugPrint('🍎 LOGIN_OK');
+    debugPrint('🍎 OPENING_MAINSCREEN');
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    navigator.pushAndRemoveUntil<void>(
+      PageRouteBuilder<void>(
+        settings: const RouteSettings(name: '/main'),
+        opaque: true,
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (context, animation, secondaryAnimation) {
+          debugPrint('🍎 MAINSCREEN_ROUTE_CREATED');
+          return const MainScreen();
+        },
+      ),
+      (route) => false,
+    );
+
+    if (afterFirstFrame != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(
+          Future<void>.delayed(const Duration(milliseconds: 450), () async {
+            try {
+              await afterFirstFrame();
+            } catch (e, stack) {
+              debugPrint('⚠️ Tarea post-login no crítica: $e');
+              debugPrintStack(stackTrace: stack);
+            }
+          }),
+        );
+      });
+    }
+  }
+
   Future<void> _handleLogin({bool fromAutoLogin = false}) async {
     if (!fromAutoLogin) {
       if (!_formKey.currentState!.validate()) return;
@@ -607,8 +644,6 @@ class _LoginPageState extends State<LoginPage> {
 
       // Limpiamos restos antiguos antes de iniciar sesión nueva.
       await ApiService().clearWordPressSession();
-
-      debugPrint('🔐 iOS Review login: enviando credenciales a MundiCam App API');
 
       // 1. Autenticar contra WordPress/WooCommerce.
       final wpResponse = await _authenticateWithWordPress(
@@ -628,8 +663,6 @@ class _LoginPageState extends State<LoginPage> {
         );
         return;
       }
-
-      debugPrint('✅ iOS Review login: login PHP correcto, validando /me');
 
       // 2. Verificar contra /me que el token recién guardado es aceptado por PHP.
       // En iOS Release no se bloquea la navegación por Firebase/Firestore/FCM:
@@ -653,16 +686,6 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
 
-      debugPrint('✅ iOS Review login: sesión validada, abriendo pantalla principal');
-
-      // Firebase, Firestore y FCM se sincronizan en segundo plano para no dejar
-      // al usuario ni a Apple Review esperando en una pantalla de carga.
-      unawaited(_postLoginBackgroundSync(
-        email: email,
-        password: password,
-        wpResponse: wpResponse,
-      ));
-
       // 8. Guardar email si Recuérdame. Nunca guardar contraseña.
       final prefs = await SharedPreferences.getInstance();
 
@@ -677,9 +700,12 @@ class _LoginPageState extends State<LoginPage> {
       // 9. Entrar a la app.
       if (!mounted) return;
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-            (route) => false,
+      _openMainScreen(
+        afterFirstFrame: () => _postLoginBackgroundSync(
+          email: email,
+          password: password,
+          wpResponse: wpResponse,
+        ),
       );
     } on FirebaseAuthException catch (e) {
       // No debería llegar aquí porque Firebase se maneja como apoyo, pero si llega
@@ -692,11 +718,10 @@ class _LoginPageState extends State<LoginPage> {
           : false;
 
       if (hasWpSession) {
-        unawaited(NotificationService().syncCurrentTokenWithBackend());
         if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-          (route) => false,
+        _openMainScreen(
+          afterFirstFrame: () =>
+              NotificationService().syncCurrentTokenWithBackend(),
         );
         return;
       }
@@ -786,17 +811,12 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     return Scaffold(
-      body: SafeArea(
-        child: Stack(
+      body: Stack(
         children: [
           Positioned.fill(
             child: Image.asset(
               'assets/gif/fondo2.gif',
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                debugPrint('⚠️ No se pudo cargar fondo login iOS Release: $error');
-                return Container(color: AppColors.primary);
-              },
             ),
           ),
           Positioned.fill(
@@ -829,18 +849,7 @@ class _LoginPageState extends State<LoginPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Image.asset(
-                              'assets/logo.png',
-                              height: 60,
-                              errorBuilder: (context, error, stackTrace) {
-                                debugPrint('⚠️ No se pudo cargar logo login iOS Release: $error');
-                                return const Icon(
-                                  Icons.security_rounded,
-                                  color: AppColors.primary,
-                                  size: 46,
-                                );
-                              },
-                            ),
+                            Image.asset('assets/logo.png', height: 60),
                             const SizedBox(height: 16),
                             Text(
                               'INICIO DE SESIÓN',
@@ -1018,7 +1027,6 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
         ],
-        ),
       ),
     );
   }

@@ -30,6 +30,7 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   bool _showSecondaryContent = false;
   bool _showChatBox = false;
+  bool _didLogFirstBuild = false;
 
   static const Color _pageBg = Colors.white;
   static const Color _footerBg = Color(0xFFEAF0F6);
@@ -40,6 +41,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
+    debugPrint('🍎 HOMEPAGE_INIT');
 
     Future.delayed(const Duration(milliseconds: 250), () {
       if (!mounted) return;
@@ -69,6 +71,14 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_didLogFirstBuild) {
+      _didLogFirstBuild = true;
+      debugPrint('🍎 HOMEPAGE_BUILD');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        debugPrint('🍎 HOMEPAGE_FIRST_FRAME');
+      });
+    }
+
     return Scaffold(
       backgroundColor: _pageBg,
       body: SafeArea(
@@ -93,7 +103,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                       const SizedBox(height: 22),
                       _buildSectionTitle('CATEGORÍAS'),
                       const SizedBox(height: 12),
-                      const CategoryGrid(),
+                      CategoryGrid(
+                        onGoCart: widget.onGoCart,
+                        onGoQuotes: widget.onGoQuotes,
+                      ),
                       if (_showSecondaryContent) ...[
                         const SizedBox(height: 14),
                         const BrandsBanner(),

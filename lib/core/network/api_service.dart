@@ -840,7 +840,8 @@ class ApiService {
         final ok = response.statusCode != null &&
             response.statusCode! >= 200 &&
             response.statusCode! < 300 &&
-            data['success'] != false;
+            data['success'] == true &&
+            data['registered'] != false;
 
         if (ok) {
           if (kDebugMode) debugPrint('✅ FCM registrado en $endpoint');

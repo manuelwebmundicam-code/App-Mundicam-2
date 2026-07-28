@@ -397,18 +397,28 @@ class NotificationService {
 
   bool _initialized = false;
   bool _localNotificationsInitialized = false;
+  Future<void>? _initializationFuture;
 
   Stream<MundiCamOrderNotification> get orderNotifications =>
       _orderController.stream;
 
-  Future<void> initialize() async {
+  Future<void> initialize() {
     if (_initialized) {
-      await syncCurrentTokenWithBackend();
-      return;
+      return syncCurrentTokenWithBackend();
     }
 
-    _initialized = true;
+    final running = _initializationFuture;
+    if (running != null) return running;
 
+    final future = _initializeInternal();
+    _initializationFuture = future;
+
+    return future.whenComplete(() {
+      _initializationFuture = null;
+    });
+  }
+
+  Future<void> _initializeInternal() async {
     await _initializeLocalNotifications();
 
     final settings = await _messaging.requestPermission(
@@ -425,17 +435,14 @@ class NotificationService {
       debugPrint('🔔 Permiso notificaciones: ${settings.authorizationStatus}');
     }
 
-    // FCM no muestra avisos en primer plano en Android. En iOS se desactiva
-    // la presentación automática para evitar duplicados, porque el aviso visible
-    // se crea con flutter_local_notifications en ambas plataformas.
     await _messaging.setForegroundNotificationPresentationOptions(
       alert: false,
       badge: false,
       sound: false,
     );
 
-    await syncCurrentTokenWithBackend();
-
+    // Registrar listeners antes de pedir el token evita perder un refresco APNs/FCM
+    // durante los primeros segundos de arranque en iOS.
     FirebaseMessaging.onMessage.listen((message) {
       unawaited(_handleForegroundRemoteMessage(message));
     });
@@ -444,15 +451,18 @@ class NotificationService {
       _handleRemoteMessageOpenedByUser(message);
     });
 
+    _messaging.onTokenRefresh.listen((token) async {
+      final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
+      await _saveToken(token, apnsToken: apnsToken);
+    });
+
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
       _handleRemoteMessageOpenedByUser(initialMessage);
     }
 
-    _messaging.onTokenRefresh.listen((token) async {
-      final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
-      await _saveToken(token, apnsToken: apnsToken);
-    });
+    await syncCurrentTokenWithBackend();
+    _initialized = true;
   }
 
   static Future<void> handleBackgroundRemoteMessage(
