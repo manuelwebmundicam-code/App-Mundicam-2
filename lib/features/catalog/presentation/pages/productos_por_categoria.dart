@@ -187,10 +187,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     final initialSearch = widget.initialSearch?.trim() ?? '';
     final hasInitialSearch = initialSearch.isNotEmpty;
     final shouldClearFiltersFromOtherCategory = !preserveFilters &&
-        previousCategoryId != null &&
-        previousCategoryId != widget.categoryId &&
         currentFilters.hasActiveFilters &&
-        !hasInitialSearch;
+        !hasInitialSearch &&
+        (previousCategoryId == null || previousCategoryId != widget.categoryId);
 
     _searchController.text = hasInitialSearch ? initialSearch : currentFilters.search;
 
@@ -212,6 +211,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       } else if (shouldClearFiltersFromOtherCategory) {
         _searchController.clear();
         ref.read(productFilterProvider.notifier).reset();
+        _reloadCurrentCategory(scrollTop: true);
       }
 
       _prewarmCategorySearchCache();
@@ -2638,49 +2638,96 @@ class _ActiveFiltersBar extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF7F7),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFF0D4D4)),
+        border: Border.all(color: const Color(0xFFE1E5EC)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.025),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.filter_alt_outlined,
-            size: 18,
-            color: AppColors.primary,
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.filter_alt_outlined,
+              size: 17,
+              color: AppColors.primary,
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              chips.join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w800,
-              ),
+            child: Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: chips
+                  .where((chip) => chip.trim().isNotEmpty)
+                  .map(_activeChip)
+                  .toList(),
             ),
           ),
           const SizedBox(width: 8),
           InkWell(
             borderRadius: BorderRadius.circular(999),
             onTap: onClearAll,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Text(
-                'Quitar',
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0xFFD9DEE7)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
+                  SizedBox(width: 4),
+                  Text(
+                    'Limpiar',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _activeChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7F7),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFF0D4D4)),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 11.5,
+          color: AppColors.primary,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -2954,18 +3001,26 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   int get _cantidadPresupuestoSegura {
-    if (!widget.p.canRequestQuote) return 0;
+    final selectedQty = cantidad < 1 ? 1 : cantidad;
+    final internalQty = widget.p.generalStockQuantity + widget.p.murciaStockQuantity;
 
-    final maxQty = widget.p.hasMundicamInternalStock
-        ? widget.p.generalStockQuantity + widget.p.murciaStockQuantity
-        : (widget.p.stockQuantity > 0 ? widget.p.stockQuantity : 999);
+    // El botón de presupuesto no debe fallar solo porque el stock interno
+    // General/Murcia venga a 0 si el producto viene marcado como presupuestable.
+    if (widget.p.maxPurchaseQty > 0) {
+      return selectedQty.clamp(1, widget.p.maxPurchaseQty).toInt();
+    }
+    if (internalQty > 0) {
+      return selectedQty.clamp(1, internalQty).toInt();
+    }
+    if (widget.p.stockQuantity > 0) {
+      return selectedQty.clamp(1, widget.p.stockQuantity).toInt();
+    }
 
-    if (maxQty <= 0) return 0;
-    return cantidad.clamp(1, maxQty).toInt();
+    return selectedQty;
   }
   bool get _puedeComprar => widget.p.canAddToCart && _cantidadSegura > 0;
   bool get _puedeAnadirPresupuesto => widget.p.canRequestQuote && !_isAddingToQuote;
-  bool get _puedeCambiarCantidad => widget.p.canAddToCart;
+  bool get _puedeCambiarCantidad => widget.p.canAddToCart || widget.p.canRequestQuote;
 
   void _goToQuotesKeepingTabs() {
     if (widget.onGoQuotes != null) {
@@ -3181,13 +3236,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     size: 17,
                   ),
                   label: Text(
-                    _bajoConsulta
-                        ? 'NO PRESUPUESTAR'
-                        : !_tieneStock
-                        ? 'NO PRESUPUESTAR'
-                        : _isAddingToQuote
+                    _isAddingToQuote
                         ? 'AÑADIENDO...'
-                        : 'AÑADIR AL PRESUPUESTO',
+                        : _puedeAnadirPresupuesto
+                        ? 'AÑADIR AL PRESUPUESTO'
+                        : 'NO PRESUPUESTAR',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -3351,11 +3404,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            product.isUnderConsultation
-                ? '"${product.name}" está bajo consulta y no puede añadirse al presupuesto.'
-                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
-          ),
+          content: Text('No se puede añadir "${product.name}" al presupuesto.'),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
@@ -3364,8 +3413,8 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       return;
     }
 
-    final qty = _cantidadPresupuestoSegura;
-    if (qty <= 0) return;
+    final calculatedQty = _cantidadPresupuestoSegura;
+    final qty = calculatedQty > 0 ? calculatedQty : 1;
 
     final precio = _precioDouble(product);
 

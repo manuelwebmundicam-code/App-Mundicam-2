@@ -329,7 +329,7 @@ class CategoryCard extends StatelessWidget {
         n.contains('baterias') ||
         n.contains('fuente') ||
         n.contains('fuentes')) {
-      addExact('assets/categorias/energia.png');
+      addExact('assets/categorias/energía.png');
       addFile('ENERGÍA');
       addFile('ENERGIA');
     }

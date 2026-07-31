@@ -465,6 +465,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
               child: CartPage(
                 onGoHome: () => _switchToTab(0, popToRoot: true),
                 onGoBack: _goBackFromCart,
+                onGoQuotes: () => _switchToTab(3, popToRoot: true),
               ),
             ),
           ],

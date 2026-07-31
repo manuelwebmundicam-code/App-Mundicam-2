@@ -198,6 +198,14 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   void clearCart() {
     state = [];
     _saveCart();
+
+    ApiService().clearRemoteCart().then((ok) {
+      if (kDebugMode) {
+        debugPrint(ok
+            ? '✅ Carrito remoto App API vaciado'
+            : '⚠️ Carrito remoto App API no vaciado');
+      }
+    });
   }
 
   /// Base imponible del carrito.

@@ -291,10 +291,10 @@ class Product {
 
   bool get canAddToCart => isPurchasable && hasValidPrice && !isUnderConsultation && hasStock;
 
-  // v1.6.2: sin stock no se compra ni se presupuesta.
-  // Puede presupuestarse un producto sin precio directo si tiene stock y el
-  // backend lo permite, pero nunca un producto marcado como sin stock.
-  bool get canRequestQuote => id > 0 && remoteCanRequestQuote && hasStock;
+  // Presupuesto: debe permitirse aunque no haya stock.
+  // La compra sí depende del stock, pero un cliente puede pedir presupuesto
+  // de un producto agotado o pendiente de reposición.
+  bool get canRequestQuote => id > 0 && remoteCanRequestQuote;
 
   String get commercialStatusLabel {
     if (isUnderConsultation || !hasValidPrice) return 'Bajo consulta';

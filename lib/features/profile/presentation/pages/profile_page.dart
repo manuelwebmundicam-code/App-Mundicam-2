@@ -32,6 +32,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   IconData _roleIcon = Icons.person_outline_rounded;
   String? _errorMessage;
   bool _testingNotifications = false;
+  bool _deletingAccount = false;
 
   Color get _roleColor {
     final label = _roleLabel.toLowerCase();
@@ -416,14 +417,79 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
 
   // ================= MÉTODOS MEJORADOS =================
-  String _getAssignedManager() {
-    final manager = _getMeta('assigned_manager').trim();
-    if (manager.isEmpty ||
-        manager == '—' ||
-        manager.toLowerCase() == 'null') {
-      return 'Mundicam';
+  String _cleanManagerValue(dynamic value) {
+    final manager = value?.toString().trim() ?? '';
+    if (manager.isEmpty || manager == '—') return '';
+    final lower = manager.toLowerCase();
+    if (lower == 'null' ||
+        lower == 'false' ||
+        lower == 'sin asignar' ||
+        lower == 'no asignado' ||
+        lower == '__mc_add_new_gestor__') {
+      return '';
     }
+
+    // El gestor de MundiCam viene del selector web wpuef_cid_c30 y debe
+    // mostrarse como nombre/texto, no como email. Si el backend sigue
+    // devolviendo solo un email, no lo usamos como nombre de gestor.
+    if (manager.contains('@')) return '';
+
     return manager;
+  }
+
+  String _getAssignedManager() {
+    // La web usa actualmente el campo wpuef_cid_c30 como selector de gestor
+    // y su valor puede ser un nombre (por ejemplo "Manuel"), no un email.
+    final directCandidates = <dynamic>[
+      _wooCustomer?['manager_name'],
+      _wooCustomer?['gestor_asignado'],
+      _wooCustomer?['assigned_manager'],
+      _wooCustomer?['wpuef_cid_c30'],
+      _wooCustomer?['commercial_manager'],
+      _wooCustomer?['sales_manager'],
+    ];
+
+    for (final value in directCandidates) {
+      final manager = _cleanManagerValue(value);
+      if (manager.isNotEmpty) return manager;
+    }
+
+    final keys = [
+      'wpuef_cid_c30',
+      'manager_name',
+      'gestor_asignado',
+      'assigned_manager',
+      'commercial_manager',
+      'sales_manager',
+    ];
+
+    for (final key in keys) {
+      final manager = _cleanManagerValue(_getMeta(key));
+      if (manager.isNotEmpty) return manager;
+    }
+
+    return 'No asignado';
+  }
+
+  String _getManagerEmail() {
+    final candidates = <dynamic>[
+      _wooCustomer?['manager_email'],
+      _wooCustomer?['wpuef_cid_c30'],
+      _getMeta('manager_email'),
+      _getMeta('wpuef_cid_c30'),
+    ];
+
+    for (final value in candidates) {
+      final email = value?.toString().trim() ?? '';
+      if (email.isNotEmpty &&
+          email != '—' &&
+          email.toLowerCase() != 'null' &&
+          email.contains('@')) {
+        return email;
+      }
+    }
+
+    return '—';
   }
 
   String _getCifNif() {
@@ -574,6 +640,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 22),
+                  _buildDeleteAccountCard(),
                 ],
               ),
             ),
@@ -1105,6 +1173,143 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
+  Widget _buildManagerCard() {
+    final managerName = _getAssignedManager();
+    final managerEmail = _getManagerEmail();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _mainCardHeader('GESTOR ASIGNADO', Icons.support_agent_outlined),
+          const SizedBox(height: 14),
+          _dataGroup(
+            title: 'Contacto comercial',
+            children: [
+              _infoRow(
+                Icons.person_pin_circle_outlined,
+                'Gestor / comercial',
+                managerName,
+              ),
+              _infoRow(
+                Icons.email_outlined,
+                'Email del gestor',
+                managerEmail,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeleteAccountCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.red.withOpacity(0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.delete_forever_outlined,
+                  color: Colors.red,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ELIMINAR CUENTA',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Oswald',
+                        letterSpacing: 0.5,
+                        color: _dark,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Solicita la eliminación de tu cuenta y bloquea el acceso a la app.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.3,
+                        color: _muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              onPressed: _deletingAccount ? null : _confirmDeleteAccount,
+              icon: _deletingAccount
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.delete_outline_rounded, size: 19),
+              label: Text(
+                _deletingAccount ? 'ENVIANDO SOLICITUD...' : 'ELIMINAR CUENTA',
+                style: const TextStyle(
+                  fontFamily: 'Oswald',
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade700,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.red.shade300,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMenuCard(
       BuildContext context, {
         required String title,
@@ -1297,6 +1502,107 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (mounted) {
         setState(() => _testingNotifications = false);
       }
+    }
+  }
+
+  Future<void> _confirmDeleteAccount() async {
+    if (_deletingAccount) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text('¿Eliminar cuenta?'),
+        content: const Text(
+          'Esta acción iniciará la eliminación de tu cuenta, bloqueará el acceso a la app y cerrará tu sesión.\n\n'
+          'El equipo de privacidad tramitará la eliminación o anonimización de tus datos conforme a la normativa aplicable.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCELAR'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'SÍ, ELIMINAR',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await _requestAccountDeletion();
+  }
+
+  Future<void> _requestAccountDeletion() async {
+    if (_deletingAccount) return;
+
+    setState(() => _deletingAccount = true);
+
+    try {
+      final result = await ApiService().solicitarEliminacionCuenta();
+
+      await NotificationService().clearDeviceRegistration();
+      await FirebaseAuth.instance.signOut();
+      await ApiService().clearWordPressSession();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+
+      if (!mounted) return;
+
+      final message = result.message.trim().isNotEmpty
+          ? result.message.trim()
+          : 'Tu solicitud de eliminación de cuenta se ha registrado correctamente.';
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          title: const Text('Solicitud registrada'),
+          content: Text(
+            '$message\n\nReferencia: ${result.requestId.isNotEmpty ? result.requestId : 'pendiente'}',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('ACEPTAR'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _deletingAccount = false);
     }
   }
 

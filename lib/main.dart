@@ -31,9 +31,16 @@ Future<void> ensureFirebaseReady() async {
       return;
     }
 
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    final firebaseOptions = DefaultFirebaseOptions.currentPlatform;
+
+    if (firebaseOptions != null) {
+      await Firebase.initializeApp(options: firebaseOptions);
+    } else {
+      // En iOS, cuando todavía no se ha generado firebase_options.dart con
+      // FlutterFire CLI, Firebase puede inicializarse desde el archivo nativo:
+      // ios/Runner/GoogleService-Info.plist.
+      await Firebase.initializeApp();
+    }
 
     debugPrint('✅ Firebase inicializado correctamente');
   } on FirebaseException catch (e) {
@@ -238,42 +245,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-
-class _MundiCamStartupScreen extends StatelessWidget {
-  const _MundiCamStartupScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: AppColors.primary),
-                SizedBox(height: 16),
-                Text(
-                  'Preparando tu sesión...',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontFamily: 'Oswald',
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class AuthWrapper extends ConsumerStatefulWidget {
   const AuthWrapper({super.key});
 
@@ -298,9 +269,9 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
             .validateStoredAppSession()
             .timeout(const Duration(seconds: 15), onTimeout: () {
             debugPrint(
-              '⚠️ /me tardó demasiado en arranque. Se fuerza login visible para evitar pantalla blanca en iOS Review.',
+              '⚠️ /me tardó demasiado en arranque. Se entra con el token local y las pantallas reintentarán.',
             );
-            return false;
+            return true;
           })
         : false;
 
@@ -336,12 +307,11 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
       future: _sessionFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const _MundiCamStartupScreen();
-        }
-
-        if (snapshot.hasError) {
-          debugPrint('⚠️ Error restaurando sesión en arranque: ${snapshot.error}');
-          return const LoginPage();
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          );
         }
 
         if (snapshot.data == true) {

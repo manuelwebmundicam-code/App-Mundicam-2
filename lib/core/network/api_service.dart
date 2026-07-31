@@ -108,6 +108,133 @@ class OrderCreateResult {
 }
 
 
+class QuoteAcceptPayResult {
+  final bool success;
+  final int quoteId;
+  final int pendingOrderId;
+  final String status;
+  final String statusLabel;
+  final String paymentUrl;
+  final bool canPay;
+  final bool isPaid;
+  final String message;
+  final Map<String, dynamic> rawData;
+
+  const QuoteAcceptPayResult({
+    required this.success,
+    required this.quoteId,
+    required this.pendingOrderId,
+    required this.status,
+    required this.statusLabel,
+    required this.paymentUrl,
+    required this.canPay,
+    required this.isPaid,
+    required this.message,
+    required this.rawData,
+  });
+
+  bool get hasPaymentUrl => paymentUrl.trim().isNotEmpty;
+
+  factory QuoteAcceptPayResult.fromJson(Map<String, dynamic> json) {
+    return QuoteAcceptPayResult(
+      success: json['success'] != false,
+      quoteId: _parseInt(json['quote_id'] ?? json['id']),
+      pendingOrderId: _parseInt(json['pending_order_id'] ?? json['order_id']),
+      status: (json['status'] ?? '').toString().trim(),
+      statusLabel: _firstNonEmptyString([
+            json['status_label'],
+            json['statusLabel'],
+          ]) ??
+          '',
+      paymentUrl: _firstNonEmptyString([
+            json['payment_url'],
+            json['checkout_payment_url'],
+            json['redirect_url'],
+          ]) ??
+          '',
+      canPay: json['can_pay'] == true,
+      isPaid: json['is_paid'] == true,
+      message: _firstNonEmptyString([json['message']]) ?? '',
+      rawData: json,
+    );
+  }
+}
+
+class QuoteCreateResult {
+  final bool success;
+  final int quoteId;
+  final String status;
+  final double total;
+  final String message;
+  final Map<String, dynamic> rawData;
+
+  const QuoteCreateResult({
+    required this.success,
+    required this.quoteId,
+    required this.status,
+    required this.total,
+    required this.message,
+    required this.rawData,
+  });
+
+  factory QuoteCreateResult.fromJson(Map<String, dynamic> json) {
+    final quoteData = _asMap(json['quote']);
+    return QuoteCreateResult(
+      success: json['success'] != false,
+      quoteId: _parseInt(
+        json['quote_id'] ?? json['id'] ?? quoteData['id'] ?? quoteData['order_id'],
+      ),
+      status: (_firstNonEmptyString([
+            json['status'],
+            quoteData['status'],
+            quoteData['order_status'],
+          ]) ??
+          '')
+          .replaceFirst(RegExp(r'^wc-'), ''),
+      total: _parseDouble(json['total'] ?? quoteData['total'] ?? quoteData['amount']),
+      message: _firstNonEmptyString([json['message']]) ?? '',
+      rawData: json,
+    );
+  }
+}
+
+class AccountDeleteRequestResult {
+  final bool success;
+  final String requestId;
+  final bool accessBlocked;
+  final bool alreadyRequested;
+  final bool rgpdEmailSent;
+  final bool emailRetryScheduled;
+  final String message;
+  final Map<String, dynamic> rawData;
+
+  const AccountDeleteRequestResult({
+    required this.success,
+    required this.requestId,
+    required this.accessBlocked,
+    required this.alreadyRequested,
+    required this.rgpdEmailSent,
+    required this.emailRetryScheduled,
+    required this.message,
+    required this.rawData,
+  });
+
+  factory AccountDeleteRequestResult.fromJson(Map<String, dynamic> json) {
+    return AccountDeleteRequestResult(
+      success: json['success'] == true,
+      requestId: (json['request_id'] ?? '').toString().trim(),
+      accessBlocked: json['access_blocked'] == true,
+      alreadyRequested: json['already_requested'] == true,
+      rgpdEmailSent: json['rgpd_email_sent'] == true,
+      emailRetryScheduled: json['email_retry_scheduled'] == true,
+      message: _firstNonEmptyString([json['message']]) ??
+          'Solicitud de eliminación registrada.',
+      rawData: json,
+    );
+  }
+}
+
+
 class ShippingOption {
   final String id;
   final String type;
@@ -840,8 +967,7 @@ class ApiService {
         final ok = response.statusCode != null &&
             response.statusCode! >= 200 &&
             response.statusCode! < 300 &&
-            data['success'] == true &&
-            data['registered'] != false;
+            data['success'] != false;
 
         if (ok) {
           if (kDebugMode) debugPrint('✅ FCM registrado en $endpoint');
@@ -1035,6 +1161,7 @@ class ApiService {
     try {
       final me = await _loadMe();
       final user = _asMap(me['user']);
+      _mergeManagerFieldsIntoUser(me, user);
       if (user.isEmpty) return null;
       return _customerMapFromUser(user, _asMap(me['permissions']));
     } catch (e) {
@@ -1047,6 +1174,7 @@ class ApiService {
     try {
       final me = await _loadMe();
       final user = _asMap(me['user']);
+      _mergeManagerFieldsIntoUser(me, user);
       if (user.isEmpty) return null;
       final userId = _parseInt(user['id'] ?? user['wordpress_id']);
       if (id > 0 && userId > 0 && id != userId) return null;
@@ -1083,6 +1211,7 @@ class ApiService {
 
     final user = _asMap(data['user']);
     final permissions = _asMap(data['permissions']);
+    _mergeManagerFieldsIntoUser(data, user);
 
     if (user.isNotEmpty || permissions.isNotEmpty) {
       await saveWordPressSession(user: user, permissions: permissions);
@@ -2352,6 +2481,17 @@ class ApiService {
   }
 
 
+  Future<bool> clearRemoteCart() async {
+    try {
+      final response = await _appPost('/cart/clear');
+      return _responseMap(response.data)['success'] != false;
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ No se pudo vaciar carrito remoto: $e');
+      return false;
+    }
+  }
+
+
   Future<List<ShippingOption>> getShippingMethods({
     required List<Map<String, dynamic>> lineItems,
     required Map<String, dynamic> shippingAddress,
@@ -2488,6 +2628,90 @@ class ApiService {
     }
   }
 
+  Future<bool> crearPresupuestoConProductos({
+    required List<Map<String, dynamic>> items,
+    String? customerNote,
+  }) async {
+    final result = await crearPresupuestoConProductosDetalle(
+      items: items,
+      customerNote: customerNote,
+    );
+    return result.success && result.quoteId > 0;
+  }
+
+  Future<QuoteCreateResult> crearPresupuestoConProductosDetalle({
+    required List<Map<String, dynamic>> items,
+    String? customerNote,
+  }) async {
+    final cleanItems = _sanitizeLineItems(items);
+    if (cleanItems.isEmpty) {
+      return const QuoteCreateResult(
+        success: false,
+        quoteId: 0,
+        status: '',
+        total: 0,
+        message: 'No hay productos para guardar el presupuesto.',
+        rawData: <String, dynamic>{},
+      );
+    }
+
+    try {
+      // PHP 1.9.27 mantiene un carrito de presupuesto persistente en servidor.
+      // Para pasar un presupuesto LOCAL al flujo real de pago, primero se guarda
+      // como presupuesto WooCommerce/YITH y después se llama a /quote/accept-and-pay.
+      // Nunca se manda al carrito normal: si el usuario vuelve atrás o cancela,
+      // seguirá apareciendo en Mis presupuestos.
+      await _appPost('/quote/clear');
+
+      for (final item in cleanItems) {
+        final variationId = _parseInt(item['variation_id']);
+        final addResponse = await _appPost('/quote/add', data: {
+          'product_id': item['product_id'],
+          if (variationId > 0) 'variation_id': variationId,
+          'quantity': item['quantity'],
+        });
+        final addData = _responseMap(addResponse.data);
+        if (addData['success'] == false) {
+          return QuoteCreateResult(
+            success: false,
+            quoteId: 0,
+            status: '',
+            total: 0,
+            message: _firstNonEmptyString([addData['message']]) ??
+                'No se pudo añadir un producto al presupuesto.',
+            rawData: addData,
+          );
+        }
+      }
+
+      final createResponse = await _appPost('/quote/create', data: {
+        if ((customerNote ?? '').trim().isNotEmpty)
+          'customer_note': customerNote!.trim(),
+      });
+      final createData = _responseMap(createResponse.data);
+      final result = QuoteCreateResult.fromJson(createData);
+      if (kDebugMode) {
+        debugPrint('✅ Presupuesto creado en servidor. ID: ${result.quoteId} · Estado: ${result.status.isEmpty ? 'sin estado' : result.status}');
+        if (result.status == 'pending') {
+          debugPrint('⚠️ El servidor ha devuelto pending. Comprueba que el PHP 1.9.27 esté activo.');
+        }
+      }
+      return result;
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Error crearPresupuestoConProductosDetalle: $e');
+      return QuoteCreateResult(
+        success: false,
+        quoteId: 0,
+        status: '',
+        total: 0,
+        message: e.toString(),
+        rawData: const <String, dynamic>{},
+      );
+    }
+  }
+
   Future<bool> crearPresupuesto({
     required String email,
     required int productId,
@@ -2516,6 +2740,19 @@ class ApiService {
       });
 
       final createData = _responseMap(createResponse.data);
+      final quoteData = _asMap(createData['quote']);
+      final status = (_firstNonEmptyString([
+            createData['status'],
+            quoteData['status'],
+          ]) ??
+          '')
+          .replaceFirst(RegExp(r'^wc-'), '');
+      if (kDebugMode) {
+        debugPrint('✅ Presupuesto creado en servidor. Estado: ${status.isEmpty ? 'sin estado' : status}');
+        if (status == 'pending') {
+          debugPrint('⚠️ El servidor ha devuelto pending. Comprueba que el PHP 1.9.26 esté activo.');
+        }
+      }
       return createData['success'] != false;
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
@@ -2594,12 +2831,67 @@ class ApiService {
     }
   }
 
+  Future<OrderMundicam?> getOrderDetail({
+    required int orderId,
+    String? orderKey,
+  }) async {
+    if (orderId <= 0) return null;
+
+    try {
+      final response = await _appGet('/order/detail', queryParameters: {
+        'order_id': orderId,
+        if ((orderKey ?? '').trim().isNotEmpty) 'order_key': orderKey!.trim(),
+      });
+      final root = _responseMap(response.data);
+      final nested = _asMap(root['order']);
+      final data = nested.isNotEmpty ? nested : _asMap(root['data']);
+      if (root['success'] == false || data.isEmpty) return null;
+      return OrderMundicam.fromJson(data);
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ No se pudo cargar /order/detail: $e');
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> getOrdenCompleta(String orderId) async {
     final cleanOrderId = orderId.replaceAll(RegExp(r'[^0-9]'), '');
     if (cleanOrderId.isEmpty) return null;
 
-    final status = await getOrderStatus(orderId: _parseInt(cleanOrderId));
-    if (status != null) return status;
+    try {
+      final response = await _appGet('/order/detail', queryParameters: {
+        'order_id': cleanOrderId,
+      });
+      final root = _responseMap(response.data);
+      final nested = _asMap(root['order']);
+      final data = nested.isNotEmpty ? nested : _asMap(root['data']);
+      if (root['success'] != false && data.isNotEmpty) {
+        return data;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ No se pudo buscar detalle en /order/detail: $e');
+    }
+
+    // Para presupuestos web necesitamos las líneas de producto. /order/status
+    // solo devuelve estado/importes y por eso la app podía mostrar "Sin productos"
+    // aunque el presupuesto estuviera correcto en la web. Primero buscamos en
+    // /quotes y /orders, que sí devuelven line_items/items; dejamos /order/status
+    // como último respaldo.
+    try {
+      final quotesResponse = await _appGet('/quotes');
+      final quotesData = _responseMap(quotesResponse.data);
+      final rawQuotes = _firstList([quotesData['quotes'], quotesData['data']]);
+      for (final item in rawQuotes.whereType<Map>()) {
+        final map = Map<String, dynamic>.from(item);
+        final candidateId = _parseInt(
+          map['id'] ?? map['order_id'] ?? map['quote_id'] ?? map['number'],
+        ).toString();
+        if (candidateId == cleanOrderId) {
+          return map;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ No se pudo buscar presupuesto completo en /quotes: $e');
+    }
 
     try {
       final response = await _appGet('/orders', queryParameters: {'per_page': 50});
@@ -2611,11 +2903,14 @@ class ApiService {
           return map;
         }
       }
-      return null;
     } catch (e) {
-      if (kDebugMode) debugPrint('❌ Error getOrdenCompleta: $e');
-      return null;
+      if (kDebugMode) debugPrint('⚠️ No se pudo buscar pedido completo en /orders: $e');
     }
+
+    final status = await getOrderStatus(orderId: _parseInt(cleanOrderId));
+    if (status != null) return status;
+
+    return null;
   }
 
   Future<List<QuoteMundicam>> getPresupuestosPorEmail(String email) async {
@@ -2630,6 +2925,49 @@ class ApiService {
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ Presupuestos App API no disponibles: $e');
       return [];
+    }
+  }
+
+
+  Future<QuoteAcceptPayResult> aceptarYPagarPresupuesto({
+    required int quoteId,
+  }) async {
+    if (quoteId <= 0) {
+      throw Exception('No se pudo identificar el presupuesto.');
+    }
+
+    try {
+      final response = await _appPost('/quote/accept-and-pay', data: {
+        'quote_id': quoteId,
+      });
+      final data = _responseMap(response.data);
+      final result = QuoteAcceptPayResult.fromJson(data);
+      if (!result.success) {
+        throw Exception(result.message.isNotEmpty
+            ? result.message
+            : 'No se pudo preparar el pago del presupuesto.');
+      }
+      return result;
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    }
+  }
+
+  Future<AccountDeleteRequestResult> solicitarEliminacionCuenta() async {
+    try {
+      final response = await _appPost('/account/delete-request', data: {
+        'confirm': true,
+      });
+      final data = _responseMap(response.data);
+      final result = AccountDeleteRequestResult.fromJson(data);
+      if (!result.success) {
+        throw Exception(result.message.isNotEmpty
+            ? result.message
+            : 'No se pudo registrar la solicitud de eliminación.');
+      }
+      return result;
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
     }
   }
 
@@ -2655,10 +2993,18 @@ class ApiService {
         'descripcion': descripcion,
       });
       final data = _responseMap(response.data);
+      if (data['success'] == false) {
+        final message = data['message']?.toString().trim();
+        throw Exception(message?.isNotEmpty == true ? message : 'No se pudo crear la solicitud RMA.');
+      }
       return response.statusCode == 200 || response.statusCode == 201 || data['success'] != false;
+    } on DioException catch (e) {
+      final message = _mapDioError(e);
+      if (kDebugMode) debugPrint('❌ Error crearRma: $message');
+      throw Exception(message);
     } catch (e) {
       if (kDebugMode) debugPrint('❌ Error crearRma: $e');
-      return false;
+      rethrow;
     }
   }
 
@@ -2910,6 +3256,72 @@ class ApiService {
     }
   }
 
+  static void _mergeManagerFieldsIntoUser(
+    Map<String, dynamic> root,
+    Map<String, dynamic> user,
+  ) {
+    String? cleanManager(dynamic value) {
+      final text = value?.toString().trim() ?? '';
+      if (text.isEmpty || text == '—') return null;
+      final lower = text.toLowerCase();
+      if (lower == 'null' ||
+          lower == 'false' ||
+          lower == 'sin asignar' ||
+          lower == 'no asignado' ||
+          lower == '__mc_add_new_gestor__') {
+        return null;
+      }
+      // wpuef_cid_c30 es nombre/valor de selector. No usar emails como nombre.
+      if (text.contains('@')) return null;
+      return text;
+    }
+
+    final managerValue = <dynamic>[
+      root['wpuef_cid_c30'],
+      root['manager_name'],
+      root['gestor_asignado'],
+      root['assigned_manager'],
+      root['commercial_manager'],
+      root['sales_manager'],
+      user['wpuef_cid_c30'],
+      user['manager_name'],
+      user['gestor_asignado'],
+      user['assigned_manager'],
+      user['commercial_manager'],
+      user['sales_manager'],
+    ].map(cleanManager).firstWhere((value) => value != null, orElse: () => null);
+
+    if (managerValue == null || managerValue.trim().isEmpty) return;
+
+    final manager = managerValue.trim();
+    user['manager_name'] = manager;
+    user['gestor_asignado'] = manager;
+    user['assigned_manager'] = manager;
+    user['wpuef_cid_c30'] = manager;
+
+    final meta = user['meta_data'];
+    final metaData = meta is List ? List<dynamic>.from(meta) : <dynamic>[];
+
+    bool hasMeta(String key) {
+      return metaData.any((item) {
+        if (item is! Map) return false;
+        return item['key']?.toString().toLowerCase().trim() == key.toLowerCase();
+      });
+    }
+
+    void addMeta(String key, String value) {
+      if (!hasMeta(key)) {
+        metaData.add(<String, dynamic>{'key': key, 'value': value});
+      }
+    }
+
+    addMeta('manager_name', manager);
+    addMeta('gestor_asignado', manager);
+    addMeta('assigned_manager', manager);
+    addMeta('wpuef_cid_c30', manager);
+    user['meta_data'] = metaData;
+  }
+
   static Map<String, dynamic> _customerMapFromUser(
     Map<String, dynamic> user,
     Map<String, dynamic> permissions,
@@ -2970,7 +3382,28 @@ class ApiService {
       user['forma_pago'],
       user['metodo_pago'],
     ]);
-
+    addMetaIfPresent('manager_name', <dynamic>[
+      user['manager_name'],
+      user['gestor_asignado'],
+      user['assigned_manager'],
+      user['wpuef_cid_c30'],
+    ]);
+    addMetaIfPresent('gestor_asignado', <dynamic>[
+      user['gestor_asignado'],
+      user['manager_name'],
+      user['wpuef_cid_c30'],
+    ]);
+    addMetaIfPresent('assigned_manager', <dynamic>[
+      user['assigned_manager'],
+      user['manager_name'],
+      user['wpuef_cid_c30'],
+    ]);
+    addMetaIfPresent('wpuef_cid_c30', <dynamic>[
+      user['wpuef_cid_c30'],
+      user['manager_name'],
+      user['gestor_asignado'],
+      user['assigned_manager'],
+    ]);
     return {
       'id': _parseInt(user['id'] ?? user['wordpress_id']),
       'email': user['email']?.toString() ?? billing['email']?.toString() ?? '',
@@ -2985,6 +3418,11 @@ class ApiService {
       'meta_data': metaData,
       'billing_nif': user['billing_nif']?.toString() ?? billing['billing_nif']?.toString() ?? '',
       'cif_nif': user['cif_nif']?.toString() ?? billing['cif_nif']?.toString() ?? '',
+      'manager_name': user['manager_name']?.toString() ?? user['gestor_asignado']?.toString() ?? user['wpuef_cid_c30']?.toString() ?? '',
+      'gestor_asignado': user['gestor_asignado']?.toString() ?? user['manager_name']?.toString() ?? user['wpuef_cid_c30']?.toString() ?? '',
+      'assigned_manager': user['assigned_manager']?.toString() ?? user['manager_name']?.toString() ?? user['wpuef_cid_c30']?.toString() ?? '',
+      'manager_email': user['manager_email']?.toString() ?? '',
+      'wpuef_cid_c30': user['wpuef_cid_c30']?.toString() ?? user['manager_name']?.toString() ?? user['gestor_asignado']?.toString() ?? '',
       'can_view_stock': permissions['can_view_stock'] == true,
     };
   }

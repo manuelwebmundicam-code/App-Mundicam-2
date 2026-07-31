@@ -23,24 +23,18 @@ class QuoteSyncService {
   }) async {
     try {
       final api = ApiService();
-      int productosSync = 0;
+      final ok = await api.crearPresupuestoConProductos(
+        items: localQuote.items
+            .map((item) => {
+                  'product_id': item.productId,
+                  'quantity': item.quantity,
+                })
+            .toList(),
+        customerNote: localQuote.nombre,
+      );
 
-      for (final item in localQuote.items) {
-        final ok = await api.crearPresupuesto(
-          email: email,
-          productId: item.productId,
-          productName: item.productName,
-          price: item.price,
-          quantity: item.quantity,
-        );
-
-        if (ok) {
-          productosSync++;
-        }
-      }
-
-      if (productosSync == 0) {
-        throw Exception('No se pudo sincronizar ningún producto.');
+      if (!ok) {
+        throw Exception('No se pudo guardar el presupuesto en el servidor.');
       }
 
       return true;

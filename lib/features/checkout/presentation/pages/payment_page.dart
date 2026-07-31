@@ -13,6 +13,8 @@ class PaymentPage extends StatefulWidget {
   final String? orderNumber;
   final double? amount;
   final String paymentMethodTitle;
+  final bool quotePayment;
+  final String? quoteNumber;
 
   const PaymentPage({
     super.key,
@@ -22,6 +24,8 @@ class PaymentPage extends StatefulWidget {
     this.orderNumber,
     this.amount,
     this.paymentMethodTitle = 'Pago con tarjeta',
+    this.quotePayment = false,
+    this.quoteNumber,
   });
 
   @override
@@ -117,7 +121,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 
             if (_isFailureUrl(url)) {
               _markPaymentError(
-                'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
+                widget.quotePayment ? 'El pago no se ha completado. Puedes volver a intentarlo desde Mis presupuestos.' : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
               );
               return NavigationDecision.prevent;
             }
@@ -288,7 +292,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 
     if (_isFailureUrl(url)) {
       _markPaymentError(
-        'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
+        widget.quotePayment ? 'El pago no se ha completado. Puedes volver a intentarlo desde Mis presupuestos.' : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
       );
     }
   }
@@ -320,7 +324,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
         setState(() {
           _checkingPayment = false;
           _paymentError = true;
-          _errorMessage = 'No se pudo comprobar el estado del pedido. Intenta de nuevo.';
+          _errorMessage = widget.quotePayment ? 'No se pudo comprobar el estado del pago. El presupuesto seguirá disponible.' : 'No se pudo comprobar el estado del pedido. Intenta de nuevo.';
         });
         return;
       }
@@ -333,13 +337,14 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       debugPrint('🔑 Order key local: ${widget.orderKey}');
       debugPrint('🔑 Order key WooCommerce: $remoteOrderKey');
 
-      if (remoteOrderKey != null &&
+      if (widget.orderKey.trim().isNotEmpty &&
+          remoteOrderKey != null &&
           remoteOrderKey.isNotEmpty &&
           remoteOrderKey != widget.orderKey) {
         setState(() {
           _checkingPayment = false;
           _paymentError = true;
-          _errorMessage = 'La verificación del pedido no coincide. Contacta con MundiCam.';
+          _errorMessage = 'La verificación del pago no coincide. Contacta con MundiCam.';
         });
         return;
       }
@@ -361,7 +366,9 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           _paymentError = !showPendingAsWaiting;
           _errorMessage = showPendingAsWaiting
               ? null
-              : 'El pedido todavía aparece pendiente de pago. Si acabas de pagar, espera unos segundos y pulsa “Comprobar pago”.';
+              : (widget.quotePayment
+                  ? 'El pago todavía no aparece confirmado. El presupuesto seguirá disponible para intentarlo de nuevo.'
+                  : 'El pedido todavía aparece pendiente de pago. Si acabas de pagar, espera unos segundos y pulsa “Comprobar pago”.');
         });
         return;
       }
@@ -454,9 +461,10 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Salir del pago'),
-        content: const Text(
-          'El pedido ya está creado, pero el pago todavía no se ha confirmado. '
-          'Podrás finalizarlo desde la web o contactando con MundiCam.',
+        content: Text(
+          widget.quotePayment
+              ? 'El pago todavía no se ha confirmado. El presupuesto seguirá visible en Mis presupuestos y podrás volver a pulsar “Aceptar y pagar” más tarde.'
+              : 'El pedido ya está creado, pero el pago todavía no se ha confirmado. Podrás finalizarlo desde la web o contactando con MundiCam.',
         ),
         actions: [
           TextButton(
@@ -512,6 +520,10 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   }
 
   String get _orderLabel {
+    if (widget.quotePayment) {
+      final quote = widget.quoteNumber?.trim();
+      if (quote != null && quote.isNotEmpty) return quote;
+    }
     final number = widget.orderNumber?.trim();
     if (number != null && number.isNotEmpty) return '#$number';
     return '#${widget.orderId}';
@@ -531,9 +543,9 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           elevation: 0,
-          title: const Text(
-            'PAGO SEGURO',
-            style: TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Oswald'),
+          title: Text(
+            widget.quotePayment ? 'PAGO PRESUPUESTO' : 'PAGO SEGURO',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Oswald'),
           ),
           leading: IconButton(
             icon: const Icon(Icons.close_rounded),
@@ -651,7 +663,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Pedido $_orderLabel · ${widget.paymentMethodTitle}',
+                  widget.quotePayment ? 'Presupuesto $_orderLabel · ${widget.paymentMethodTitle}' : 'Pedido $_orderLabel · ${widget.paymentMethodTitle}',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 13,
@@ -826,7 +838,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Pedido $_orderLabel · ${_formatAmount(widget.amount)}',
+                  widget.quotePayment ? 'Presupuesto $_orderLabel · ${_formatAmount(widget.amount)}' : 'Pedido $_orderLabel · ${_formatAmount(widget.amount)}',
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey.shade600,
@@ -1024,7 +1036,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'El pedido $_orderLabel se ha recibido correctamente. Te enviaremos la confirmación por email.',
+                  widget.quotePayment ? 'El pago del presupuesto $_orderLabel se ha confirmado correctamente. Pasará a pedidos cuando el servidor actualice el estado.' : 'El pedido $_orderLabel se ha recibido correctamente. Te enviaremos la confirmación por email.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
