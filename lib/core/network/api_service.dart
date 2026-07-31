@@ -478,6 +478,8 @@ class ApiService {
   static const String _userEmailPrefsKey = 'user_email';
   static const String _userPayloadPrefsKey = 'mundicam_app_user_payload';
   static const String _permissionsPrefsKey = 'mundicam_app_permissions_payload';
+  static const String _localDeletionBlockedIdentifiersPrefsKey =
+      'mundicam_local_deletion_blocked_identifiers_v1';
 
   late final Dio _dio;
 
@@ -615,7 +617,7 @@ class ApiService {
 
       if (valid) {
         final nestedData = _asMap(data['data']);
-        final user = _asMap(data['user'] ?? nestedData['user']);
+        final user = _userFromMeResponse(data);
         final permissions = _asMap(
           data['permissions'] ?? nestedData['permissions'],
         );
@@ -718,6 +720,77 @@ class ApiService {
     return role == null || role.isEmpty ? <String>[] : <String>[role];
   }
 
+  /// Bloqueo local de seguridad para una cuenta que ha confirmado borrado.
+  /// El PHP sigue siendo la autoridad global, pero esta lista impide reabrir
+  /// la misma cuenta en esta instalación si la red falla durante la solicitud.
+  Future<void> markAccountDeletionPendingLocally({
+    required Iterable<String?> identifiers,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final blocked = <String>{
+      ...?prefs.getStringList(_localDeletionBlockedIdentifiersPrefsKey),
+    };
+
+    for (final identifier in identifiers) {
+      final normalized = _normalizeAccountIdentifier(identifier);
+      if (normalized.isNotEmpty) blocked.add(normalized);
+    }
+
+    if (blocked.isNotEmpty) {
+      final values = blocked.toList()..sort();
+      await prefs.setStringList(
+        _localDeletionBlockedIdentifiersPrefsKey,
+        values,
+      );
+    }
+  }
+
+  Future<bool> isAccountDeletionPendingLocally(String? identifier) async {
+    final normalized = _normalizeAccountIdentifier(identifier);
+    if (normalized.isEmpty) return false;
+
+    final prefs = await SharedPreferences.getInstance();
+    final blocked = prefs
+            .getStringList(_localDeletionBlockedIdentifiersPrefsKey)
+            ?.map(_normalizeAccountIdentifier)
+            .toSet() ??
+        <String>{};
+    return blocked.contains(normalized);
+  }
+
+  /// Limpia sesión y preferencias sin borrar la lista local de cuentas que ya
+  /// confirmaron una solicitud de eliminación.
+  Future<void> clearLocalAppDataPreservingDeletionBlocks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final blocked = prefs.getStringList(
+          _localDeletionBlockedIdentifiersPrefsKey,
+        ) ??
+        const <String>[];
+
+    await clearWordPressSession();
+    await prefs.clear();
+
+    if (blocked.isNotEmpty) {
+      await prefs.setStringList(
+        _localDeletionBlockedIdentifiersPrefsKey,
+        blocked,
+      );
+    }
+  }
+
+  static String _normalizeAccountIdentifier(String? value) {
+    final normalized = value?.trim().toLowerCase() ?? '';
+    if (normalized.isEmpty || normalized == 'null') return '';
+    return normalized;
+  }
+
+  Map<String, dynamic> _userFromMeResponse(Map<String, dynamic> root) {
+    final nestedData = _asMap(root['data']);
+    final user = _asMap(root['user'] ?? nestedData['user']);
+    _mergeManagerFieldsIntoUser(<String, dynamic>{...nestedData, ...root}, user);
+    return user;
+  }
+
   Future<void> refreshSessionContextFromBackend({bool force = false}) async {
     await _ensureInitialized();
     if (_appToken.trim().isEmpty) return;
@@ -735,7 +808,7 @@ class ApiService {
       final response = await _appGet('/me');
       final root = _responseMap(response.data);
       final nestedData = _asMap(root['data']);
-      final user = _asMap(root['user'] ?? nestedData['user']);
+      final user = _userFromMeResponse(root);
       final permissions = _asMap(root['permissions'] ?? nestedData['permissions']);
 
       var sessionChanged = false;
@@ -2960,10 +3033,14 @@ class ApiService {
       });
       final data = _responseMap(response.data);
       final result = AccountDeleteRequestResult.fromJson(data);
-      if (!result.success) {
-        throw Exception(result.message.isNotEmpty
-            ? result.message
-            : 'No se pudo registrar la solicitud de eliminación.');
+      final serverConfirmedBlock =
+          result.accessBlocked || result.alreadyRequested;
+      if (!result.success || !serverConfirmedBlock) {
+        throw Exception(
+          result.message.isNotEmpty
+              ? result.message
+              : 'El servidor no confirmó el bloqueo de la cuenta.',
+        );
       }
       return result;
     } on DioException catch (e) {
@@ -3260,7 +3337,25 @@ class ApiService {
     Map<String, dynamic> root,
     Map<String, dynamic> user,
   ) {
-    String? cleanManager(dynamic value) {
+    final nestedData = _asMap(root['data']);
+    final billing = _asMap(user['billing']);
+    final shipping = _asMap(user['shipping']);
+    final meta = user['meta_data'];
+    final metaData = meta is List ? List<dynamic>.from(meta) : <dynamic>[];
+
+    String? metaValue(String key) {
+      for (final item in metaData) {
+        if (item is! Map) continue;
+        if (item['key']?.toString().trim().toLowerCase() != key.toLowerCase()) {
+          continue;
+        }
+        final value = item['value']?.toString().trim() ?? '';
+        if (value.isNotEmpty && value.toLowerCase() != 'null') return value;
+      }
+      return null;
+    }
+
+    String? cleanValue(dynamic value, {bool email = false}) {
       final text = value?.toString().trim() ?? '';
       if (text.isEmpty || text == '—') return null;
       final lower = text.toLowerCase();
@@ -3271,36 +3366,50 @@ class ApiService {
           lower == '__mc_add_new_gestor__') {
         return null;
       }
-      // wpuef_cid_c30 es nombre/valor de selector. No usar emails como nombre.
-      if (text.contains('@')) return null;
-      return text;
+      if (email) return text.contains('@') ? text : null;
+      return text.contains('@') ? null : text;
     }
 
-    final managerValue = <dynamic>[
+    final managerEmail = <dynamic>[
+      root['manager_email'],
       root['wpuef_cid_c30'],
+      nestedData['manager_email'],
+      nestedData['wpuef_cid_c30'],
+      user['manager_email'],
+      user['wpuef_cid_c30'],
+      billing['manager_email'],
+      billing['wpuef_cid_c30'],
+      shipping['manager_email'],
+      shipping['wpuef_cid_c30'],
+      metaValue('manager_email'),
+      metaValue('wpuef_cid_c30'),
+      user['assigned_manager_email'],
+      user['gestor_email'],
+      user['technical_manager_email'],
+    ].map((value) => cleanValue(value, email: true)).firstWhere(
+          (value) => value != null,
+          orElse: () => null,
+        );
+
+    final managerName = <dynamic>[
       root['manager_name'],
       root['gestor_asignado'],
       root['assigned_manager'],
-      root['commercial_manager'],
-      root['sales_manager'],
-      user['wpuef_cid_c30'],
+      nestedData['manager_name'],
+      nestedData['gestor_asignado'],
+      nestedData['assigned_manager'],
       user['manager_name'],
       user['gestor_asignado'],
       user['assigned_manager'],
       user['commercial_manager'],
       user['sales_manager'],
-    ].map(cleanManager).firstWhere((value) => value != null, orElse: () => null);
-
-    if (managerValue == null || managerValue.trim().isEmpty) return;
-
-    final manager = managerValue.trim();
-    user['manager_name'] = manager;
-    user['gestor_asignado'] = manager;
-    user['assigned_manager'] = manager;
-    user['wpuef_cid_c30'] = manager;
-
-    final meta = user['meta_data'];
-    final metaData = meta is List ? List<dynamic>.from(meta) : <dynamic>[];
+      metaValue('manager_name'),
+      metaValue('gestor_asignado'),
+      metaValue('assigned_manager'),
+    ].map((value) => cleanValue(value)).firstWhere(
+          (value) => value != null,
+          orElse: () => null,
+        );
 
     bool hasMeta(String key) {
       return metaData.any((item) {
@@ -3310,15 +3419,28 @@ class ApiService {
     }
 
     void addMeta(String key, String value) {
-      if (!hasMeta(key)) {
-        metaData.add(<String, dynamic>{'key': key, 'value': value});
-      }
+      if (value.trim().isEmpty || hasMeta(key)) return;
+      metaData.add(<String, dynamic>{'key': key, 'value': value.trim()});
     }
 
-    addMeta('manager_name', manager);
-    addMeta('gestor_asignado', manager);
-    addMeta('assigned_manager', manager);
-    addMeta('wpuef_cid_c30', manager);
+    if (managerEmail != null && managerEmail.trim().isNotEmpty) {
+      final email = managerEmail.trim();
+      user['manager_email'] = email;
+      user['wpuef_cid_c30'] = email;
+      addMeta('manager_email', email);
+      addMeta('wpuef_cid_c30', email);
+    }
+
+    if (managerName != null && managerName.trim().isNotEmpty) {
+      final name = managerName.trim();
+      user['manager_name'] = name;
+      user['gestor_asignado'] = name;
+      user['assigned_manager'] = name;
+      addMeta('manager_name', name);
+      addMeta('gestor_asignado', name);
+      addMeta('assigned_manager', name);
+    }
+
     user['meta_data'] = metaData;
   }
 
@@ -3382,28 +3504,44 @@ class ApiService {
       user['forma_pago'],
       user['metodo_pago'],
     ]);
+    addMetaIfPresent('manager_email', <dynamic>[
+      user['manager_email'],
+      user['wpuef_cid_c30'],
+      billing['manager_email'],
+      billing['wpuef_cid_c30'],
+    ]);
+    addMetaIfPresent('wpuef_cid_c30', <dynamic>[
+      user['wpuef_cid_c30'],
+      user['manager_email'],
+    ]);
     addMetaIfPresent('manager_name', <dynamic>[
       user['manager_name'],
       user['gestor_asignado'],
       user['assigned_manager'],
-      user['wpuef_cid_c30'],
     ]);
     addMetaIfPresent('gestor_asignado', <dynamic>[
       user['gestor_asignado'],
       user['manager_name'],
-      user['wpuef_cid_c30'],
     ]);
     addMetaIfPresent('assigned_manager', <dynamic>[
       user['assigned_manager'],
       user['manager_name'],
-      user['wpuef_cid_c30'],
     ]);
-    addMetaIfPresent('wpuef_cid_c30', <dynamic>[
-      user['wpuef_cid_c30'],
-      user['manager_name'],
-      user['gestor_asignado'],
-      user['assigned_manager'],
-    ]);
+
+    final managerEmail = _firstNonEmptyString(<dynamic>[
+          user['manager_email'],
+          user['wpuef_cid_c30'],
+          billing['manager_email'],
+          billing['wpuef_cid_c30'],
+        ]) ??
+        '';
+    final managerName = _firstNonEmptyString(<dynamic>[
+          user['manager_name'],
+          user['gestor_asignado'],
+          user['assigned_manager'],
+        ]) ??
+        '';
+
     return {
       'id': _parseInt(user['id'] ?? user['wordpress_id']),
       'email': user['email']?.toString() ?? billing['email']?.toString() ?? '',
@@ -3418,11 +3556,11 @@ class ApiService {
       'meta_data': metaData,
       'billing_nif': user['billing_nif']?.toString() ?? billing['billing_nif']?.toString() ?? '',
       'cif_nif': user['cif_nif']?.toString() ?? billing['cif_nif']?.toString() ?? '',
-      'manager_name': user['manager_name']?.toString() ?? user['gestor_asignado']?.toString() ?? user['wpuef_cid_c30']?.toString() ?? '',
-      'gestor_asignado': user['gestor_asignado']?.toString() ?? user['manager_name']?.toString() ?? user['wpuef_cid_c30']?.toString() ?? '',
-      'assigned_manager': user['assigned_manager']?.toString() ?? user['manager_name']?.toString() ?? user['wpuef_cid_c30']?.toString() ?? '',
-      'manager_email': user['manager_email']?.toString() ?? '',
-      'wpuef_cid_c30': user['wpuef_cid_c30']?.toString() ?? user['manager_name']?.toString() ?? user['gestor_asignado']?.toString() ?? '',
+      'manager_name': managerName,
+      'gestor_asignado': managerName,
+      'assigned_manager': managerName,
+      'manager_email': managerEmail,
+      'wpuef_cid_c30': managerEmail,
       'can_view_stock': permissions['can_view_stock'] == true,
     };
   }

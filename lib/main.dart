@@ -31,16 +31,9 @@ Future<void> ensureFirebaseReady() async {
       return;
     }
 
-    final firebaseOptions = DefaultFirebaseOptions.currentPlatform;
-
-    if (firebaseOptions != null) {
-      await Firebase.initializeApp(options: firebaseOptions);
-    } else {
-      // En iOS, cuando todavía no se ha generado firebase_options.dart con
-      // FlutterFire CLI, Firebase puede inicializarse desde el archivo nativo:
-      // ios/Runner/GoogleService-Info.plist.
-      await Firebase.initializeApp();
-    }
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
     debugPrint('✅ Firebase inicializado correctamente');
   } on FirebaseException catch (e) {
@@ -72,7 +65,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -129,53 +122,55 @@ void main() async {
     );
   };
 
-  try {
-    await ensureFirebaseReady().timeout(const Duration(seconds: 12));
-
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    debugPrint('✅ Handler FCM background registrado para Android/iOS');
-  } catch (e) {
-    debugPrint('❌ Error al conectar Firebase: $e');
-  }
-
-  try {
-    final remoteConfig = FirebaseRemoteConfig.instance;
-
-    await remoteConfig.setConfigSettings(
-      RemoteConfigSettings(
-        fetchTimeout: const Duration(seconds: 10),
-        minimumFetchInterval: const Duration(hours: 12),
-      ),
-    );
-
-    await remoteConfig.setDefaults({
-      'api_base_url': 'https://www.mundicam.com',
-    });
-
-    await remoteConfig.fetchAndActivate().timeout(const Duration(seconds: 12));
-    debugPrint('✅ Remote Config inicializado correctamente');
-  } catch (e) {
-    debugPrint('⚠️ Error al inicializar Remote Config: $e');
-  }
-
+  // El handler debe registrarse al arrancar, pero Firebase/Remote Config no
+  // deben retrasar el primer frame de iOS. La interfaz se muestra primero.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   runApp(const ProviderScope(child: MyApp()));
-
   unawaited(_postRunAppBootstrap());
 }
 
 Future<void> _postRunAppBootstrap() async {
-  if (Firebase.apps.isNotEmpty) {
+  var firebaseReady = false;
+
+  try {
+    await ensureFirebaseReady().timeout(const Duration(seconds: 12));
+    firebaseReady = true;
+    debugPrint('✅ Handler FCM background registrado para Android/iOS');
+  } catch (e) {
+    debugPrint('⚠️ Firebase no disponible al arrancar; la app continúa: $e');
+  }
+
+  if (firebaseReady) {
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      await remoteConfig.setConfigSettings(
+        RemoteConfigSettings(
+          fetchTimeout: const Duration(seconds: 10),
+          minimumFetchInterval: const Duration(hours: 12),
+        ),
+      );
+      await remoteConfig.setDefaults({
+        'api_base_url': 'https://www.mundicam.com',
+      });
+      await remoteConfig.fetchAndActivate().timeout(
+        const Duration(seconds: 12),
+      );
+      debugPrint('✅ Remote Config inicializado correctamente');
+    } catch (e) {
+      debugPrint('⚠️ Remote Config no crítico: $e');
+    }
+
     try {
       await NotificationService()
           .initialize()
           .timeout(const Duration(seconds: 15), onTimeout: () {
-        debugPrint('⚠️ Inicialización FCM tardó demasiado. Se reintentará después.');
+        debugPrint(
+          '⚠️ Inicialización FCM tardó demasiado. Se reintentará después.',
+        );
       });
     } catch (e) {
       debugPrint('⚠️ Error inicializando notificaciones: $e');
     }
-  } else {
-    debugPrint('⚠️ Firebase no está inicializado. Se omiten notificaciones FCM.');
   }
 
   try {
@@ -263,6 +258,17 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
 
   Future<bool> _validateSession() async {
     final api = ApiService();
+    final storedEmail = await api.currentSessionEmail();
+    final storedUserId = await api.currentSessionWordPressId();
+    final locallyBlocked =
+        await api.isAccountDeletionPendingLocally(storedEmail) ||
+        await api.isAccountDeletionPendingLocally(storedUserId?.toString());
+
+    if (locallyBlocked) {
+      await api.clearWordPressSession();
+      return false;
+    }
+
     final hasStoredToken = await api.hasStoredAppSession();
     final hasAppSession = hasStoredToken
         ? await api

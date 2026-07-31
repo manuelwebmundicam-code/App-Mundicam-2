@@ -75,9 +75,23 @@ class _LoginPageState extends State<LoginPage> {
         _isLoadingSavedCredentials = false;
       });
 
-      final hasStoredToken = await _hasStoredWordPressSession();
+      final apiService = ApiService();
+      final storedSessionEmail = await apiService.currentSessionEmail();
+      final storedSessionId = await apiService.currentSessionWordPressId();
+      final storedSessionBlocked =
+          await apiService.isAccountDeletionPendingLocally(storedSessionEmail) ||
+          await apiService.isAccountDeletionPendingLocally(
+            storedSessionId?.toString(),
+          );
+
+      if (storedSessionBlocked) {
+        await apiService.clearWordPressSession();
+      }
+
+      final hasStoredToken =
+          storedSessionBlocked ? false : await _hasStoredWordPressSession();
       final hasWpSession = hasStoredToken
-          ? await ApiService()
+          ? await apiService
               .validateStoredAppSession()
               .timeout(const Duration(seconds: 15), onTimeout: () {
               debugPrint(
@@ -441,6 +455,20 @@ class _LoginPageState extends State<LoginPage> {
             : <String, dynamic>{};
         final status = dataMap['status'] ?? response.statusCode;
         final message = body['message']?.toString().trim();
+        final code = (body['code'] ?? dataMap['code'])
+            ?.toString()
+            .trim()
+            .toLowerCase();
+        final normalizedMessage = message?.toLowerCase() ?? '';
+
+        if (code == 'mundicam_account_deletion_pending' ||
+            normalizedMessage.contains('eliminación pendiente') ||
+            normalizedMessage.contains('eliminacion pendiente') ||
+            normalizedMessage.contains('solicitud de eliminación')) {
+          await ApiService().markAccountDeletionPendingLocally(
+            identifiers: <String?>[email],
+          );
+        }
 
         throw Exception(
           (message != null && message.isNotEmpty)
@@ -642,8 +670,15 @@ class _LoginPageState extends State<LoginPage> {
         throw Exception('Introduce usuario y contraseña.');
       }
 
+      final apiService = ApiService();
+      if (await apiService.isAccountDeletionPendingLocally(email)) {
+        throw Exception(
+          'Esta cuenta tiene una solicitud de eliminación pendiente y no puede iniciar sesión desde esta instalación.',
+        );
+      }
+
       // Limpiamos restos antiguos antes de iniciar sesión nueva.
-      await ApiService().clearWordPressSession();
+      await apiService.clearWordPressSession();
 
       // 1. Autenticar contra WordPress/WooCommerce.
       final wpResponse = await _authenticateWithWordPress(

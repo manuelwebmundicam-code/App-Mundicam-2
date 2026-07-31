@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
@@ -438,8 +439,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   String _getAssignedManager() {
-    // La web usa actualmente el campo wpuef_cid_c30 como selector de gestor
-    // y su valor puede ser un nombre (por ejemplo "Manuel"), no un email.
+    // El backend puede devolver un nombre separado. En la versión actual,
+    // wpuef_cid_c30 contiene principalmente el correo del gestor.
     final directCandidates = <dynamic>[
       _wooCustomer?['manager_name'],
       _wooCustomer?['gestor_asignado'],
@@ -468,7 +469,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (manager.isNotEmpty) return manager;
     }
 
-    return 'No asignado';
+    return _getManagerEmail().contains('@')
+        ? 'Gestor / técnico asignado'
+        : 'No asignado';
   }
 
   String _getManagerEmail() {
@@ -490,6 +493,28 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
 
     return '—';
+  }
+
+  Future<void> _emailManager() async {
+    final email = _getManagerEmail();
+    if (!email.contains('@')) return;
+
+    final uri = Uri(
+      scheme: 'mailto',
+      path: email,
+      queryParameters: const <String, String>{
+        'subject': 'Consulta desde la app MundiCam',
+      },
+    );
+
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir la aplicación de correo.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   String _getCifNif() {
@@ -1194,10 +1219,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 'Gestor / comercial',
                 managerName,
               ),
-              _infoRow(
-                Icons.email_outlined,
-                'Email del gestor',
-                managerEmail,
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: managerEmail.contains('@') ? _emailManager : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: _infoRow(
+                    Icons.email_outlined,
+                    'Email del gestor',
+                    managerEmail,
+                  ),
+                ),
               ),
             ],
           ),
@@ -1546,60 +1578,100 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   Future<void> _requestAccountDeletion() async {
     if (_deletingAccount) return;
-
     setState(() => _deletingAccount = true);
 
-    try {
-      final result = await ApiService().solicitarEliminacionCuenta();
+    final apiService = ApiService();
+    AccountDeleteRequestResult? result;
+    Object? serverError;
 
-      await NotificationService().clearDeviceRegistration();
-      await FirebaseAuth.instance.signOut();
-      await ApiService().clearWordPressSession();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
+    try {
+      final sessionUser = await apiService.currentSessionUser();
+      final email = (await apiService.currentSessionEmail()) ??
+          _wooCustomer?['email']?.toString();
+      final username = sessionUser['username']?.toString() ??
+          sessionUser['user_login']?.toString() ??
+          _wooCustomer?['username']?.toString();
+      final wordpressId = await apiService.currentSessionWordPressId();
+
+      // Se guarda antes de contactar con el PHP. Si la red se corta o la app se
+      // cierra durante la petición, esta instalación no reabre la cuenta.
+      await apiService.markAccountDeletionPendingLocally(
+        identifiers: <String?>[
+          email,
+          username,
+          wordpressId?.toString(),
+        ],
+      );
+
+      try {
+        result = await apiService
+            .solicitarEliminacionCuenta()
+            .timeout(const Duration(seconds: 30));
+      } catch (e) {
+        serverError = e;
+      }
+
+      // La limpieza local se ejecuta siempre, aunque Firebase o FCM fallen.
+      try {
+        await NotificationService()
+            .clearDeviceRegistration()
+            .timeout(const Duration(seconds: 6));
+      } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (_) {}
+      await apiService.clearLocalAppDataPreservingDeletionBlocks();
 
       if (!mounted) return;
 
-      final message = result.message.trim().isNotEmpty
-          ? result.message.trim()
-          : 'Tu solicitud de eliminación de cuenta se ha registrado correctamente.';
+      final synchronized = result != null;
+      final reference = result?.requestId.trim() ?? '';
+      final serverMessage = serverError
+              ?.toString()
+              .replaceFirst('Exception: ', '')
+              .trim() ??
+          '';
 
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-          title: const Text('Solicitud registrada'),
+        builder: (dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          icon: Icon(
+            synchronized
+                ? Icons.mark_email_read_outlined
+                : Icons.lock_clock_outlined,
+            color: synchronized ? Colors.green : Colors.orange.shade800,
+            size: 48,
+          ),
+          title: Text(
+            synchronized
+                ? 'Solicitud recibida'
+                : 'Acceso bloqueado en este dispositivo',
+          ),
           content: Text(
-            '$message\n\nReferencia: ${result.requestId.isNotEmpty ? result.requestId : 'pendiente'}',
+            synchronized
+                ? (reference.isEmpty
+                    ? 'Tu acceso ha quedado bloqueado. El equipo de privacidad tramitará la eliminación y te confirmará la finalización por correo.'
+                    : 'Tu acceso ha quedado bloqueado. Referencia: $reference. El equipo de privacidad tramitará la eliminación y te confirmará la finalización por correo.')
+                : 'La sesión se ha cerrado y esta cuenta no podrá volver a entrar desde esta instalación. El servidor no confirmó la solicitud${serverMessage.isEmpty ? '' : ': $serverMessage'}. Contacta con rgpd@mundicam.com si no recibes confirmación.',
+            textAlign: TextAlign.center,
           ),
           actions: [
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('ACEPTAR'),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('ENTENDIDO'),
             ),
           ],
         ),
       );
 
       if (!mounted) return;
-
       Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginPage()),
         (_) => false,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
       );
     } finally {
       if (mounted) setState(() => _deletingAccount = false);

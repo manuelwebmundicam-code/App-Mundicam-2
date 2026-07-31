@@ -1,4 +1,4 @@
-# MundiCam iOS Podfile corregido para Flutter + Firebase + WebView. Notificaciones push iOS desactivadas de momento.
+# MundiCam iOS Podfile para Flutter + Firebase + WebView + notificaciones push APNs/FCM.
 # Ejecutar en Mac: flutter clean && flutter pub get && cd ios && pod install
 
 platform :ios, '13.0'

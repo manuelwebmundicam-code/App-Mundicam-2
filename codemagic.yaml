@@ -17,59 +17,136 @@ workflows:
           flutter --version 2>&1 | tee build-reports/flutter-version.log
           dart --version 2>&1 | tee build-reports/dart-version.log
           xcodebuild -version 2>&1 | tee build-reports/xcode-version.log
-          ruby --version 2>&1 | tee build-reports/ruby-version.log
           pod --version 2>&1 | tee build-reports/pod-version.log
           git status --short 2>&1 | tee build-reports/git-status.log
 
-      - name: Validar archivos iOS
+      - name: Validar configuración iOS
         script: |
           set -euxo pipefail
           mkdir -p build-reports
+          for FILE in \
+            ios/Runner/GoogleService-Info.plist \
+            ios/Runner/Info.plist \
+            ios/Runner/Runner.entitlements \
+            ios/Runner/RunnerDebug.entitlements \
+            ios/Runner/PrivacyInfo.xcprivacy; do
+            test -f "$FILE"
+            plutil -lint "$FILE"
+          done
 
-          test -f ios/Runner/GoogleService-Info.plist
-          test -f ios/Runner/Info.plist
-          test -f ios/Runner/Runner.entitlements
-          test -f ios/Runner/PrivacyInfo.xcprivacy
-
-          plutil -lint ios/Runner/GoogleService-Info.plist             2>&1 | tee build-reports/google-service-plist.log
-          plutil -lint ios/Runner/Info.plist             2>&1 | tee build-reports/info-plist.log
-          plutil -lint ios/Runner/Runner.entitlements             2>&1 | tee build-reports/runner-entitlements.log
-          plutil -lint ios/Runner/PrivacyInfo.xcprivacy             2>&1 | tee build-reports/privacy-info.log
-
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy             -c "Print :BUNDLE_ID"             ios/Runner/GoogleService-Info.plist)
-
-          echo "Firebase BUNDLE_ID=$BUNDLE_ID"             | tee build-reports/firebase-bundle-id.log
-
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :BUNDLE_ID" ios/Runner/GoogleService-Info.plist)
           test "$BUNDLE_ID" = "com.mundicam.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' ios/Runner/Runner.entitlements)" = "production"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' ios/Runner/RunnerDebug.entitlements)" = "development"
+          grep -q 'GoogleService-Info.plist in Resources' ios/Runner.xcodeproj/project.pbxproj
+          grep -q 'PrivacyInfo.xcprivacy in Resources' ios/Runner.xcodeproj/project.pbxproj
 
       - name: Obtener dependencias Flutter
         script: |
           set -euxo pipefail
-          mkdir -p build-reports
-          flutter clean 2>&1 | tee build-reports/flutter-clean.log
-          flutter pub get 2>&1 | tee build-reports/flutter-pub-get.log
+          flutter clean
+          flutter pub get
 
       - name: Analizar código Flutter
         script: |
           set -o pipefail
           mkdir -p build-reports
-          flutter analyze --no-fatal-infos --no-fatal-warnings             2>&1 | tee build-reports/flutter-analyze.log
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee build-reports/flutter-analyze.log
 
       - name: Instalar CocoaPods
         script: |
-          set -o pipefail
-          mkdir -p build-reports
+          set -euxo pipefail
           cd ios
-          pod install --repo-update --verbose             2>&1 | tee ../build-reports/pod-install.log
+          pod install --repo-update
           cd ..
 
       - name: Compilar iOS Release sin firma
         script: |
           set -o pipefail
           mkdir -p build-reports
-          flutter build ios --release --no-codesign -v             2>&1 | tee build-reports/flutter-ios-release.log
+          flutter build ios --release --no-codesign -v 2>&1 | tee build-reports/flutter-ios-release.log
+
+      - name: Comprobar recursos dentro de Runner.app
+        script: |
+          set -euxo pipefail
+          APP=build/ios/iphoneos/Runner.app
+          test -d "$APP"
+          test -f "$APP/GoogleService-Info.plist"
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          /usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' "$APP/GoogleService-Info.plist" | grep -qx 'com.mundicam.app'
 
     artifacts:
       - build-reports/**
       - build/ios/iphoneos/Runner.app
+      - /tmp/xcodebuild_logs/*.log
+
+  ios-release:
+    name: MundiCam iOS App Store IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+
+    environment:
+      flutter: 3.35.5
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.mundicam.app
+
+    scripts:
+      - name: Validar fuentes iOS
+        script: |
+          set -euxo pipefail
+          test -f ios/Runner/GoogleService-Info.plist
+          test -f ios/Runner/PrivacyInfo.xcprivacy
+          test "$(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' ios/Runner/GoogleService-Info.plist)" = "com.mundicam.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' ios/Runner/Runner.entitlements)" = "production"
+
+      - name: Obtener dependencias
+        script: |
+          set -euxo pipefail
+          flutter clean
+          flutter pub get
+          cd ios
+          pod install --repo-update
+          cd ..
+
+      - name: Analizar código Flutter
+        script: |
+          set -o pipefail
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Aplicar certificado y perfil App Store
+        script: |
+          set -euxo pipefail
+          xcode-project use-profiles
+
+      - name: Generar IPA firmada
+        script: |
+          set -euxo pipefail
+          flutter build ipa --release \
+            --build-name=1.0.4 \
+            --build-number=12 \
+            --export-options-plist=/Users/builder/export_options.plist
+
+      - name: Verificar IPA final
+        script: |
+          set -euxo pipefail
+          IPA=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' | head -1)
+          test -n "$IPA"
+          rm -rf build/ipa-inspect
+          mkdir -p build/ipa-inspect
+          unzip -q "$IPA" -d build/ipa-inspect
+          APP=build/ipa-inspect/Payload/Runner.app
+          test -f "$APP/GoogleService-Info.plist"
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          codesign -d --entitlements :- "$APP" > build/ipa-entitlements.plist 2> build/codesign-details.log
+          plutil -lint build/ipa-entitlements.plist
+          plutil -extract aps-environment raw build/ipa-entitlements.plist | grep -qx production
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -qx 'com.mundicam.app'
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/ipa-entitlements.plist
+      - build/codesign-details.log
       - /tmp/xcodebuild_logs/*.log
