@@ -14,9 +14,10 @@ StateNotifierProvider<LocalQuotesNotifier, List<LocalQuote>>((ref) {
 
 class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
   static const String _storageKey = 'mundicam_local_quotes';
+  late final Future<void> _initialLoad;
 
   LocalQuotesNotifier() : super([]) {
-    _cargarPresupuestos();
+    _initialLoad = _cargarPresupuestos();
   }
 
   // Cargar presupuestos guardados
@@ -138,7 +139,25 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
 
   // Eliminar presupuesto completo
   Future<void> eliminarPresupuesto(String orderId) async {
+    await _initialLoad;
     state = state.where((q) => q.orderId != orderId).toList();
+    await _guardarPresupuestos();
+  }
+
+  Future<void> eliminarPresupuestosConfirmados(
+    Iterable<String> orderIds,
+  ) async {
+    await _initialLoad;
+    final ids = orderIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (ids.isEmpty) return;
+
+    final updated = state.where((quote) => !ids.contains(quote.orderId)).toList();
+    if (updated.length == state.length) return;
+
+    state = updated;
     await _guardarPresupuestos();
   }
 

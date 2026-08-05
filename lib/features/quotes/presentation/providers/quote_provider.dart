@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/quotes/data/models/quote_model.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 
 /// Provider para el servicio API.
 /// Se usa desde presupuestos y también desde pantallas que añaden productos al presupuesto.
@@ -92,6 +93,24 @@ final quotesProvider = FutureProvider<List<QuoteMundicam>>((ref) async {
 
   try {
     final presupuestos = await apiService.getPresupuestosPorEmail(email);
+
+    // /orders solo devuelve pedidos procedentes de presupuestos cuando ya están
+    // confirmados. Así eliminamos del almacenamiento local la copia que corresponda
+    // después de Redsys o de la aprobación manual de transferencia/giro.
+    try {
+      final pedidosConfirmados = await apiService.getOrders(email);
+      final localQuoteIds = pedidosConfirmados
+          .map((order) => order.sourceLocalQuoteUuid.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      if (localQuoteIds.isNotEmpty) {
+        await ref
+            .read(localQuotesProvider.notifier)
+            .eliminarPresupuestosConfirmados(localQuoteIds);
+      }
+    } catch (e) {
+      debugPrint('⚠️ No se pudieron reconciliar presupuestos locales: $e');
+    }
 
     /// Nos quedamos con presupuestos útiles para la app.
     /// PHP 1.9.25 crea los presupuestos reales como YITH `ywraq-pending`,

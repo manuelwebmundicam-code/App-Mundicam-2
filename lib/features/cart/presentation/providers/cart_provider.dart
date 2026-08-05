@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -5,20 +6,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 
 class CartItem {
   final Product product;
   final int quantity;
+  final int quoteOriginalQuantity;
+  final String quoteApprovedUnitPrice;
+  final String currentEffectiveUnitPrice;
 
   const CartItem({
     required this.product,
     this.quantity = 1,
+    this.quoteOriginalQuantity = 0,
+    this.quoteApprovedUnitPrice = '',
+    this.currentEffectiveUnitPrice = '',
   });
+
+  bool get hasQuotePricing =>
+      quoteOriginalQuantity > 0 &&
+      quoteApprovedUnitPrice.trim().isNotEmpty &&
+      currentEffectiveUnitPrice.trim().isNotEmpty;
 
   Map<String, dynamic> toJson() => {
     'product': product.toJson(),
     'quantity': quantity,
+    'quote_original_quantity': quoteOriginalQuantity,
+    'quote_approved_unit_price': quoteApprovedUnitPrice,
+    'current_effective_unit_price': currentEffectiveUnitPrice,
   };
 
   factory CartItem.fromJson(Map<String, dynamic> json) {
@@ -27,6 +43,12 @@ class CartItem {
         Map<String, dynamic>.from(json['product'] as Map),
       ),
       quantity: _parseInt(json['quantity'], fallback: 1),
+      quoteOriginalQuantity:
+          _parseInt(json['quote_original_quantity'], fallback: 0),
+      quoteApprovedUnitPrice:
+          json['quote_approved_unit_price']?.toString().trim() ?? '',
+      currentEffectiveUnitPrice:
+          json['current_effective_unit_price']?.toString().trim() ?? '',
     );
   }
 
@@ -42,7 +64,61 @@ class CartItem {
   }
 }
 
+class _QuoteLinePricing {
+  final int originalQuantity;
+  final String approvedUnitPrice;
+  final String currentEffectiveUnitPrice;
+
+  const _QuoteLinePricing({
+    required this.originalQuantity,
+    required this.approvedUnitPrice,
+    required this.currentEffectiveUnitPrice,
+  });
+
+  bool get isValid =>
+      originalQuantity > 0 &&
+      approvedUnitPrice.trim().isNotEmpty &&
+      currentEffectiveUnitPrice.trim().isNotEmpty;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'original_quantity': originalQuantity,
+        'approved_unit_price': approvedUnitPrice,
+        'current_effective_unit_price': currentEffectiveUnitPrice,
+      };
+
+  factory _QuoteLinePricing.fromJson(Map<String, dynamic> json) {
+    return _QuoteLinePricing(
+      originalQuantity:
+          CartItem._parseInt(json['original_quantity'], fallback: 0),
+      approvedUnitPrice:
+          json['approved_unit_price']?.toString().trim() ?? '',
+      currentEffectiveUnitPrice:
+          json['current_effective_unit_price']?.toString().trim() ?? '',
+    );
+  }
+
+  factory _QuoteLinePricing.fromCartItem(CartItem item) {
+    return _QuoteLinePricing(
+      originalQuantity: item.quoteOriginalQuantity,
+      approvedUnitPrice: item.quoteApprovedUnitPrice,
+      currentEffectiveUnitPrice: item.currentEffectiveUnitPrice,
+    );
+  }
+}
+
 class CartNotifier extends StateNotifier<List<CartItem>> {
+  static const String _sourceTypeKey = 'mundicam_cart_source_type';
+  static const String _sourceQuoteIdKey = 'mundicam_cart_source_quote_id';
+  static const String _sourceLocalUuidKey = 'mundicam_cart_source_local_uuid';
+  static const String _sourceQuotePricingKey =
+      'mundicam_cart_source_quote_pricing';
+
+  String _sourceType = '';
+  int _sourceQuoteId = 0;
+  String _sourceLocalQuoteUuid = '';
+  Map<int, _QuoteLinePricing> _webQuotePricing =
+      <int, _QuoteLinePricing>{};
+
   CartNotifier() : super([]) {
     _loadCart();
   }
@@ -67,6 +143,30 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
   Future<void> _loadCart() async {
     final prefs = await SharedPreferences.getInstance();
+    _sourceType = prefs.getString(_sourceTypeKey) ?? '';
+    _sourceQuoteId = prefs.getInt(_sourceQuoteIdKey) ?? 0;
+    _sourceLocalQuoteUuid = prefs.getString(_sourceLocalUuidKey) ?? '';
+    _webQuotePricing = <int, _QuoteLinePricing>{};
+    final savedPricing = prefs.getString(_sourceQuotePricingKey);
+    if (savedPricing != null && savedPricing.trim().isNotEmpty) {
+      try {
+        final decodedPricing = jsonDecode(savedPricing);
+        if (decodedPricing is Map) {
+          for (final entry in decodedPricing.entries) {
+            final productId = int.tryParse(entry.key.toString()) ?? 0;
+            if (productId <= 0 || entry.value is! Map) continue;
+            final pricing = _QuoteLinePricing.fromJson(
+              Map<String, dynamic>.from(entry.value as Map),
+            );
+            if (pricing.isValid) {
+              _webQuotePricing[productId] = pricing;
+            }
+          }
+        }
+      } catch (_) {
+        _webQuotePricing = <int, _QuoteLinePricing>{};
+      }
+    }
     final savedData = prefs.getString('cart_mundicam_data');
 
     if (savedData == null || savedData.trim().isEmpty) {
@@ -99,6 +199,124 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
       debugPrint('❌ Error cargando carrito: $e');
       state = [];
     }
+  }
+
+  Product _productForQuoteQuantity(
+    Product product,
+    int quantity,
+    _QuoteLinePricing? pricing,
+  ) {
+    if (_sourceType != 'web_quote' || pricing == null || !pricing.isValid) {
+      return product;
+    }
+
+    final selectedPrice = quantity == pricing.originalQuantity
+        ? pricing.approvedUnitPrice
+        : pricing.currentEffectiveUnitPrice;
+    return selectedPrice.trim().isEmpty
+        ? product
+        : product.copyWith(price: selectedPrice.trim());
+  }
+
+  CartItem _buildCartItem({
+    required Product product,
+    required int quantity,
+    _QuoteLinePricing? pricing,
+  }) {
+    final effectivePricing = pricing ?? _webQuotePricing[product.id];
+    return CartItem(
+      product: _productForQuoteQuantity(product, quantity, effectivePricing),
+      quantity: quantity,
+      quoteOriginalQuantity: effectivePricing?.originalQuantity ?? 0,
+      quoteApprovedUnitPrice: effectivePricing?.approvedUnitPrice ?? '',
+      currentEffectiveUnitPrice:
+          effectivePricing?.currentEffectiveUnitPrice ?? '',
+    );
+  }
+
+  Future<void> _saveQuotePricing(SharedPreferences prefs) async {
+    if (_sourceType != 'web_quote' || _webQuotePricing.isEmpty) {
+      await prefs.remove(_sourceQuotePricingKey);
+      return;
+    }
+
+    final encoded = <String, dynamic>{
+      for (final entry in _webQuotePricing.entries)
+        entry.key.toString(): entry.value.toJson(),
+    };
+    await prefs.setString(_sourceQuotePricingKey, jsonEncode(encoded));
+  }
+
+  int get sourceQuoteId => _sourceType == 'web_quote' ? _sourceQuoteId : 0;
+
+  String get sourceLocalQuoteUuid =>
+      _sourceType == 'local_quote' ? _sourceLocalQuoteUuid : '';
+
+  bool get hasQuoteSource =>
+      sourceQuoteId > 0 || sourceLocalQuoteUuid.trim().isNotEmpty;
+
+  Future<void> replaceCartFromQuote({
+    required List<CartItem> items,
+    int sourceQuoteId = 0,
+    String sourceLocalQuoteUuid = '',
+  }) async {
+    final cleanItems = items
+        .where((item) =>
+            item.product.id > 0 &&
+            item.quantity > 0 &&
+            item.product.canAddToCart)
+        .toList();
+
+    _sourceType = sourceQuoteId > 0
+        ? 'web_quote'
+        : (sourceLocalQuoteUuid.trim().isNotEmpty ? 'local_quote' : '');
+    _sourceQuoteId = sourceQuoteId > 0 ? sourceQuoteId : 0;
+    _sourceLocalQuoteUuid =
+        sourceLocalQuoteUuid.trim().isNotEmpty ? sourceLocalQuoteUuid.trim() : '';
+    _webQuotePricing = _sourceType == 'web_quote'
+        ? <int, _QuoteLinePricing>{
+            for (final item in cleanItems)
+              if (item.hasQuotePricing)
+                item.product.id: _QuoteLinePricing.fromCartItem(item),
+          }
+        : <int, _QuoteLinePricing>{};
+
+    state = [
+      for (final item in cleanItems)
+        _buildCartItem(
+          product: item.product,
+          quantity: item.quantity,
+          pricing: item.hasQuotePricing
+              ? _QuoteLinePricing.fromCartItem(item)
+              : null,
+        ),
+    ];
+    await _saveCart();
+
+    final prefs = await SharedPreferences.getInstance();
+    if (_sourceType.isEmpty) {
+      await prefs.remove(_sourceTypeKey);
+      await prefs.remove(_sourceQuoteIdKey);
+      await prefs.remove(_sourceLocalUuidKey);
+      await prefs.remove(_sourceQuotePricingKey);
+    } else {
+      await prefs.setString(_sourceTypeKey, _sourceType);
+      await prefs.setInt(_sourceQuoteIdKey, _sourceQuoteId);
+      await prefs.setString(_sourceLocalUuidKey, _sourceLocalQuoteUuid);
+      await _saveQuotePricing(prefs);
+    }
+  }
+
+  Future<void> clearQuoteSource() async {
+    _sourceType = '';
+    _sourceQuoteId = 0;
+    _sourceLocalQuoteUuid = '';
+    _webQuotePricing = <int, _QuoteLinePricing>{};
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sourceTypeKey);
+    await prefs.remove(_sourceQuoteIdKey);
+    await prefs.remove(_sourceLocalUuidKey);
+    await prefs.remove(_sourceQuotePricingKey);
   }
 
   void addProduct(Product product, int qty) {
@@ -134,9 +352,12 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
       state = [
         for (final item in state)
           if (item.product.id == product.id)
-            CartItem(
+            _buildCartItem(
               product: item.product,
               quantity: item.quantity + safeQty,
+              pricing: item.hasQuotePricing
+                  ? _QuoteLinePricing.fromCartItem(item)
+                  : null,
             )
           else
             item,
@@ -146,7 +367,7 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
       state = [
         ...state,
-        CartItem(
+        _buildCartItem(
           product: product,
           quantity: safeQty,
         ),
@@ -154,6 +375,18 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     }
 
     _saveCart();
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'add_to_cart',
+        objectType: 'product',
+        objectId: product.id,
+        value: safeQty,
+        metadata: <String, dynamic>{
+          'quantity': safeQty,
+          if (product.sku.trim().isNotEmpty) 'sku': product.sku.trim(),
+        },
+      ),
+    );
 
     // Sincronización ligera con el carrito persistente del plugin nuevo.
     // Si falla no bloquea el carrito local ni la experiencia de compra.
@@ -169,11 +402,43 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   }
 
   void removeProduct(int productId) {
+    CartItem? removedItem;
+    for (final item in state) {
+      if (item.product.id == productId) {
+        removedItem = item;
+        break;
+      }
+    }
+
     state = state.where((item) => item.product.id != productId).toList();
     _saveCart();
+
+    if (removedItem != null) {
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'remove_from_cart',
+          objectType: 'product',
+          objectId: productId,
+          value: removedItem.quantity,
+          metadata: <String, dynamic>{
+            'quantity': removedItem.quantity,
+            if (removedItem.product.sku.trim().isNotEmpty)
+              'sku': removedItem.product.sku.trim(),
+          },
+        ),
+      );
+    }
   }
 
   void updateQuantity(int productId, int newQty) {
+    CartItem? previousItem;
+    for (final item in state) {
+      if (item.product.id == productId) {
+        previousItem = item;
+        break;
+      }
+    }
+
     if (newQty <= 0) {
       removeProduct(productId);
       return;
@@ -183,9 +448,12 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
       for (final item in state)
         if (item.product.id == productId)
           item.product.canAddToCart
-              ? CartItem(
+              ? _buildCartItem(
             product: item.product,
             quantity: newQty,
+            pricing: item.hasQuotePricing
+                ? _QuoteLinePricing.fromCartItem(item)
+                : null,
           )
               : item
         else
@@ -193,11 +461,32 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     ].where((item) => item.product.canAddToCart).toList();
 
     _saveCart();
+
+    if (previousItem != null && previousItem.product.canAddToCart) {
+      final delta = newQty - previousItem.quantity;
+      if (delta != 0) {
+        unawaited(
+          MundicamAnalyticsService.instance.track(
+            eventName: delta > 0 ? 'add_to_cart' : 'remove_from_cart',
+            objectType: 'product',
+            objectId: productId,
+            value: delta.abs(),
+            metadata: <String, dynamic>{
+              'quantity': delta.abs(),
+              'new_quantity': newQty,
+              if (previousItem.product.sku.trim().isNotEmpty)
+                'sku': previousItem.product.sku.trim(),
+            },
+          ),
+        );
+      }
+    }
   }
 
-  void clearCart() {
+  Future<void> clearCart() async {
     state = [];
-    _saveCart();
+    await _saveCart();
+    await clearQuoteSource();
 
     ApiService().clearRemoteCart().then((ok) {
       if (kDebugMode) {

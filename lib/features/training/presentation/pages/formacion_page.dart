@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/features/training/data/models/cursos_model.dart';
 import 'package:mundicam/features/training/presentation/providers/academy_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 const Color _pageBg = Color(0xFFF4F7FB);
@@ -31,6 +32,8 @@ class FormacionPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'academy');
     final academyAsync = ref.watch(academyProvider);
 
     return Scaffold(

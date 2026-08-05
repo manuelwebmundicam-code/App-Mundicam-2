@@ -12,6 +12,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 
 class MundiCamOrderNotification {
   final String event;
@@ -585,6 +586,18 @@ class NotificationService {
     );
 
     if (notification == null) return;
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'push_opened',
+        objectType: notification.orderId != null ? 'order' : 'notification',
+        objectId: notification.orderId,
+        metadata: <String, dynamic>{
+          'event': notification.event,
+          if ((notification.status ?? '').trim().isNotEmpty)
+            'status': notification.status!.trim(),
+        },
+      ),
+    );
     _emitNotification(notification);
   }
 
@@ -595,6 +608,18 @@ class NotificationService {
     );
 
     if (notification == null) return;
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'push_opened',
+        objectType: notification.orderId != null ? 'order' : 'notification',
+        objectId: notification.orderId,
+        metadata: <String, dynamic>{
+          'event': notification.event,
+          if ((notification.status ?? '').trim().isNotEmpty)
+            'status': notification.status!.trim(),
+        },
+      ),
+    );
     _emitNotification(notification);
   }
 

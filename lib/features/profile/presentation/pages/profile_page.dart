@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
@@ -477,9 +478,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   String _getManagerEmail() {
     final candidates = <dynamic>[
       _wooCustomer?['manager_email'],
-      _wooCustomer?['wpuef_cid_c30'],
       _getMeta('manager_email'),
-      _getMeta('wpuef_cid_c30'),
     ];
 
     for (final value in candidates) {
@@ -493,6 +492,37 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
 
     return '—';
+  }
+
+  String _getManagerPhone() {
+    final candidates = <dynamic>[
+      _wooCustomer?['manager_phone'],
+      _getMeta('manager_phone'),
+    ];
+
+    for (final value in candidates) {
+      final phone = value?.toString().trim() ?? '';
+      if (phone.isNotEmpty &&
+          phone != '—' &&
+          phone.toLowerCase() != 'null') {
+        return phone;
+      }
+    }
+    return '—';
+  }
+
+  Future<void> _callManager() async {
+    final phone = _getManagerPhone();
+    if (phone == '—') return;
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir la aplicación de teléfono.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _emailManager() async {
@@ -576,6 +606,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'profile');
     return Scaffold(
       backgroundColor: _pageBg,
       appBar: _ProfilePageAppBar(
@@ -608,7 +640,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         "Presupuestos",
                         const QuotesPage(),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 10),
+                      _quickButton(
+                        context,
+                        Icons.handyman_outlined,
+                        "RMA's",
+                        const RmaPage(),
+                      ),
+                      const SizedBox(width: 10),
                       _quickButton(
                         context,
                         Icons.local_shipping_outlined,
@@ -1201,6 +1240,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Widget _buildManagerCard() {
     final managerName = _getAssignedManager();
     final managerEmail = _getManagerEmail();
+    final managerPhone = _getManagerPhone();
 
     return Container(
       width: double.infinity,
@@ -1228,6 +1268,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     Icons.email_outlined,
                     'Email del gestor',
                     managerEmail,
+                  ),
+                ),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: managerPhone != '—' ? _callManager : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: _infoRow(
+                    Icons.phone_outlined,
+                    'Teléfono del gestor',
+                    managerPhone,
                   ),
                 ),
               ),
@@ -1267,7 +1319,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(
-                  Icons.delete_forever_outlined,
+                  Icons.pause_circle_outline_rounded,
                   color: Colors.red,
                   size: 21,
                 ),
@@ -1278,7 +1330,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'ELIMINAR CUENTA',
+                      'INHABILITAR CUENTA EN LA APP',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w900,
@@ -1289,7 +1341,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'Solicita la eliminación de tu cuenta y bloquea el acceso a la app.',
+                      'Inhabilita el acceso a la app en todos tus dispositivos. La web seguirá activa.',
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.3,
@@ -1317,9 +1369,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(Icons.delete_outline_rounded, size: 19),
+                  : const Icon(Icons.pause_circle_outline_rounded, size: 19),
               label: Text(
-                _deletingAccount ? 'ENVIANDO SOLICITUD...' : 'ELIMINAR CUENTA',
+                _deletingAccount ? 'INHABILITANDO...' : 'INHABILITAR EN LA APP',
                 style: const TextStyle(
                   fontFamily: 'Oswald',
                   fontWeight: FontWeight.w900,
@@ -1544,10 +1596,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Text('¿Eliminar cuenta?'),
+        title: const Text('¿Inhabilitar cuenta en la app?'),
         content: const Text(
-          'Esta acción iniciará la eliminación de tu cuenta, bloqueará el acceso a la app y cerrará tu sesión.\n\n'
-          'El equipo de privacidad tramitará la eliminación o anonimización de tus datos conforme a la normativa aplicable.',
+          'Esta acción inhabilitará el acceso a la app MundiCam en todos tus dispositivos, eliminará las notificaciones y cerrará únicamente la sesión de la app.\n\n'
+          'Tu acceso a la web seguirá funcionando de forma independiente. El equipo de privacidad recibirá la solicitud para tramitar la eliminación o anonimización correspondiente.',
         ),
         actions: [
           TextButton(
@@ -1564,7 +1616,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
             ),
             child: const Text(
-              'SÍ, ELIMINAR',
+              'SÍ, INHABILITAR',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
@@ -1581,8 +1633,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     setState(() => _deletingAccount = true);
 
     final apiService = ApiService();
-    AccountDeleteRequestResult? result;
-    Object? serverError;
 
     try {
       final sessionUser = await apiService.currentSessionUser();
@@ -1593,8 +1643,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           _wooCustomer?['username']?.toString();
       final wordpressId = await apiService.currentSessionWordPressId();
 
-      // Se guarda antes de contactar con el PHP. Si la red se corta o la app se
-      // cierra durante la petición, esta instalación no reabre la cuenta.
+      final result = await apiService
+          .solicitarEliminacionCuenta()
+          .timeout(const Duration(seconds: 30));
+
       await apiService.markAccountDeletionPendingLocally(
         identifiers: <String?>[
           email,
@@ -1603,15 +1655,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         ],
       );
 
-      try {
-        result = await apiService
-            .solicitarEliminacionCuenta()
-            .timeout(const Duration(seconds: 30));
-      } catch (e) {
-        serverError = e;
-      }
-
-      // La limpieza local se ejecuta siempre, aunque Firebase o FCM fallen.
       try {
         await NotificationService()
             .clearDeviceRegistration()
@@ -1624,14 +1667,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
       if (!mounted) return;
 
-      final synchronized = result != null;
-      final reference = result?.requestId.trim() ?? '';
-      final serverMessage = serverError
-              ?.toString()
-              .replaceFirst('Exception: ', '')
-              .trim() ??
-          '';
-
+      final reference = result.requestId.trim();
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
@@ -1639,24 +1675,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          icon: Icon(
-            synchronized
-                ? Icons.mark_email_read_outlined
-                : Icons.lock_clock_outlined,
-            color: synchronized ? Colors.green : Colors.orange.shade800,
+          icon: const Icon(
+            Icons.pause_circle_outline_rounded,
+            color: Colors.green,
             size: 48,
           ),
-          title: Text(
-            synchronized
-                ? 'Solicitud recibida'
-                : 'Acceso bloqueado en este dispositivo',
-          ),
+          title: const Text('App inhabilitada'),
           content: Text(
-            synchronized
-                ? (reference.isEmpty
-                    ? 'Tu acceso ha quedado bloqueado. El equipo de privacidad tramitará la eliminación y te confirmará la finalización por correo.'
-                    : 'Tu acceso ha quedado bloqueado. Referencia: $reference. El equipo de privacidad tramitará la eliminación y te confirmará la finalización por correo.')
-                : 'La sesión se ha cerrado y esta cuenta no podrá volver a entrar desde esta instalación. El servidor no confirmó la solicitud${serverMessage.isEmpty ? '' : ': $serverMessage'}. Contacta con rgpd@mundicam.com si no recibes confirmación.',
+            reference.isEmpty
+                ? 'El acceso a la app ha quedado inhabilitado en todos tus dispositivos. La web seguirá activa. Recibirás la confirmación por correo.'
+                : 'El acceso a la app ha quedado inhabilitado en todos tus dispositivos. La web seguirá activa. Referencia: $reference.',
             textAlign: TextAlign.center,
           ),
           actions: [
@@ -1672,6 +1700,20 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginPage()),
         (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final clean = e.toString().replaceFirst('Exception: ', '').trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            clean.isEmpty
+                ? 'No se pudo inhabilitar la cuenta en la app. Inténtalo de nuevo.'
+                : clean,
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     } finally {
       if (mounted) setState(() => _deletingAccount = false);

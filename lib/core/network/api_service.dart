@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/cache/product_cache_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/catalog/data/models/category_model.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/home/data/models/banner.dart';
@@ -52,11 +53,58 @@ String? _firstNonEmptyString(List<dynamic> values) {
   return null;
 }
 
+String? _canonicalOrderPaymentMethod(dynamic value) {
+  final raw = value?.toString().trim().toLowerCase() ?? '';
+  switch (raw) {
+    case 'redsys':
+      return 'redsys';
+    case 'bacs':
+      return 'bacs';
+    case 'cheque':
+    case 'giro':
+    case 'aplazado':
+      return 'cheque';
+    default:
+      return null;
+  }
+}
+
 List<dynamic> _firstList(List<dynamic> values) {
   for (final value in values) {
     if (value is List) return value;
   }
   return <dynamic>[];
+}
+
+
+class PasswordResetRequestResult {
+  final bool success;
+  final String message;
+  final Map<String, dynamic>? rawData;
+
+  const PasswordResetRequestResult({
+    required this.success,
+    required this.message,
+    this.rawData,
+  });
+
+  factory PasswordResetRequestResult.success([String? message]) {
+    return PasswordResetRequestResult(
+      success: true,
+      message: message?.trim().isNotEmpty == true
+          ? message!.trim()
+          : 'Si el correo está registrado, recibirás un mensaje para restablecer tu contraseña.',
+    );
+  }
+
+  factory PasswordResetRequestResult.failure(String message) {
+    return PasswordResetRequestResult(
+      success: false,
+      message: message.trim().isNotEmpty
+          ? message.trim()
+          : 'No se pudo solicitar la recuperación de contraseña.',
+    );
+  }
 }
 
 class OrderCreateResult {
@@ -228,7 +276,7 @@ class AccountDeleteRequestResult {
       rgpdEmailSent: json['rgpd_email_sent'] == true,
       emailRetryScheduled: json['email_retry_scheduled'] == true,
       message: _firstNonEmptyString([json['message']]) ??
-          'Solicitud de eliminación registrada.',
+          'Solicitud de inhabilitación registrada.',
       rawData: json,
     );
   }
@@ -1229,6 +1277,189 @@ class ApiService {
   // ================================================================
   // PERFIL / CLIENTE
   // ================================================================
+
+
+  Future<PasswordResetRequestResult> requestPasswordReset({
+    required String email,
+  }) async {
+    final cleanEmail = email.trim();
+
+    if (cleanEmail.isEmpty) {
+      return PasswordResetRequestResult.failure('Introduce tu correo electrónico.');
+    }
+
+    final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    if (!emailRegex.hasMatch(cleanEmail)) {
+      return PasswordResetRequestResult.failure('Introduce un correo electrónico válido.');
+    }
+
+    // 1) Endpoint propio recomendado en PHP. No requiere sesión porque el usuario
+    // está recuperando acceso antes de iniciar sesión.
+    final appEndpoints = <String>[
+      '/auth/forgot-password',
+      '/password/forgot',
+      '/account/forgot-password',
+      '/forgot-password',
+    ];
+
+    for (final path in appEndpoints) {
+      try {
+        final response = await _dio.post(
+          '$_appNamespace$path',
+          data: <String, dynamic>{
+            'email': cleanEmail,
+            'user_login': cleanEmail,
+          },
+          options: Options(
+            headers: const <String, dynamic>{
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-store',
+              'User-Agent': 'MundiCam-App/PasswordReset',
+            },
+            validateStatus: (status) => status != null && status < 500,
+            sendTimeout: const Duration(seconds: 15),
+            receiveTimeout: const Duration(seconds: 20),
+          ),
+        );
+
+        final statusCode = response.statusCode ?? 0;
+        if (statusCode == 404 || statusCode == 405) {
+          continue;
+        }
+
+        final data = response.data;
+        final body = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+
+        if (statusCode >= 200 && statusCode < 300 && body['success'] != false) {
+          return PasswordResetRequestResult(
+            success: true,
+            message: _firstNonEmptyString([
+                  body['message'],
+                  body['data'] is Map ? (body['data'] as Map)['message'] : null,
+                ]) ??
+                'Si el correo está registrado, recibirás un mensaje para restablecer tu contraseña.',
+            rawData: body,
+          );
+        }
+
+        final message = _firstNonEmptyString([
+          body['message'],
+          body['error'],
+          body['data'] is Map ? (body['data'] as Map)['message'] : null,
+        ]);
+
+        if (message != null && message.trim().isNotEmpty) {
+          return PasswordResetRequestResult.failure(message);
+        }
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('⚠️ Endpoint app reset no disponible ($path): $error');
+        }
+      }
+    }
+
+    // 2) Fallback sin WebView: pedir nonce al formulario WooCommerce y hacer POST.
+    // Esto evita abrir una pantalla web blanca/fea dentro de la app.
+    return _requestWooCommercePasswordReset(cleanEmail);
+  }
+
+  Future<PasswordResetRequestResult> _requestWooCommercePasswordReset(
+    String email,
+  ) async {
+    final lostPasswordPath = '/my-account/lost-password/';
+    final lostPasswordUrl = '$_baseUrl$lostPasswordPath';
+
+    try {
+      final getResponse = await _dio.get<String>(
+        lostPasswordUrl,
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: const <String, dynamic>{
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Cache-Control': 'no-store',
+            'User-Agent': 'MundiCam-App/PasswordReset',
+          },
+          validateStatus: (status) => status != null && status < 500,
+          receiveTimeout: const Duration(seconds: 20),
+        ),
+      );
+
+      final html = getResponse.data ?? '';
+      final nonce = _extractHtmlInputValue(
+            html,
+            'woocommerce-lost-password-nonce',
+          ) ??
+          _extractHtmlInputValue(html, '_wpnonce');
+
+      if ((getResponse.statusCode ?? 0) >= 400 || nonce == null || nonce.isEmpty) {
+        return PasswordResetRequestResult.failure(
+          'No se pudo preparar la recuperación de contraseña. Inténtalo de nuevo en unos minutos.',
+        );
+      }
+
+      final postResponse = await _dio.post<String>(
+        lostPasswordUrl,
+        data: <String, dynamic>{
+          'user_login': email,
+          'wc_reset_password': 'true',
+          'woocommerce-lost-password-nonce': nonce,
+          '_wpnonce': nonce,
+          '_wp_http_referer': lostPasswordPath,
+        },
+        options: Options(
+          responseType: ResponseType.plain,
+          contentType: Headers.formUrlEncodedContentType,
+          followRedirects: true,
+          headers: const <String, dynamic>{
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Cache-Control': 'no-store',
+            'User-Agent': 'MundiCam-App/PasswordReset',
+          },
+          validateStatus: (status) => status != null && status < 500,
+          sendTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 25),
+        ),
+      );
+
+      final statusCode = postResponse.statusCode ?? 0;
+      if (statusCode >= 200 && statusCode < 400) {
+        return PasswordResetRequestResult.success();
+      }
+
+      return PasswordResetRequestResult.failure(
+        'No se pudo enviar el correo de recuperación. Inténtalo de nuevo en unos minutos.',
+      );
+    } catch (error) {
+      if (kDebugMode) debugPrint('⚠️ Reset WooCommerce falló: $error');
+      return PasswordResetRequestResult.failure(
+        'No se pudo conectar con MundiCam para recuperar la contraseña. Inténtalo de nuevo en unos minutos.',
+      );
+    }
+  }
+
+  String? _extractHtmlInputValue(String html, String inputName) {
+    final escapedName = RegExp.escape(inputName);
+
+    final patterns = <RegExp>[
+      RegExp(
+        '<input[^>]*name=["\\\']$escapedName["\\\'][^>]*value=["\\\']([^"\\\']*)["\\\'][^>]*>',
+        caseSensitive: false,
+      ),
+      RegExp(
+        '<input[^>]*value=["\\\']([^"\\\']*)["\\\'][^>]*name=["\\\']$escapedName["\\\'][^>]*>',
+        caseSensitive: false,
+      ),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(html);
+      final value = match?.group(1)?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+
+    return null;
+  }
 
   Future<Map<String, dynamic>?> getCustomerByEmail(String email) async {
     try {
@@ -2568,6 +2799,8 @@ class ApiService {
   Future<List<ShippingOption>> getShippingMethods({
     required List<Map<String, dynamic>> lineItems,
     required Map<String, dynamic> shippingAddress,
+    int sourceQuoteId = 0,
+    String sourceLocalQuoteUuid = '',
   }) async {
     final cleanItems = _sanitizeLineItems(lineItems);
     if (cleanItems.isEmpty) return <ShippingOption>[];
@@ -2576,6 +2809,9 @@ class ApiService {
       final response = await _appPost('/shipping/methods', data: {
         'line_items': cleanItems,
         'shipping_address': shippingAddress,
+        if (sourceQuoteId > 0) 'source_quote_id': sourceQuoteId,
+        if (sourceLocalQuoteUuid.trim().isNotEmpty)
+          'source_local_quote_uuid': sourceLocalQuoteUuid.trim(),
       });
       final root = _responseMap(response.data);
       final nested = _asMap(root['data']);
@@ -2615,6 +2851,8 @@ class ApiService {
     required List<Map<String, dynamic>> lineItems,
     required Map<String, dynamic> shippingAddress,
     String? shippingMethodId,
+    int sourceQuoteId = 0,
+    String sourceLocalQuoteUuid = '',
   }) async {
     final cleanItems = _sanitizeLineItems(lineItems);
     if (cleanItems.isEmpty) return null;
@@ -2623,6 +2861,9 @@ class ApiService {
       final response = await _appPost('/order/preview', data: {
         'line_items': cleanItems,
         'shipping_address': shippingAddress,
+        if (sourceQuoteId > 0) 'source_quote_id': sourceQuoteId,
+        if (sourceLocalQuoteUuid.trim().isNotEmpty)
+          'source_local_quote_uuid': sourceLocalQuoteUuid.trim(),
         if ((shippingMethodId ?? '').trim().isNotEmpty) ...{
           'shipping_method_id': shippingMethodId!.trim(),
           'shipping_option_id': shippingMethodId!.trim(),
@@ -2652,10 +2893,26 @@ class ApiService {
         return OrderCreateResult.failure('No hay productos válidos para crear el pedido.');
       }
 
-      final response = await _appPost('/order/create', data: {
-        ...orderData,
-        'line_items': lineItems,
-      });
+      final paymentMethod =
+          _canonicalOrderPaymentMethod(orderData['payment_method']);
+      if (paymentMethod == null) {
+        return OrderCreateResult.failure(
+          'Selecciona un método de pago válido antes de crear el pedido.',
+        );
+      }
+
+      // El estado lo decide exclusivamente el PHP 1.9.36:
+      // redsys=pending, bacs=processing, cheque=on-hold.
+      final requestData = Map<String, dynamic>.from(orderData)
+        ..remove('status')
+        ..remove('set_paid')
+        ..['payment_method'] = paymentMethod
+        ..['line_items'] = lineItems;
+
+      final enrichedOrderData =
+          await MundicamAnalyticsService.instance.enrichPayload(requestData);
+      final response =
+          await _appPost('/order/create', data: enrichedOrderData);
 
       final data = _responseMap(response.data);
       if (data['success'] == false) {
@@ -2729,6 +2986,16 @@ class ApiService {
     }
 
     try {
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'quote_started',
+          value: cleanItems.length,
+          metadata: <String, dynamic>{'items': cleanItems.length},
+          dedupeKey: 'quote_started:${cleanItems.length}',
+          dedupeWindow: const Duration(seconds: 2),
+        ),
+      );
+
       // PHP 1.9.27 mantiene un carrito de presupuesto persistente en servidor.
       // Para pasar un presupuesto LOCAL al flujo real de pago, primero se guarda
       // como presupuesto WooCommerce/YITH y después se llama a /quote/accept-and-pay.
@@ -2757,9 +3024,12 @@ class ApiService {
         }
       }
 
+      final analyticsContext =
+          await MundicamAnalyticsService.instance.requestContext();
       final createResponse = await _appPost('/quote/create', data: {
         if ((customerNote ?? '').trim().isNotEmpty)
           'customer_note': customerNote!.trim(),
+        ...analyticsContext,
       });
       final createData = _responseMap(createResponse.data);
       final result = QuoteCreateResult.fromJson(createData);
@@ -2807,9 +3077,22 @@ class ApiService {
       // El plugin mantiene un carrito de presupuesto persistente. Para que el
       // presupuesto aparezca inmediatamente en la pantalla "Presupuestos",
       // creamos la solicitud en WooCommerce/YITH justo después de añadir.
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'quote_started',
+          objectType: 'product',
+          objectId: productId,
+          value: quantity <= 0 ? 1 : quantity,
+          dedupeKey: 'quote_started:$productId',
+          dedupeWindow: const Duration(seconds: 2),
+        ),
+      );
+      final analyticsContext =
+          await MundicamAnalyticsService.instance.requestContext();
       final createResponse = await _appPost('/quote/create', data: {
         if ((customerNote ?? '').trim().isNotEmpty)
           'customer_note': customerNote!.trim(),
+        ...analyticsContext,
       });
 
       final createData = _responseMap(createResponse.data);
@@ -3002,6 +3285,30 @@ class ApiService {
   }
 
 
+  Future<Map<String, dynamic>> prepararPresupuestoEnCarrito({
+    required int quoteId,
+  }) async {
+    if (quoteId <= 0) {
+      throw Exception('No se pudo identificar el presupuesto.');
+    }
+
+    try {
+      final response = await _appPost('/quote/prepare-cart', data: {
+        'quote_id': quoteId,
+      });
+      final data = _responseMap(response.data);
+      if (data['success'] == false || data['cart_ready'] != true) {
+        throw Exception(
+          data['message']?.toString() ??
+              'No se pudo cargar el presupuesto en el carrito.',
+        );
+      }
+      return data;
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    }
+  }
+
   Future<QuoteAcceptPayResult> aceptarYPagarPresupuesto({
     required int quoteId,
   }) async {
@@ -3026,6 +3333,32 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> cancelarIntentoPagoPresupuesto({
+    required int orderId,
+    required String orderKey,
+  }) async {
+    if (orderId <= 0 || orderKey.trim().isEmpty) {
+      throw Exception('No se pudo identificar el intento de pago.');
+    }
+
+    try {
+      final response = await _appPost('/quote/cancel-checkout', data: {
+        'order_id': orderId,
+        'order_key': orderKey.trim(),
+      });
+      final data = _responseMap(response.data);
+      if (data['success'] != true) {
+        throw Exception(
+          data['message']?.toString() ??
+              'No se pudo cancelar el intento de pago del presupuesto.',
+        );
+      }
+      return data;
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    }
+  }
+
   Future<AccountDeleteRequestResult> solicitarEliminacionCuenta() async {
     try {
       final response = await _appPost('/account/delete-request', data: {
@@ -3039,7 +3372,7 @@ class ApiService {
         throw Exception(
           result.message.isNotEmpty
               ? result.message
-              : 'El servidor no confirmó el bloqueo de la cuenta.',
+              : 'El servidor no confirmó la inhabilitación de la app.',
         );
       }
       return result;
@@ -3372,17 +3705,11 @@ class ApiService {
 
     final managerEmail = <dynamic>[
       root['manager_email'],
-      root['wpuef_cid_c30'],
       nestedData['manager_email'],
-      nestedData['wpuef_cid_c30'],
       user['manager_email'],
-      user['wpuef_cid_c30'],
       billing['manager_email'],
-      billing['wpuef_cid_c30'],
       shipping['manager_email'],
-      shipping['wpuef_cid_c30'],
       metaValue('manager_email'),
-      metaValue('wpuef_cid_c30'),
       user['assigned_manager_email'],
       user['gestor_email'],
       user['technical_manager_email'],
@@ -3393,23 +3720,42 @@ class ApiService {
 
     final managerName = <dynamic>[
       root['manager_name'],
+      root['wpuef_cid_c30'],
       root['gestor_asignado'],
       root['assigned_manager'],
       nestedData['manager_name'],
+      nestedData['wpuef_cid_c30'],
       nestedData['gestor_asignado'],
       nestedData['assigned_manager'],
       user['manager_name'],
+      user['wpuef_cid_c30'],
       user['gestor_asignado'],
       user['assigned_manager'],
       user['commercial_manager'],
       user['sales_manager'],
       metaValue('manager_name'),
+      metaValue('wpuef_cid_c30'),
       metaValue('gestor_asignado'),
       metaValue('assigned_manager'),
     ].map((value) => cleanValue(value)).firstWhere(
           (value) => value != null,
           orElse: () => null,
         );
+
+    final managerPhone = <dynamic>[
+      root['manager_phone'],
+      nestedData['manager_phone'],
+      user['manager_phone'],
+      billing['manager_phone'],
+      shipping['manager_phone'],
+      metaValue('manager_phone'),
+      user['assigned_manager_phone'],
+      user['gestor_phone'],
+    ].map((value) {
+      final text = value?.toString().trim() ?? '';
+      if (text.isEmpty || text.toLowerCase() == 'null') return null;
+      return text;
+    }).firstWhere((value) => value != null, orElse: () => null);
 
     bool hasMeta(String key) {
       return metaData.any((item) {
@@ -3426,19 +3772,25 @@ class ApiService {
     if (managerEmail != null && managerEmail.trim().isNotEmpty) {
       final email = managerEmail.trim();
       user['manager_email'] = email;
-      user['wpuef_cid_c30'] = email;
       addMeta('manager_email', email);
-      addMeta('wpuef_cid_c30', email);
     }
 
     if (managerName != null && managerName.trim().isNotEmpty) {
       final name = managerName.trim();
       user['manager_name'] = name;
+      user['wpuef_cid_c30'] = name;
       user['gestor_asignado'] = name;
       user['assigned_manager'] = name;
       addMeta('manager_name', name);
+      addMeta('wpuef_cid_c30', name);
       addMeta('gestor_asignado', name);
       addMeta('assigned_manager', name);
+    }
+
+    if (managerPhone != null && managerPhone.trim().isNotEmpty) {
+      final phone = managerPhone.trim();
+      user['manager_phone'] = phone;
+      addMeta('manager_phone', phone);
     }
 
     user['meta_data'] = metaData;
@@ -3506,13 +3858,16 @@ class ApiService {
     ]);
     addMetaIfPresent('manager_email', <dynamic>[
       user['manager_email'],
-      user['wpuef_cid_c30'],
       billing['manager_email'],
-      billing['wpuef_cid_c30'],
+    ]);
+    addMetaIfPresent('manager_phone', <dynamic>[
+      user['manager_phone'],
+      billing['manager_phone'],
     ]);
     addMetaIfPresent('wpuef_cid_c30', <dynamic>[
       user['wpuef_cid_c30'],
-      user['manager_email'],
+      user['manager_name'],
+      user['assigned_manager'],
     ]);
     addMetaIfPresent('manager_name', <dynamic>[
       user['manager_name'],
@@ -3530,15 +3885,19 @@ class ApiService {
 
     final managerEmail = _firstNonEmptyString(<dynamic>[
           user['manager_email'],
-          user['wpuef_cid_c30'],
           billing['manager_email'],
-          billing['wpuef_cid_c30'],
         ]) ??
         '';
     final managerName = _firstNonEmptyString(<dynamic>[
           user['manager_name'],
+          user['wpuef_cid_c30'],
           user['gestor_asignado'],
           user['assigned_manager'],
+        ]) ??
+        '';
+    final managerPhone = _firstNonEmptyString(<dynamic>[
+          user['manager_phone'],
+          billing['manager_phone'],
         ]) ??
         '';
 
@@ -3560,7 +3919,13 @@ class ApiService {
       'gestor_asignado': managerName,
       'assigned_manager': managerName,
       'manager_email': managerEmail,
-      'wpuef_cid_c30': managerEmail,
+      'manager_phone': managerPhone,
+      'wpuef_cid_c30': managerName,
+      'manager': {
+        'name': managerName,
+        'email': managerEmail,
+        'phone': managerPhone,
+      },
       'can_view_stock': permissions['can_view_stock'] == true,
     };
   }

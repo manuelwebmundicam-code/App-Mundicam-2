@@ -10,8 +10,13 @@ import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
+
+enum CheckoutExitAction { returnToQuotes }
 
 class _CheckoutPaymentMethod {
   final String id;
@@ -118,6 +123,26 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       controller.addListener(_onShippingAddressChanged);
     }
     _cargarDatosCliente();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      MundicamAnalyticsService.instance
+          .trackScreenViewForRoute(context, 'checkout');
+      final cartSource = ref.read(cartProvider.notifier);
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'checkout_started',
+          metadata: <String, dynamic>{
+            'source': cartSource.sourceQuoteId > 0
+                ? 'web_quote'
+                : (cartSource.sourceLocalQuoteUuid.trim().isNotEmpty
+                    ? 'local_quote'
+                    : 'cart'),
+          },
+          dedupeKey: 'checkout_started',
+          dedupeWindow: const Duration(seconds: 2),
+        ),
+      );
+    });
   }
 
   @override
@@ -389,6 +414,45 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   String _formatMoney(double value) => '${value.toStringAsFixed(2)} €';
 
+  int get _sourceQuoteId => ref.read(cartProvider.notifier).sourceQuoteId;
+
+  String get _sourceLocalQuoteUuid =>
+      ref.read(cartProvider.notifier).sourceLocalQuoteUuid;
+
+  String _stableFingerprint(String input) {
+    var hash = 0x811C9DC5;
+    for (final codeUnit in input.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
+  }
+
+  String _checkoutContextFingerprint({
+    required Map<String, dynamic> shippingAddress,
+    required String shippingMethodId,
+  }) {
+    const addressKeys = <String>[
+      'first_name',
+      'last_name',
+      'company',
+      'address_1',
+      'address_2',
+      'city',
+      'state',
+      'postcode',
+      'country',
+      'email',
+      'phone',
+    ];
+    final address = addressKeys
+        .map((key) => '${key.toLowerCase()}=${shippingAddress[key]?.toString().trim().toLowerCase() ?? ''}')
+        .join('|');
+    return _stableFingerprint(
+      '${_paymentMethod.trim().toLowerCase()}|${shippingMethodId.trim().toLowerCase()}|$address',
+    );
+  }
+
   bool _isPaymentMethodEnabled(_CheckoutPaymentMethod method) {
     if (!method.requiresCredit) return true;
     final disponible = _creditLimit - _creditUsed;
@@ -423,6 +487,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       final options = await ApiService().getShippingMethods(
         lineItems: lineItems,
         shippingAddress: address,
+        sourceQuoteId: _sourceQuoteId,
+        sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
       );
 
       ShippingOption? selected;
@@ -441,6 +507,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           lineItems: lineItems,
           shippingAddress: address,
           shippingMethodId: selected.id,
+          sourceQuoteId: _sourceQuoteId,
+          sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
         );
       }
 
@@ -455,6 +523,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             lineItems: lineItems,
             shippingAddress: address,
             shippingMethodId: selected.id,
+            sourceQuoteId: _sourceQuoteId,
+            sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
           );
         }
       }
@@ -501,6 +571,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         lineItems: _currentLineItems(),
         shippingAddress: _shippingAddressPayload(),
         shippingMethodId: option.id,
+        sourceQuoteId: _sourceQuoteId,
+        sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
       );
     } catch (e) {
       debugPrint('❌ Error seleccionando envío: $e');
@@ -528,6 +600,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       lineItems: _currentLineItems(),
       shippingAddress: _shippingAddressPayload(),
       shippingMethodId: _selectedShippingOption!.id,
+      sourceQuoteId: _sourceQuoteId,
+      sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
     );
 
     if (preview != null && mounted) {
@@ -551,11 +625,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
 
     return effectivePreview;
-  }
-
-  String _buildWooPaymentUrl(
-      {required int orderId, required String orderKey}) {
-    return '$_baseUrl/checkout/order-pay/$orderId/?pay_for_order=true&key=${Uri.encodeComponent(orderKey)}';
   }
 
   /// Vuelve al Home usando el callback si existe, si no, hace pop de la ruta.
@@ -898,6 +967,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   Future<void> _finalizarPedido() async {
     if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
+    final cartNotifier = ref.read(cartProvider.notifier);
+    final sourceQuoteId = cartNotifier.sourceQuoteId;
+    final sourceLocalQuoteUuid = cartNotifier.sourceLocalQuoteUuid;
+    final hasQuoteSource =
+        sourceQuoteId > 0 || sourceLocalQuoteUuid.trim().isNotEmpty;
+
     final idempotencyKey = _checkoutIdempotencyKey ??=
         'app-${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
     setState(() => _isLoading = true);
@@ -910,7 +985,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
 
     final cartItems = ref.read(cartProvider);
-    final notifier = ref.read(cartProvider.notifier);
+    final notifier = cartNotifier;
     final preview = await _ensurePreviewBeforeSubmit();
     if (!mounted) return;
 
@@ -950,13 +1025,28 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             })
         .toList();
     final shippingAddress = _shippingAddressPayload();
+    final quoteIdentity = sourceQuoteId > 0
+        ? 'web-$sourceQuoteId'
+        : 'local-${sourceLocalQuoteUuid.trim()}';
+    final cartIdentity = preview.cartHash.isNotEmpty
+        ? preview.cartHash
+        : lineItems.toString();
+    final checkoutContext = _checkoutContextFingerprint(
+      shippingAddress: shippingAddress,
+      shippingMethodId: _selectedShippingOption!.id,
+    );
+    final effectiveIdempotencyKey = hasQuoteSource
+        ? 'quote-${_stableFingerprint(quoteIdentity)}-'
+            '${_stableFingerprint(cartIdentity)}-$checkoutContext'
+        : idempotencyKey;
 
     final orderData = {
       if (_customerId != null) 'customer_id': _customerId,
       'payment_method': _paymentMethod,
       'payment_method_title': _paymentMethodTitle,
-      'set_paid': false,
-      'status': isCardPayment ? 'pending' : 'on-hold',
+      if (sourceQuoteId > 0) 'source_quote_id': sourceQuoteId,
+      if (sourceLocalQuoteUuid.trim().isNotEmpty)
+        'source_local_quote_uuid': sourceLocalQuoteUuid.trim(),
       'billing': _billingAddressPayload(),
       'shipping': shippingAddress,
       'shipping_address': shippingAddress,
@@ -970,7 +1060,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'expected_tax_total': preview.taxTotal.toStringAsFixed(2),
       'expected_total': total.toStringAsFixed(2),
       'expected_currency': preview.currency.isEmpty ? 'EUR' : preview.currency,
-      'idempotency_key': idempotencyKey,
+      'idempotency_key': effectiveIdempotencyKey,
       'customer_note': _notesController.text.trim(),
       'meta_data': [
         {'key': '_billing_nif', 'value': _nifController.text.trim()},
@@ -1006,13 +1096,21 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           return;
         }
 
-        final securePaymentUrl = result.paymentUrl ??
+        final paymentUrl = result.paymentUrl ??
             await ApiService().getSecureCardPaymentUrl(
               orderId: result.orderId!,
               orderKey: orderKey,
             );
-        final paymentUrl = securePaymentUrl ??
-            _buildWooPaymentUrl(orderId: result.orderId!, orderKey: orderKey);
+
+        if (paymentUrl == null ||
+            paymentUrl.trim().isEmpty ||
+            !paymentUrl.contains('mundicam_app_payment_token=')) {
+          _mostrarError(
+            'El servidor no devolvió el enlace seguro de Redsys. '
+            'No se abrirá la web general de MundiCam.',
+          );
+          return;
+        }
 
         if (!mounted) return;
 
@@ -1028,6 +1126,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               orderNumber: result.orderNumber,
               amount: total,
               paymentMethodTitle: _paymentMethodTitle,
+              quotePayment: hasQuoteSource,
+              quoteNumber: sourceQuoteId > 0
+                  ? sourceQuoteId.toString()
+                  : sourceLocalQuoteUuid,
             ),
           ),
         );
@@ -1035,22 +1137,90 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         if (paid == true) {
           _checkoutIdempotencyKey = null;
-          ref.read(cartProvider.notifier).clearCart();
+          if (sourceLocalQuoteUuid.trim().isNotEmpty) {
+            await ref
+                .read(localQuotesProvider.notifier)
+                .eliminarPresupuesto(sourceLocalQuoteUuid.trim());
+          }
+          await ref.read(cartProvider.notifier).clearCart();
           ref.invalidate(ordersProvider);
           _irAlInicio(
-              mensaje: '✅ Pago realizado con éxito. ¡Gracias por tu pedido!');
+              mensaje: '✅ Pago confirmado. El pedido ya está en preparación.');
         } else {
-          _mostrarError(
-              'Pedido creado pendiente de pago. Puedes finalizarlo desde la web.');
+          if (hasQuoteSource) {
+            bool paymentWasAlreadyConfirmed = false;
+            try {
+              final cancelResult = await ApiService().cancelarIntentoPagoPresupuesto(
+                orderId: result.orderId!,
+                orderKey: orderKey,
+              );
+              paymentWasAlreadyConfirmed = cancelResult['already_paid'] == true;
+            } catch (e) {
+              debugPrint('⚠️ No se pudo confirmar la cancelación del intento: $e');
+            }
+
+            if (paymentWasAlreadyConfirmed) {
+              _checkoutIdempotencyKey = null;
+              if (sourceLocalQuoteUuid.trim().isNotEmpty) {
+                await ref
+                    .read(localQuotesProvider.notifier)
+                    .eliminarPresupuesto(sourceLocalQuoteUuid.trim());
+              }
+              await ref.read(cartProvider.notifier).clearCart();
+              ref.invalidate(ordersProvider);
+              ref.invalidate(quotesProvider);
+              _irAlInicio(
+                mensaje: '✅ El pago ya estaba confirmado. El pedido está en preparación.',
+              );
+              return;
+            }
+
+            _checkoutIdempotencyKey = null;
+            await ref.read(cartProvider.notifier).clearCart();
+            ref.invalidate(ordersProvider);
+            ref.invalidate(quotesProvider);
+            if (mounted) {
+              Navigator.of(context).pop(CheckoutExitAction.returnToQuotes);
+            }
+          } else {
+            _mostrarError(
+              'El pedido sigue pendiente de pago. Puedes reintentar el pago '
+              'desde esta misma operación.',
+            );
+          }
         }
         return;
       }
 
-      // Transferencia / giro
+      // Transferencia / giro. Ninguno abre Redsys ni realiza un cobro
+      // automático. El servidor decide el estado real de cada método.
       _checkoutIdempotencyKey = null;
-      ref.read(cartProvider.notifier).clearCart();
+      await ref.read(cartProvider.notifier).clearCart();
       ref.invalidate(ordersProvider);
-      _irAlInicio(mensaje: '✅ Pedido confirmado. Te llevamos al inicio.');
+
+      final isDeferredPayment = _paymentMethod == 'cheque';
+      if (hasQuoteSource) {
+        ref.invalidate(quotesProvider);
+        if (mounted) {
+          final message = isDeferredPayment
+              ? 'Pedido en espera de aprobación manual. No se ha realizado '
+                  'ningún cobro automático y el presupuesto seguirá visible '
+                  'hasta que logística lo apruebe.'
+              : 'Transferencia pendiente de comprobación. El presupuesto seguirá '
+                  'visible hasta que administración confirme el ingreso.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+          Navigator.of(context).pop(CheckoutExitAction.returnToQuotes);
+        }
+      } else {
+        _irAlInicio(
+          mensaje: isDeferredPayment
+              ? 'Pedido en espera de aprobación manual. No se ha realizado '
+                  'ningún cobro automático.'
+              : '✅ Pedido registrado por transferencia bancaria.',
+        );
+      }
     } catch (e) {
       debugPrint('❌ Error creando pedido: $e');
       _mostrarError(

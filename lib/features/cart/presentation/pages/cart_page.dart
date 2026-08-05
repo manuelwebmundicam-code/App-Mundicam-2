@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/checkout/presentation/pages/checkout_page.dart';
@@ -54,19 +55,26 @@ class CartPage extends ConsumerWidget {
   ) async {
     if (cartItems.isEmpty) return;
 
+    final cartNotifier = ref.read(cartProvider.notifier);
+    final hasOriginalQuote = cartNotifier.hasQuoteSource;
+
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: const Text(
-          'Cancelar pedido',
+          'Cancelar tramitación',
           style: TextStyle(
             fontFamily: 'Oswald',
             fontWeight: FontWeight.w800,
           ),
         ),
-        content: const Text(
-          'Se sacarán estos productos de la cesta y se guardarán de nuevo como presupuesto para pagarlo más tarde.',
+        content: Text(
+          hasOriginalQuote
+              ? 'Se vaciará la cesta. El presupuesto original seguirá guardado '
+                  'en Presupuestos y podrás retomarlo más tarde.'
+              : 'Se sacarán estos productos de la cesta y se guardarán como un '
+                  'presupuesto local para retomarlo más tarde.',
         ),
         actions: [
           TextButton(
@@ -87,38 +95,45 @@ class CartPage extends ConsumerWidget {
 
     if (confirmar != true) return;
 
-    final orderId = DateTime.now().millisecondsSinceEpoch.toString();
-    final nombre = 'Presupuesto #$orderId';
-    final quoteNotifier = ref.read(localQuotesProvider.notifier);
+    String message;
+    if (hasOriginalQuote) {
+      await cartNotifier.clearCart();
+      message = 'El presupuesto original sigue guardado.';
+    } else {
+      final orderId = DateTime.now().millisecondsSinceEpoch.toString();
+      final nombre = 'Presupuesto #$orderId';
+      final quoteNotifier = ref.read(localQuotesProvider.notifier);
 
-    await quoteNotifier.crearPresupuesto(
-      orderId: orderId,
-      nombre: nombre,
-    );
-
-    for (final item in cartItems) {
-      final price = double.tryParse(
-            item.product.price.replaceAll(',', '.'),
-          ) ??
-          0;
-      await quoteNotifier.anadirItem(
+      await quoteNotifier.crearPresupuesto(
         orderId: orderId,
-        item: LocalQuoteItem(
-          productId: item.product.id,
-          productName: item.product.name,
-          quantity: item.quantity,
-          price: price,
-        ),
+        nombre: nombre,
       );
-    }
 
-    ref.read(cartProvider.notifier).clearCart();
+      for (final item in cartItems) {
+        final price = double.tryParse(
+              item.product.price.replaceAll(',', '.'),
+            ) ??
+            0;
+        await quoteNotifier.anadirItem(
+          orderId: orderId,
+          item: LocalQuoteItem(
+            productId: item.product.id,
+            productName: item.product.name,
+            quantity: item.quantity,
+            price: price,
+          ),
+        );
+      }
+
+      await cartNotifier.clearCart();
+      message = 'Presupuesto guardado: $nombre';
+    }
 
     if (!context.mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Presupuesto guardado de nuevo: $nombre'),
+        content: Text(message),
         backgroundColor: const Color(0xFF1565C0),
       ),
     );
@@ -130,8 +145,11 @@ class CartPage extends ConsumerWidget {
     }
   }
 
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'cart');
     final cartItems = ref.watch(cartProvider);
     final totalUnits = cartItems.fold<int>(
       0,
@@ -526,12 +544,20 @@ class CartPage extends ConsumerWidget {
               child: ElevatedButton.icon(
                 onPressed: cartItems.isEmpty
                     ? null
-                    : () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
+                    : () async {
+                  final result = await Navigator.of(context).push<CheckoutExitAction>(
+                    MaterialPageRoute<CheckoutExitAction>(
                       builder: (_) => const CheckoutPage(),
                     ),
                   );
+
+                  if (result == CheckoutExitAction.returnToQuotes && context.mounted) {
+                    if (onGoQuotes != null) {
+                      onGoQuotes!();
+                    } else if (Navigator.of(context).canPop()) {
+                      Navigator.of(context).pop();
+                    }
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,

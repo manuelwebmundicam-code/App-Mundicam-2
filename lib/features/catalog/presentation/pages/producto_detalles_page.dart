@@ -1,6 +1,8 @@
 // ARCHIVO: lib/features/catalog/presentation/pages/producto_detalles_page.dart
 // Sustituye el archivo completo por este contenido.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -9,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
@@ -165,6 +168,25 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     super.initState();
     _cargarStockDetalladoSiHaceFalta();
     _cargarRecomendados();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      MundicamAnalyticsService.instance.trackScreenViewForRoute(
+        context,
+        'product_detail',
+      );
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'product_view',
+          objectType: 'product',
+          objectId: widget.product.id,
+          metadata: <String, dynamic>{
+            if (widget.product.sku.trim().isNotEmpty)
+              'sku': widget.product.sku.trim(),
+          },
+          dedupeKey: 'product_view:${widget.product.id}',
+          dedupeWindow: const Duration(seconds: 2),
+        ),
+      );
+    });
   }
 
   Future<void> _cargarStockDetalladoSiHaceFalta() async {

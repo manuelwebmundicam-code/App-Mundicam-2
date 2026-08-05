@@ -9,6 +9,7 @@ import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/providers/badge_provider.dart';
 import 'package:mundicam/shared/providers/order_badge_provider.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_page.dart';
@@ -59,6 +60,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     super.initState();
     debugPrint('🍎 MAINSCREEN_INIT');
     WidgetsBinding.instance.addObserver(this);
+    unawaited(MundicamAnalyticsService.instance.screenView('home'));
 
     unawaited(
       _loadConfirmedQuoteIdsFromPrefs().catchError((Object error, StackTrace stack) {
@@ -301,6 +303,19 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   void _switchToTab(int index, {bool popToRoot = false}) {
     if (index < 0 || index >= _navigatorKeys.length) return;
+
+    const analyticsScreenNames = <String>[
+      'home',
+      'catalog',
+      'orders',
+      'quotes',
+      'cart',
+    ];
+    unawaited(
+      MundicamAnalyticsService.instance.screenView(
+        analyticsScreenNames[index],
+      ),
+    );
 
     if (index == 4 && _selectedIndex != 4) {
       _lastIndexBeforeCart = _selectedIndex;

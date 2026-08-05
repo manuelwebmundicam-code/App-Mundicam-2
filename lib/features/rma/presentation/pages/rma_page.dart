@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/features/rma/presentation/providers/rma_provider.dart';
 
@@ -10,6 +11,8 @@ class RmaPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'rma');
     final rmaAsync = ref.watch(rmaProvider);
 
     return Scaffold(

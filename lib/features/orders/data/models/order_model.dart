@@ -8,6 +8,8 @@ class OrderMundicam {
   final DateTime? datePaid;
   final DateTime? dateCompleted;
   final bool isQuote;
+  final int sourceQuoteId;
+  final String sourceLocalQuoteUuid;
 
   final String subtotal;
   final String taxTotal;
@@ -39,6 +41,8 @@ class OrderMundicam {
     this.datePaid,
     this.dateCompleted,
     this.isQuote = false,
+    this.sourceQuoteId = 0,
+    this.sourceLocalQuoteUuid = '',
     this.subtotal = '0',
     this.taxTotal = '0',
     this.shippingTotal = '0',
@@ -131,6 +135,12 @@ class OrderMundicam {
         json['date_completed'] ?? json['dateCompleted'],
       ),
       isQuote: _parseBool(json['is_quote'] ?? json['isQuote']),
+      sourceQuoteId: _parseInt(
+        json['source_quote_id'] ?? json['sourceQuoteId'],
+      ),
+      sourceLocalQuoteUuid: _safeString(
+        json['source_local_quote_uuid'] ?? json['sourceLocalQuoteUuid'],
+      ),
       subtotal: _safeMoney(json['subtotal']),
       taxTotal: _safeMoney(json['tax_total'] ?? json['taxTotal']),
       shippingTotal: _safeMoney(json['shipping_total'] ?? json['shippingTotal']),

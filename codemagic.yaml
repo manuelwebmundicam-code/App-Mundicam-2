@@ -126,7 +126,7 @@ workflows:
           set -euxo pipefail
           flutter build ipa --release \
             --build-name=1.0.4 \
-            --build-number=12 \
+            --build-number=13 \
             --export-options-plist=/Users/builder/export_options.plist
 
       - name: Verificar IPA final

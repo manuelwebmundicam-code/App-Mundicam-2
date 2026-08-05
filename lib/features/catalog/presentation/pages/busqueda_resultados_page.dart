@@ -1,4 +1,5 @@
 // busqueda_resultados_page.dart
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
@@ -58,6 +60,7 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
   String _selectedBrand = '';
   String _orderBy = '';
   int _requestToken = 0;
+  bool _searchEventTracked = false;
 
   final ScrollController _scrollController = ScrollController();
   bool _loadingMore = false;
@@ -75,6 +78,10 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
     super.initState();
     _cleanedQuery = _SearchEngine.cleanQuery(widget.query);
     _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      MundicamAnalyticsService.instance
+          .trackScreenViewForRoute(context, 'search_results');
+    });
     _loadResults();
   }
 
@@ -153,6 +160,21 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         _loadingMore = false;
         _error = null;
       });
+
+      if (!_searchEventTracked) {
+        _searchEventTracked = true;
+        unawaited(
+          MundicamAnalyticsService.instance.track(
+            eventName: 'search',
+            metadata: <String, dynamic>{
+              'query': _cleanedQuery,
+              'results': _totalItems > 0 ? _totalItems : sorted.length,
+            },
+            dedupeKey: 'search:$_cleanedQuery',
+            dedupeWindow: const Duration(seconds: 2),
+          ),
+        );
+      }
 
       _webLikeCategoryFacets(sorted).then((categoryFacets) {
         if (!mounted || token != _requestToken || categoryFacets.isEmpty) return;

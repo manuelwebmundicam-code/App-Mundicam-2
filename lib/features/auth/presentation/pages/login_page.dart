@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/shared/widgets/mundicam_webview_page.dart';
@@ -199,6 +200,14 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _abrirRegistro() async {
     if (!mounted) return;
+
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'registration_started',
+        dedupeKey: 'registration_started',
+        dedupeWindow: const Duration(seconds: 2),
+      ),
+    );
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -399,6 +408,8 @@ class _LoginPageState extends State<LoginPage> {
     ];
 
     Object? lastError;
+    final analyticsContext =
+        await MundicamAnalyticsService.instance.requestContext();
 
     for (final uri in attempts) {
       try {
@@ -416,6 +427,7 @@ class _LoginPageState extends State<LoginPage> {
             'username': email,
             'login': email,
             'password': password,
+            ...analyticsContext,
           }),
         );
 
@@ -671,9 +683,17 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       final apiService = ApiService();
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'login_attempt',
+          dedupeKey: 'login_attempt',
+          dedupeWindow: const Duration(milliseconds: 800),
+        ),
+      );
+
       if (await apiService.isAccountDeletionPendingLocally(email)) {
         throw Exception(
-          'Esta cuenta tiene una solicitud de eliminación pendiente y no puede iniciar sesión desde esta instalación.',
+          'Esta cuenta está inhabilitada para acceder desde la app MundiCam. El acceso web sigue siendo independiente.',
         );
       }
 

@@ -14,6 +14,7 @@ import 'package:mundicam/core/cache/category_cache_service.dart';
 import 'package:mundicam/core/cache/storage_cache_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
@@ -65,8 +66,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
+final _mundicamAnalyticsLifecycleObserver =
+    _MundicamAnalyticsLifecycleObserver();
+
+class _MundicamAnalyticsLifecycleObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    MundicamAnalyticsService.instance.handleLifecycleState(state);
+  }
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding.instance.addObserver(_mundicamAnalyticsLifecycleObserver);
+  unawaited(MundicamAnalyticsService.instance.bootstrap());
 
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);

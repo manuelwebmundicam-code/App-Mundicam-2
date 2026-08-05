@@ -4,10 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
-import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_from_page.dart';
@@ -34,17 +34,13 @@ class OrdersPage extends ConsumerStatefulWidget {
 }
 
 class _OrdersPageState extends ConsumerState<OrdersPage> {
-  void _goToHome(BuildContext context) {
+  void _handleBack(BuildContext context) {
     if (widget.onGoHome != null) {
       widget.onGoHome!();
       return;
     }
 
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const HomePage()),
-      (route) => false,
-    );
+    Navigator.of(context).maybePop();
   }
 
   Future<void> _refreshOrders() async {
@@ -63,6 +59,8 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
 
   @override
   Widget build(BuildContext context) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'orders');
     final ordersAsync = ref.watch(ordersProvider);
 
     return Scaffold(
@@ -71,7 +69,7 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
         title: 'MIS PEDIDOS',
         subtitle: '',
         icon: Icons.local_shipping_outlined,
-        onBack: () => _goToHome(context),
+        onBack: () => _handleBack(context),
         onRefresh: _refreshOrders,
       ),
       body: ordersAsync.when(

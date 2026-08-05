@@ -5,9 +5,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/network/api_service.dart';
+import '../../../../core/analytics/mundicam_analytics_service.dart';
 import '../../../../shared/theme/app_theme.dart';
 import '../../../../shared/widgets/professional_page_app_bar.dart';
-import '../../../checkout/presentation/pages/payment_page.dart';
+import '../../../cart/presentation/pages/cart_page.dart';
+import '../../../cart/presentation/providers/cart_provider.dart';
 import '../../../../shared/providers/badge_provider.dart';
 import '../../../catalog/data/models/producto.dart';
 import '../../../catalog/presentation/pages/producto_detalles_page.dart';
@@ -415,68 +417,91 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     if (_isLoadingAction) return;
     final confirmar = await _showConfirmDialog(
       title: 'Aceptar presupuesto',
-      icon: Icons.check_circle_rounded,
+      icon: Icons.shopping_cart_checkout_rounded,
       iconColor: Colors.green,
-      content: 'Se abrirá el pago seguro del presupuesto.\n\n'
-          'Si vuelves atrás o cancelas antes de pagar, el presupuesto seguirá visible en Mis presupuestos para que puedas intentarlo de nuevo.\n\n'
-          'Presupuesto: #${quote.id}\nTotal: ${_formatMoney(quote.total)}',
-      confirmText: 'ACEPTAR Y PAGAR',
+      content: 'Los productos del presupuesto se cargarán en la cesta. '
+          'Podrás añadir, eliminar o cambiar cantidades antes de tramitar el pedido.\n\n'
+          'El presupuesto seguirá guardado hasta que el pago quede confirmado.\n\n'
+          'Presupuesto: #${quote.id}\nTotal actual: ${_formatMoney(quote.total)}',
+      confirmText: 'IR A LA CESTA',
       confirmColor: const Color(0xFF2E7D32),
     );
     if (confirmar != true || !mounted) return;
-    setState(() { _isLoadingAction = true; _processingQuoteId = 'accept_${quote.id}'; });
+
+    setState(() {
+      _isLoadingAction = true;
+      _processingQuoteId = 'accept_${quote.id}';
+    });
+
     try {
-      final api = ApiService();
       final quoteId = int.parse(_extractOrderId(quote));
-      final result = await api.aceptarYPagarPresupuesto(quoteId: quoteId);
+      final response =
+          await ApiService().prepararPresupuestoEnCarrito(quoteId: quoteId);
+      final rawCart = response['cart'] is Map
+          ? Map<String, dynamic>.from(response['cart'] as Map)
+          : <String, dynamic>{};
+      final rawItems = rawCart['cart_items'] ?? rawCart['items'];
+      final cartItems = <CartItem>[];
 
-      if (!mounted) return;
-
-      if (result.isPaid) {
-        _showSnackBar('✅ El presupuesto ya aparece como pagado.', Colors.green.shade700);
-        ref.invalidate(quotesProvider);
-        ref.invalidate(quoteBadgeProvider);
-        return;
+      if (rawItems is List) {
+        for (final raw in rawItems.whereType<Map>()) {
+          final json = Map<String, dynamic>.from(raw);
+          final quantity = int.tryParse(json['quantity']?.toString() ?? '') ?? 1;
+          final product = Product.fromJson(json);
+          if (product.id > 0 && quantity > 0 && product.canAddToCart) {
+            cartItems.add(
+              CartItem(
+                product: product,
+                quantity: quantity,
+                quoteOriginalQuantity: int.tryParse(
+                      json['quote_original_quantity']?.toString() ?? '',
+                    ) ??
+                    quantity,
+                quoteApprovedUnitPrice:
+                    json['approved_quote_price']?.toString().trim() ?? '',
+                currentEffectiveUnitPrice:
+                    json['current_effective_price']?.toString().trim() ?? '',
+              ),
+            );
+          }
+        }
       }
 
-      if (!result.canPay || !result.hasPaymentUrl || result.pendingOrderId <= 0) {
-        throw Exception('El servidor no devolvió una URL de pago válida.');
+      if (cartItems.isEmpty) {
+        throw Exception('El presupuesto no contiene productos disponibles.');
       }
 
-      setState(() { _isLoadingAction = false; _processingQuoteId = null; });
+      await ref.read(cartProvider.notifier).replaceCartFromQuote(
+            items: cartItems,
+            sourceQuoteId: quoteId,
+          );
 
-      final paid = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => PaymentPage(
-            orderId: result.pendingOrderId,
-            orderKey: '',
-            paymentUrl: result.paymentUrl,
-            orderNumber: result.pendingOrderId.toString(),
-            amount: quote.total,
-            paymentMethodTitle: 'Pago seguro del presupuesto',
-            quotePayment: true,
-            quoteNumber: quote.id,
-          ),
-        ),
-      );
-
-      if (!mounted) return;
-
-      ref.invalidate(quotesProvider);
-      ref.invalidate(quoteBadgeProvider);
       ref.invalidate(cartBadgeProvider);
-
-      if (paid == true) {
-        _showSnackBar('✅ Pago confirmado. El presupuesto pasará a pedidos.', Colors.green.shade700);
+      if (!mounted) return;
+      if (widget.onGoCart != null) {
+        widget.onGoCart!();
       } else {
-        _showSnackBar('El presupuesto sigue guardado para pagarlo más tarde.', const Color(0xFF1565C0));
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const CartPage()),
+        );
       }
     } catch (e) {
-      if (mounted) _showSnackBar('Error: $e', Colors.red);
+      if (mounted) {
+        _showSnackBar(
+          'No se pudo cargar el presupuesto en la cesta: $e',
+          Colors.red,
+        );
+      }
     } finally {
-      if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
+      if (mounted) {
+        setState(() {
+          _isLoadingAction = false;
+          _processingQuoteId = null;
+        });
+      }
     }
   }
+
 
   Future<void> _guardarPresupuesto(QuoteMundicam quote) async {
     if (_isLoadingAction) return;
@@ -528,99 +553,76 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     if (_isLoadingAction) return;
     final confirmar = await _showConfirmDialog(
       title: 'Aceptar presupuesto',
-      icon: Icons.check_circle_rounded,
+      icon: Icons.shopping_cart_checkout_rounded,
       iconColor: Colors.green,
-      content: 'Se guardará este presupuesto y se abrirá el pago seguro.\n\n'
-          'Si vuelves atrás o cancelas antes de pagar, seguirá visible en Mis presupuestos.\n\n'
-          '"${localQuote.nombre}"\n${localQuote.items.length} productos\nTotal: ${_formatMoney(localQuote.total)}',
-      confirmText: 'ACEPTAR Y PAGAR',
+      content: 'Los productos se cargarán en la cesta para que puedas modificarla '
+          'antes de pagar.\n\n'
+          'Este presupuesto seguirá guardado únicamente en el móvil hasta que el '
+          'pago quede confirmado. No se creará un presupuesto en la web.\n\n'
+          '"${localQuote.nombre}"\n${localQuote.items.length} productos\n'
+          'Total actual: ${_formatMoney(localQuote.total)}',
+      confirmText: 'IR A LA CESTA',
       confirmColor: const Color(0xFF2E7D32),
     );
     if (confirmar != true || !mounted) return;
-    setState(() { _isLoadingAction = true; _processingQuoteId = 'local_accept_${localQuote.orderId}'; });
 
-    int createdQuoteId = 0;
+    setState(() {
+      _isLoadingAction = true;
+      _processingQuoteId = 'local_accept_${localQuote.orderId}';
+    });
+
     try {
-      final api = ApiService();
-      final created = await api.crearPresupuestoConProductosDetalle(
-        items: localQuote.items
-            .map((item) => {
-                  'product_id': item.productId,
-                  'quantity': item.quantity,
-                })
-            .toList(),
-        customerNote: localQuote.nombre,
-      );
-
-      if (!created.success || created.quoteId <= 0) {
-        throw Exception(created.message.isNotEmpty
-            ? created.message
-            : 'No se pudo guardar el presupuesto en el servidor.');
-      }
-      createdQuoteId = created.quoteId;
-
-      // Ya existe como presupuesto real en /quotes. Quitamos solo la copia local
-      // para evitar duplicados, pero NO lo mandamos al carrito.
-      await ref.read(localQuotesProvider.notifier).eliminarPresupuesto(localQuote.orderId);
-      ref.invalidate(quotesProvider);
-      ref.invalidate(quoteBadgeProvider);
-      ref.invalidate(cartBadgeProvider);
-
-      final result = await api.aceptarYPagarPresupuesto(quoteId: created.quoteId);
-
-      if (!mounted) return;
-
-      if (result.isPaid) {
-        _showSnackBar('✅ El presupuesto ya aparece como pagado.', Colors.green.shade700);
-        ref.invalidate(quotesProvider);
-        ref.invalidate(quoteBadgeProvider);
-        return;
-      }
-
-      if (!result.canPay || !result.hasPaymentUrl || result.pendingOrderId <= 0) {
-        throw Exception('El servidor no devolvió una URL de pago válida.');
-      }
-
-      setState(() { _isLoadingAction = false; _processingQuoteId = null; });
-
-      final paid = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => PaymentPage(
-            orderId: result.pendingOrderId,
-            orderKey: '',
-            paymentUrl: result.paymentUrl,
-            orderNumber: result.pendingOrderId.toString(),
-            amount: created.total > 0 ? created.total : localQuote.total,
-            paymentMethodTitle: 'Pago seguro del presupuesto',
-            quotePayment: true,
-            quoteNumber: 'PRE-${created.quoteId}',
+      final cartItems = <CartItem>[];
+      for (final item in localQuote.items) {
+        final product = await ApiService().getProductoById(item.productId);
+        if (product == null || !product.canAddToCart) {
+          throw Exception(
+            'El producto "${item.productName}" ya no está disponible para compra.',
+          );
+        }
+        cartItems.add(
+          CartItem(
+            product: product,
+            quantity: item.quantity > 0 ? item.quantity : 1,
           ),
-        ),
-      );
+        );
+      }
 
-      if (!mounted) return;
+      if (cartItems.isEmpty) {
+        throw Exception('El presupuesto no contiene productos disponibles.');
+      }
 
-      ref.invalidate(quotesProvider);
-      ref.invalidate(quoteBadgeProvider);
+      await ref.read(cartProvider.notifier).replaceCartFromQuote(
+            items: cartItems,
+            sourceLocalQuoteUuid: localQuote.orderId,
+          );
+
       ref.invalidate(cartBadgeProvider);
-
-      if (paid == true) {
-        _showSnackBar('✅ Pago confirmado. El presupuesto pasará a pedidos.', Colors.green.shade700);
+      if (!mounted) return;
+      if (widget.onGoCart != null) {
+        widget.onGoCart!();
       } else {
-        _showSnackBar('El presupuesto sigue guardado para pagarlo más tarde.', const Color(0xFF1565C0));
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const CartPage()),
+        );
       }
     } catch (e) {
-      ref.invalidate(quotesProvider);
-      ref.invalidate(quoteBadgeProvider);
-      ref.invalidate(cartBadgeProvider);
-      final extra = createdQuoteId > 0
-          ? '\nEl presupuesto ya quedó guardado en Mis presupuestos.'
-          : '';
-      if (mounted) _showSnackBar('Error: $e$extra', Colors.red);
+      if (mounted) {
+        _showSnackBar(
+          'No se pudo cargar el presupuesto local en la cesta: $e',
+          Colors.red,
+        );
+      }
     } finally {
-      if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
+      if (mounted) {
+        setState(() {
+          _isLoadingAction = false;
+          _processingQuoteId = null;
+        });
+      }
     }
   }
+
 
   Future<void> _guardarLocalPresupuesto(LocalQuote localQuote) async {
     if (_isLoadingAction) return;
@@ -681,12 +683,20 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   }
 
   void _handleBack() {
+    // Abierto desde Perfil mediante Navigator.push: la flecha vuelve siempre
+    // a Perfil, sin sustituir la pila por la pantalla de inicio.
+    if (widget.onGoHome == null) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+
+    // Como pestaña principal conservamos el comportamiento existente.
     if (_isLoadingAction) return;
     if (_expandedQuoteIds.isNotEmpty || _expandedLocalQuoteIds.isNotEmpty) {
       setState(() { _expandedQuoteIds.clear(); _expandedLocalQuoteIds.clear(); });
       return;
     }
-    if (widget.onGoHome != null) widget.onGoHome!();
+    widget.onGoHome!();
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -695,6 +705,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   @override
   Widget build(BuildContext context) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'quotes');
     final quotesAsync = ref.watch(quotesProvider);
     final localQuotes = ref.watch(localQuotesProvider);
     final localQuotesActivos = localQuotes.where((q) => !q.isExpired).toList();
