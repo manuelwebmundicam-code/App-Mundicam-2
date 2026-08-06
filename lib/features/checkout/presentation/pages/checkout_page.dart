@@ -15,8 +15,7 @@ import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
-
-enum CheckoutExitAction { returnToQuotes }
+import 'package:mundicam/shared/providers/badge_provider.dart';
 
 class _CheckoutPaymentMethod {
   final String id;
@@ -61,6 +60,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   final _postCodeController = TextEditingController();
   final _companyController = TextEditingController();
   final _nifController = TextEditingController();
+  final _fiscalAddressController = TextEditingController();
+  final _fiscalAddress2Controller = TextEditingController();
+  final _fiscalCityController = TextEditingController();
+  final _fiscalPostCodeController = TextEditingController();
+  final _fiscalStateController = TextEditingController();
+  final _fiscalCountryController = TextEditingController();
   final _stateController = TextEditingController();
   final _countryController = TextEditingController();
   final _notesController = TextEditingController();
@@ -168,6 +173,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       _postCodeController,
       _companyController,
       _nifController,
+      _fiscalAddressController,
+      _fiscalAddress2Controller,
+      _fiscalCityController,
+      _fiscalPostCodeController,
+      _fiscalStateController,
+      _fiscalCountryController,
       _stateController,
       _countryController,
       _notesController,
@@ -239,6 +250,72 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     if (text.isEmpty) return 'ES';
     if (text == 'ESPAÑA' || text == 'SPAIN') return 'ES';
     return text;
+  }
+
+  String _countryDisplayName(String countryCode) {
+    final code = _normalizeCountryCode(countryCode);
+    if (code == 'ES') return 'España';
+    return code;
+  }
+
+  String _spanishProvinceDisplayName(String stateCode) {
+    const names = <String, String>{
+      'C': 'A Coruña',
+      'VI': 'Álava',
+      'AB': 'Albacete',
+      'A': 'Alicante',
+      'AL': 'Almería',
+      'O': 'Asturias',
+      'AV': 'Ávila',
+      'BA': 'Badajoz',
+      'PM': 'Illes Balears',
+      'B': 'Barcelona',
+      'BU': 'Burgos',
+      'CC': 'Cáceres',
+      'CA': 'Cádiz',
+      'S': 'Cantabria',
+      'CS': 'Castellón',
+      'CE': 'Ceuta',
+      'CR': 'Ciudad Real',
+      'CO': 'Córdoba',
+      'CU': 'Cuenca',
+      'GI': 'Girona',
+      'GR': 'Granada',
+      'GU': 'Guadalajara',
+      'SS': 'Gipuzkoa',
+      'H': 'Huelva',
+      'HU': 'Huesca',
+      'J': 'Jaén',
+      'LO': 'La Rioja',
+      'GC': 'Las Palmas',
+      'LE': 'León',
+      'L': 'Lleida',
+      'LU': 'Lugo',
+      'M': 'Madrid',
+      'MA': 'Málaga',
+      'ML': 'Melilla',
+      'MU': 'Murcia',
+      'NA': 'Navarra',
+      'OR': 'Ourense',
+      'P': 'Palencia',
+      'PO': 'Pontevedra',
+      'SA': 'Salamanca',
+      'TF': 'Santa Cruz de Tenerife',
+      'SG': 'Segovia',
+      'SE': 'Sevilla',
+      'SO': 'Soria',
+      'T': 'Tarragona',
+      'TE': 'Teruel',
+      'TO': 'Toledo',
+      'V': 'Valencia',
+      'VA': 'Valladolid',
+      'BI': 'Bizkaia',
+      'ZA': 'Zamora',
+      'Z': 'Zaragoza',
+    };
+
+    final code = stateCode.trim().toUpperCase();
+    return names[code] ?? stateCode.trim();
   }
 
   String _normalizeSpanishProvinceCode({
@@ -391,19 +468,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   Map<String, dynamic> _billingAddressPayload() {
-    final country = _normalizeCountryCode(_countryController.text);
-    final postcode = _postCodeController.text.trim();
+    final country = _normalizeCountryCode(_fiscalCountryController.text);
+    final postcode = _fiscalPostCodeController.text.trim();
     final state = _normalizeSpanishProvinceCode(
       country: country,
-      state: _stateController.text,
+      state: _fiscalStateController.text,
       postcode: postcode,
     );
     return {
       'first_name': _nameController.text.trim(),
       'last_name': _lastNameController.text.trim(),
       'company': _companyController.text.trim(),
-      'address_1': _addressController.text.trim(),
-      'city': _cityController.text.trim(),
+      'address_1': _fiscalAddressController.text.trim(),
+      'address_2': _fiscalAddress2Controller.text.trim(),
+      'city': _fiscalCityController.text.trim(),
       'postcode': postcode,
       'state': state,
       'country': country,
@@ -413,45 +491,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   String _formatMoney(double value) => '${value.toStringAsFixed(2)} €';
-
-  int get _sourceQuoteId => ref.read(cartProvider.notifier).sourceQuoteId;
-
-  String get _sourceLocalQuoteUuid =>
-      ref.read(cartProvider.notifier).sourceLocalQuoteUuid;
-
-  String _stableFingerprint(String input) {
-    var hash = 0x811C9DC5;
-    for (final codeUnit in input.codeUnits) {
-      hash ^= codeUnit;
-      hash = (hash * 0x01000193) & 0xFFFFFFFF;
-    }
-    return hash.toRadixString(16).padLeft(8, '0');
-  }
-
-  String _checkoutContextFingerprint({
-    required Map<String, dynamic> shippingAddress,
-    required String shippingMethodId,
-  }) {
-    const addressKeys = <String>[
-      'first_name',
-      'last_name',
-      'company',
-      'address_1',
-      'address_2',
-      'city',
-      'state',
-      'postcode',
-      'country',
-      'email',
-      'phone',
-    ];
-    final address = addressKeys
-        .map((key) => '${key.toLowerCase()}=${shippingAddress[key]?.toString().trim().toLowerCase() ?? ''}')
-        .join('|');
-    return _stableFingerprint(
-      '${_paymentMethod.trim().toLowerCase()}|${shippingMethodId.trim().toLowerCase()}|$address',
-    );
-  }
 
   bool _isPaymentMethodEnabled(_CheckoutPaymentMethod method) {
     if (!method.requiresCredit) return true;
@@ -487,8 +526,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       final options = await ApiService().getShippingMethods(
         lineItems: lineItems,
         shippingAddress: address,
-        sourceQuoteId: _sourceQuoteId,
-        sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
       );
 
       ShippingOption? selected;
@@ -507,8 +544,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           lineItems: lineItems,
           shippingAddress: address,
           shippingMethodId: selected.id,
-          sourceQuoteId: _sourceQuoteId,
-          sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
         );
       }
 
@@ -523,8 +558,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             lineItems: lineItems,
             shippingAddress: address,
             shippingMethodId: selected.id,
-            sourceQuoteId: _sourceQuoteId,
-            sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
           );
         }
       }
@@ -571,8 +604,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         lineItems: _currentLineItems(),
         shippingAddress: _shippingAddressPayload(),
         shippingMethodId: option.id,
-        sourceQuoteId: _sourceQuoteId,
-        sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
       );
     } catch (e) {
       debugPrint('❌ Error seleccionando envío: $e');
@@ -600,8 +631,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       lineItems: _currentLineItems(),
       shippingAddress: _shippingAddressPayload(),
       shippingMethodId: _selectedShippingOption!.id,
-      sourceQuoteId: _sourceQuoteId,
-      sourceLocalQuoteUuid: _sourceLocalQuoteUuid,
     );
 
     if (preview != null && mounted) {
@@ -798,6 +827,26 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           _companyController.text = billing['company']?.toString() ?? '';
           _phoneController.text = billing['phone']?.toString() ?? '';
           _nifController.text = _getNifCif(metaData, billing);
+
+          // Datos fiscales: siempre proceden de billing. No se mezclan con la
+          // dirección de entrega, que puede modificarse de forma independiente.
+          _fiscalAddressController.text = billing['address_1']?.toString() ?? '';
+          _fiscalAddress2Controller.text = billing['address_2']?.toString() ?? '';
+          _fiscalCityController.text = billing['city']?.toString() ?? '';
+          _fiscalPostCodeController.text = billing['postcode']?.toString() ?? '';
+          final fiscalCountry = _normalizeCountryCode(
+            billing['country']?.toString() ?? '',
+          );
+          final fiscalStateCode = _normalizeSpanishProvinceCode(
+            country: fiscalCountry,
+            state: billing['state']?.toString() ?? '',
+            postcode: _fiscalPostCodeController.text,
+          );
+          _fiscalStateController.text = fiscalCountry == 'ES'
+              ? _spanishProvinceDisplayName(fiscalStateCode)
+              : fiscalStateCode;
+          _fiscalCountryController.text = _countryDisplayName(fiscalCountry);
+
           _addressController.text = _firstAddressValue(shipping, billing, 'address_1');
           _cityController.text = _firstAddressValue(shipping, billing, 'city');
           _postCodeController.text = _firstAddressValue(shipping, billing, 'postcode');
@@ -960,6 +1009,21 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
   }
 
+  Future<bool> _eliminarPresupuestoLocalSeguro(String localUuid) async {
+    final cleanUuid = localUuid.trim();
+    if (cleanUuid.isEmpty) return true;
+
+    try {
+      await ref
+          .read(localQuotesProvider.notifier)
+          .eliminarPresupuesto(cleanUuid);
+      return true;
+    } catch (e) {
+      debugPrint('No se pudo eliminar la copia local $cleanUuid: $e');
+      return false;
+    }
+  }
+
   // ──────────────────────────────────────────────
   // Finalizar pedido
   // ──────────────────────────────────────────────
@@ -974,7 +1038,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         sourceQuoteId > 0 || sourceLocalQuoteUuid.trim().isNotEmpty;
 
     final idempotencyKey = _checkoutIdempotencyKey ??=
-        'app-${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
+        hasQuoteSource
+            ? 'quote-${sourceQuoteId > 0 ? 'web-$sourceQuoteId' : 'local-$sourceLocalQuoteUuid'}'
+            : 'app-${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
     setState(() => _isLoading = true);
     HapticFeedback.mediumImpact();
 
@@ -1025,25 +1091,16 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             })
         .toList();
     final shippingAddress = _shippingAddressPayload();
-    final quoteIdentity = sourceQuoteId > 0
-        ? 'web-$sourceQuoteId'
-        : 'local-${sourceLocalQuoteUuid.trim()}';
-    final cartIdentity = preview.cartHash.isNotEmpty
-        ? preview.cartHash
-        : lineItems.toString();
-    final checkoutContext = _checkoutContextFingerprint(
-      shippingAddress: shippingAddress,
-      shippingMethodId: _selectedShippingOption!.id,
-    );
     final effectiveIdempotencyKey = hasQuoteSource
-        ? 'quote-${_stableFingerprint(quoteIdentity)}-'
-            '${_stableFingerprint(cartIdentity)}-$checkoutContext'
+        ? 'quote-${sourceQuoteId > 0 ? 'web-$sourceQuoteId' : 'local-$sourceLocalQuoteUuid'}-${preview.cartHash.isNotEmpty ? preview.cartHash : lineItems.toString().hashCode}'
         : idempotencyKey;
 
     final orderData = {
       if (_customerId != null) 'customer_id': _customerId,
       'payment_method': _paymentMethod,
       'payment_method_title': _paymentMethodTitle,
+      'set_paid': false,
+      'status': isCardPayment ? 'pending' : 'on-hold',
       if (sourceQuoteId > 0) 'source_quote_id': sourceQuoteId,
       if (sourceLocalQuoteUuid.trim().isNotEmpty)
         'source_local_quote_uuid': sourceLocalQuoteUuid.trim(),
@@ -1137,90 +1194,56 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         if (paid == true) {
           _checkoutIdempotencyKey = null;
-          if (sourceLocalQuoteUuid.trim().isNotEmpty) {
-            await ref
-                .read(localQuotesProvider.notifier)
-                .eliminarPresupuesto(sourceLocalQuoteUuid.trim());
-          }
+          final localCleanupOk = await _eliminarPresupuestoLocalSeguro(
+            sourceLocalQuoteUuid,
+          );
           await ref.read(cartProvider.notifier).clearCart();
           ref.invalidate(ordersProvider);
           _irAlInicio(
-              mensaje: '✅ Pago confirmado. El pedido ya está en preparación.');
+            mensaje: localCleanupOk
+                ? '✅ Pago confirmado. El pedido ya está en preparación.'
+                : '✅ Pago confirmado. El pedido está en preparación. '
+                    'No se pudo borrar la copia local; elimínala desde Presupuestos.',
+          );
         } else {
+          // En PaymentPage un checkout de presupuesto solo devuelve false después
+          // de que /quote/cancel-checkout haya confirmado la cancelación. Si la
+          // cancelación falla o Redsys ya confirmó, la pantalla permanece abierta.
           if (hasQuoteSource) {
-            bool paymentWasAlreadyConfirmed = false;
-            try {
-              final cancelResult = await ApiService().cancelarIntentoPagoPresupuesto(
-                orderId: result.orderId!,
-                orderKey: orderKey,
-              );
-              paymentWasAlreadyConfirmed = cancelResult['already_paid'] == true;
-            } catch (e) {
-              debugPrint('⚠️ No se pudo confirmar la cancelación del intento: $e');
-            }
-
-            if (paymentWasAlreadyConfirmed) {
-              _checkoutIdempotencyKey = null;
-              if (sourceLocalQuoteUuid.trim().isNotEmpty) {
-                await ref
-                    .read(localQuotesProvider.notifier)
-                    .eliminarPresupuesto(sourceLocalQuoteUuid.trim());
-              }
-              await ref.read(cartProvider.notifier).clearCart();
-              ref.invalidate(ordersProvider);
-              ref.invalidate(quotesProvider);
-              _irAlInicio(
-                mensaje: '✅ El pago ya estaba confirmado. El pedido está en preparación.',
-              );
-              return;
-            }
-
             _checkoutIdempotencyKey = null;
+            final localCleanupOk = await _eliminarPresupuestoLocalSeguro(
+              sourceLocalQuoteUuid,
+            );
             await ref.read(cartProvider.notifier).clearCart();
             ref.invalidate(ordersProvider);
             ref.invalidate(quotesProvider);
-            if (mounted) {
-              Navigator.of(context).pop(CheckoutExitAction.returnToQuotes);
-            }
+            ref.invalidate(quoteBadgeProvider);
+            ref.invalidate(cartBadgeProvider);
+            _irAlInicio(
+              mensaje: localCleanupOk
+                  ? 'Pedido cancelado. Puedes consultarlo en Mis pedidos.'
+                  : 'Pedido cancelado. No se pudo borrar la copia local; '
+                      'elimínala desde Presupuestos.',
+            );
           } else {
             _mostrarError(
-              'El pedido sigue pendiente de pago. Puedes reintentar el pago '
-              'desde esta misma operación.',
+              'El pedido sigue pendiente de pago. Puedes reintentar el pago desde esta misma operación.',
             );
           }
         }
         return;
       }
 
-      // Transferencia / giro. Ninguno abre Redsys ni realiza un cobro
-      // automático. El servidor decide el estado real de cada método.
+      // Transferencia / giro
       _checkoutIdempotencyKey = null;
       await ref.read(cartProvider.notifier).clearCart();
       ref.invalidate(ordersProvider);
-
-      final isDeferredPayment = _paymentMethod == 'cheque';
-      if (hasQuoteSource) {
-        ref.invalidate(quotesProvider);
-        if (mounted) {
-          final message = isDeferredPayment
-              ? 'Pedido en espera de aprobación manual. No se ha realizado '
-                  'ningún cobro automático y el presupuesto seguirá visible '
-                  'hasta que logística lo apruebe.'
-              : 'Transferencia pendiente de comprobación. El presupuesto seguirá '
-                  'visible hasta que administración confirme el ingreso.';
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
-          );
-          Navigator.of(context).pop(CheckoutExitAction.returnToQuotes);
-        }
-      } else {
-        _irAlInicio(
-          mensaje: isDeferredPayment
-              ? 'Pedido en espera de aprobación manual. No se ha realizado '
-                  'ningún cobro automático.'
-              : '✅ Pedido registrado por transferencia bancaria.',
-        );
-      }
+      _irAlInicio(
+        mensaje: hasQuoteSource
+            ? 'Solicitud registrada. El presupuesto seguirá visible hasta que '
+                'el pago quede confirmado.'
+            : '✅ Pedido confirmado. Te llevamos al inicio.',
+      );
     } catch (e) {
       debugPrint('❌ Error creando pedido: $e');
       _mostrarError(
@@ -1273,11 +1296,55 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             const SizedBox(height: 16),
             _buildSectionCard(
               icon: Icons.business_outlined,
-              title: 'DATOS DE EMPRESA',
+              title: 'DATOS FISCALES DE LA EMPRESA',
+              subtitle:
+                  'Se usarán para facturación. La dirección de entrega puede cambiarse más abajo.',
               locked: true,
               children: [
-                _buildLockedField('Empresa', _companyController),
+                _buildLockedField('Razón social / Empresa', _companyController),
                 _buildLockedField('NIF/CIF', _nifController),
+                _buildLockedField('Dirección fiscal', _fiscalAddressController),
+                if (_fiscalAddress2Controller.text.trim().isNotEmpty)
+                  _buildLockedField(
+                    'Complemento de dirección',
+                    _fiscalAddress2Controller,
+                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: _buildLockedField(
+                        'Código postal',
+                        _fiscalPostCodeController,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 3,
+                      child: _buildLockedField(
+                        'Localidad',
+                        _fiscalCityController,
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildLockedField(
+                        'Provincia',
+                        _fiscalStateController,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildLockedField(
+                        'País',
+                        _fiscalCountryController,
+                      ),
+                    ),
+                  ],
+                ),
                 _buildManagerInfo(),
                 _buildCreditInfo(),
               ],

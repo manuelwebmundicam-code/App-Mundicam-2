@@ -150,9 +150,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
             title: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _NotificationLogoIcon(
-                  isGeneralNotification: isGeneralNotification,
-                ),
+                const _NotificationLogoIcon(),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -579,11 +577,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
 }
 
 class _NotificationLogoIcon extends StatelessWidget {
-  final bool isGeneralNotification;
-
-  const _NotificationLogoIcon({
-    required this.isGeneralNotification,
-  });
+  const _NotificationLogoIcon();
 
   @override
   Widget build(BuildContext context) {
@@ -594,7 +588,7 @@ class _NotificationLogoIcon extends StatelessWidget {
         color: AppColors.primary,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.85),
+          color: Colors.white.withValues(alpha: 0.9),
           width: 1.2,
         ),
         boxShadow: [
@@ -606,26 +600,20 @@ class _NotificationLogoIcon extends StatelessWidget {
         ],
       ),
       alignment: Alignment.center,
-      child: isGeneralNotification
-          ? Padding(
-              padding: const EdgeInsets.all(8),
-              child: Image.asset(
-                'assets/images/mundicam_notification_logo.png',
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Icon(
-                    Icons.notifications_active_rounded,
-                    color: Colors.white,
-                    size: 23,
-                  );
-                },
-              ),
-            )
-          : const Icon(
-              Icons.local_shipping_rounded,
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Image.asset(
+          'assets/images/mundicam_notification_logo.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return const Icon(
+              Icons.notifications_active_rounded,
               color: Colors.white,
-              size: 24,
-            ),
+              size: 23,
+            );
+          },
+        ),
+      ),
     );
   }
 }

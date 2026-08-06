@@ -95,38 +95,49 @@ class CartPage extends ConsumerWidget {
 
     if (confirmar != true) return;
 
-    String message;
-    if (hasOriginalQuote) {
-      await cartNotifier.clearCart();
-      message = 'El presupuesto original sigue guardado.';
-    } else {
-      final orderId = DateTime.now().millisecondsSinceEpoch.toString();
-      final nombre = 'Presupuesto #$orderId';
-      final quoteNotifier = ref.read(localQuotesProvider.notifier);
+    String message = '';
+    try {
+      if (hasOriginalQuote) {
+        await cartNotifier.clearCart();
+        message = 'El presupuesto original sigue guardado.';
+      } else {
+        final orderId = DateTime.now().millisecondsSinceEpoch.toString();
+        final nombre = 'Presupuesto #$orderId';
+        final quoteNotifier = ref.read(localQuotesProvider.notifier);
 
-      await quoteNotifier.crearPresupuesto(
-        orderId: orderId,
-        nombre: nombre,
-      );
-
-      for (final item in cartItems) {
-        final price = double.tryParse(
-              item.product.price.replaceAll(',', '.'),
-            ) ??
-            0;
-        await quoteNotifier.anadirItem(
+        await quoteNotifier.crearPresupuesto(
           orderId: orderId,
-          item: LocalQuoteItem(
-            productId: item.product.id,
-            productName: item.product.name,
-            quantity: item.quantity,
-            price: price,
-          ),
+          nombre: nombre,
         );
-      }
 
-      await cartNotifier.clearCart();
-      message = 'Presupuesto guardado: $nombre';
+        for (final item in cartItems) {
+          final price = double.tryParse(
+                item.product.price.replaceAll(',', '.'),
+              ) ??
+              0;
+          await quoteNotifier.anadirItem(
+            orderId: orderId,
+            item: LocalQuoteItem(
+              productId: item.product.id,
+              productName: item.product.name,
+              quantity: item.quantity,
+              price: price,
+            ),
+          );
+        }
+
+        await cartNotifier.clearCart();
+        message = 'Presupuesto guardado: $nombre';
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo guardar el presupuesto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
 
     if (!context.mounted) return;
@@ -544,20 +555,12 @@ class CartPage extends ConsumerWidget {
               child: ElevatedButton.icon(
                 onPressed: cartItems.isEmpty
                     ? null
-                    : () async {
-                  final result = await Navigator.of(context).push<CheckoutExitAction>(
-                    MaterialPageRoute<CheckoutExitAction>(
+                    : () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
                       builder: (_) => const CheckoutPage(),
                     ),
                   );
-
-                  if (result == CheckoutExitAction.returnToQuotes && context.mounted) {
-                    if (onGoQuotes != null) {
-                      onGoQuotes!();
-                    } else if (Navigator.of(context).canPop()) {
-                      Navigator.of(context).pop();
-                    }
-                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,

@@ -11,6 +11,8 @@ import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_p
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_from_page.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/shared/providers/badge_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
@@ -388,6 +390,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
   late Future<List<_PedidoProducto>> _itemsFuture;
   OrderMundicam? _loadedOrder;
   bool _isRepeating = false;
+  bool _isCancelling = false;
 
   final Map<int, Product?> _productPreviewCache = <int, Product?>{};
   final Map<int, Future<Product?>> _productPreviewFutures =
@@ -600,6 +603,96 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
     }
   }
 
+  Future<void> _cancelOrder(OrderMundicam order) async {
+    if (_isCancelling || !order.actions.canCancel) return;
+    if (order.orderKey.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se dispone de la clave necesaria para cancelar este pedido.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancelar pedido'),
+        content: Text(
+          '¿Confirmas la cancelación del pedido #${order.id}? El servidor volverá a comprobar que siga impagado y en un estado cancelable.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Volver'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Cancelar pedido'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isCancelling = true);
+    try {
+      final cancelled = await ApiService().cancelarPedido(
+        orderId: order.id,
+        orderKey: order.orderKey,
+      );
+      if (!mounted) return;
+
+      var localCleanupOk = true;
+      if (cancelled.sourceLocalQuoteUuid.trim().isNotEmpty) {
+        try {
+          await ref
+              .read(localQuotesProvider.notifier)
+              .eliminarPresupuesto(cancelled.sourceLocalQuoteUuid.trim());
+        } catch (e) {
+          localCleanupOk = false;
+          debugPrint('No se pudo borrar la copia local tras cancelar: $e');
+        }
+      }
+
+      setState(() {
+        _loadedOrder = cancelled;
+        _isCancelling = false;
+      });
+      ref.invalidate(ordersProvider);
+      ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            localCleanupOk
+                ? 'Pedido cancelado correctamente.'
+                : 'Pedido cancelado. No se pudo borrar la copia local; '
+                    'elimínala desde Presupuestos.',
+          ),
+          backgroundColor: localCleanupOk ? Colors.green : Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isCancelling = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo cancelar el pedido: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _repetirPedido(List<_PedidoProducto> items) async {
     if (_isRepeating) return;
 
@@ -777,6 +870,40 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                   ),
                 ],
                 const SizedBox(height: 14),
+                if (order.actions.canCancel) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: OutlinedButton.icon(
+                      onPressed: _isCancelling ? null : () => _cancelOrder(order),
+                      icon: _isCancelling
+                          ? const SizedBox(
+                              width: 17,
+                              height: 17,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.red,
+                              ),
+                            )
+                          : const Icon(Icons.cancel_outlined, size: 18),
+                      label: Text(
+                        _isCancelling ? 'CANCELANDO...' : 'CANCELAR PEDIDO',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade700,
+                        side: BorderSide(color: Colors.red.shade300),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 if (order.actions.canRepeat || !order.actions.hasExplicitValues)
                   SizedBox(
                   width: double.infinity,

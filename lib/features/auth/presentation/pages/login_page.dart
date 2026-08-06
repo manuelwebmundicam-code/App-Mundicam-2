@@ -77,20 +77,7 @@ class _LoginPageState extends State<LoginPage> {
       });
 
       final apiService = ApiService();
-      final storedSessionEmail = await apiService.currentSessionEmail();
-      final storedSessionId = await apiService.currentSessionWordPressId();
-      final storedSessionBlocked =
-          await apiService.isAccountDeletionPendingLocally(storedSessionEmail) ||
-          await apiService.isAccountDeletionPendingLocally(
-            storedSessionId?.toString(),
-          );
-
-      if (storedSessionBlocked) {
-        await apiService.clearWordPressSession();
-      }
-
-      final hasStoredToken =
-          storedSessionBlocked ? false : await _hasStoredWordPressSession();
+      final hasStoredToken = await _hasStoredWordPressSession();
       final hasWpSession = hasStoredToken
           ? await apiService
               .validateStoredAppSession()
@@ -462,25 +449,7 @@ class _LoginPageState extends State<LoginPage> {
           return body;
         }
 
-        final dataMap = body['data'] is Map
-            ? Map<String, dynamic>.from(body['data'] as Map)
-            : <String, dynamic>{};
-        final status = dataMap['status'] ?? response.statusCode;
         final message = body['message']?.toString().trim();
-        final code = (body['code'] ?? dataMap['code'])
-            ?.toString()
-            .trim()
-            .toLowerCase();
-        final normalizedMessage = message?.toLowerCase() ?? '';
-
-        if (code == 'mundicam_account_deletion_pending' ||
-            normalizedMessage.contains('eliminación pendiente') ||
-            normalizedMessage.contains('eliminacion pendiente') ||
-            normalizedMessage.contains('solicitud de eliminación')) {
-          await ApiService().markAccountDeletionPendingLocally(
-            identifiers: <String?>[email],
-          );
-        }
 
         throw Exception(
           (message != null && message.isNotEmpty)
@@ -690,12 +659,6 @@ class _LoginPageState extends State<LoginPage> {
           dedupeWindow: const Duration(milliseconds: 800),
         ),
       );
-
-      if (await apiService.isAccountDeletionPendingLocally(email)) {
-        throw Exception(
-          'Esta cuenta está inhabilitada para acceder desde la app MundiCam. El acceso web sigue siendo independiente.',
-        );
-      }
 
       // Limpiamos restos antiguos antes de iniciar sesión nueva.
       await apiService.clearWordPressSession();

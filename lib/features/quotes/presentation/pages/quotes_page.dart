@@ -381,16 +381,25 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   // ELIMINAR PRODUCTO INDIVIDUAL - LOCAL
   // ═══════════════════════════════════════════════════════════════
 
-  Future<void> _eliminarProductoLocal(LocalQuote quote, int productId, String productName) async {
+  Future<void> _eliminarProductoLocal(
+    LocalQuote quote,
+    int productId,
+    String productName, {
+    int variationId = 0,
+  }) async {
     if (_isLoadingAction || _deletingItemKey != null) return;
 
-    final itemKey = '${quote.orderId}_$productId';
+    final itemKey = '${quote.orderId}_${productId}_$variationId';
     setState(() { _deletingItemKey = itemKey; });
 
     try {
       final notifier = ref.read(localQuotesProvider.notifier);
 
-      await notifier.eliminarItem(orderId: quote.orderId, productId: productId);
+      await notifier.eliminarItem(
+        orderId: quote.orderId,
+        productId: productId,
+        variationId: variationId,
+      );
 
       // Verificar si el presupuesto quedó vacío
       final updated = notifier.getPresupuesto(quote.orderId);
@@ -412,6 +421,119 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   // ═══════════════════════════════════════════════════════════════
   // ACCIONES
   // ═══════════════════════════════════════════════════════════════
+
+  Future<String?> _askLocalQuoteName(String initialName) async {
+    final controller = TextEditingController(text: initialName.trim());
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Nombre del presupuesto'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 80,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              labelText: 'Nombre',
+              hintText: 'Ej. Instalación oficina Madrid',
+            ),
+            onSubmitted: (value) {
+              final clean = value.trim();
+              if (clean.isNotEmpty) Navigator.of(context).pop(clean);
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final clean = controller.text.trim();
+                if (clean.isNotEmpty) Navigator.of(context).pop(clean);
+              },
+              child: const Text('Guardar nombre'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _renameLocalQuote(LocalQuote quote) async {
+    final name = await _askLocalQuoteName(quote.nombre);
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      await ref.read(localQuotesProvider.notifier).renombrarPresupuesto(
+            orderId: quote.orderId,
+            nombre: name.trim(),
+          );
+      if (mounted) {
+        _showSnackBar('Nombre actualizado.', Colors.green.shade700);
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar('No se pudo cambiar el nombre: $e', Colors.red);
+    }
+  }
+
+  Future<void> _returnWebQuoteToLocal(QuoteMundicam quote) async {
+    if (_isLoadingAction) return;
+    final confirmed = await _showConfirmDialog(
+      title: 'Volver a local',
+      icon: Icons.phone_android_rounded,
+      iconColor: Colors.orange,
+      content: 'El presupuesto #${quote.id} se retirará de la web, quedará como rechazado en WooCommerce/YITH y volverá al móvil como presupuesto local editable. No aparecerá como pedido cancelado.',
+      confirmText: 'VOLVER A LOCAL',
+      confirmColor: Colors.orange.shade800,
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isLoadingAction = true;
+      _processingQuoteId = 'return_local_${quote.id}';
+    });
+
+    try {
+      final restored = await ApiService().devolverPresupuestoALocal(
+        quoteId: int.parse(_extractOrderId(quote)),
+      );
+      if (!mounted) return;
+
+      final chosenName = await _askLocalQuoteName(restored.nombre);
+      final finalQuote = chosenName != null && chosenName.trim().isNotEmpty
+          ? restored.copyWith(nombre: chosenName.trim())
+          : restored;
+
+      await ref
+          .read(localQuotesProvider.notifier)
+          .restaurarPresupuesto(finalQuote);
+      await _hideWebQuote(quote.id);
+      ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
+      ref.invalidate(cartBadgeProvider);
+
+      if (mounted) {
+        _showSnackBar(
+          'Presupuesto devuelto a local. Ya puedes editarlo.',
+          Colors.green.shade700,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('No se pudo devolver el presupuesto a local: $e', Colors.red);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingAction = false;
+          _processingQuoteId = null;
+        });
+      }
+    }
+  }
 
   Future<void> _aceptarPresupuesto(QuoteMundicam quote) async {
     if (_isLoadingAction) return;
@@ -449,20 +571,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           final quantity = int.tryParse(json['quantity']?.toString() ?? '') ?? 1;
           final product = Product.fromJson(json);
           if (product.id > 0 && quantity > 0 && product.canAddToCart) {
-            cartItems.add(
-              CartItem(
-                product: product,
-                quantity: quantity,
-                quoteOriginalQuantity: int.tryParse(
-                      json['quote_original_quantity']?.toString() ?? '',
-                    ) ??
-                    quantity,
-                quoteApprovedUnitPrice:
-                    json['approved_quote_price']?.toString().trim() ?? '',
-                currentEffectiveUnitPrice:
-                    json['current_effective_price']?.toString().trim() ?? '',
-              ),
-            );
+            cartItems.add(CartItem(product: product, quantity: quantity));
           }
         }
       }
@@ -574,7 +683,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     try {
       final cartItems = <CartItem>[];
       for (final item in localQuote.items) {
-        final product = await ApiService().getProductoById(item.productId);
+        final lookupId = item.variationId > 0 ? item.variationId : item.productId;
+        final product = await ApiService().getProductoById(lookupId);
         if (product == null || !product.canAddToCart) {
           throw Exception(
             'El producto "${item.productName}" ya no está disponible para compra.',
@@ -677,6 +787,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       ref.invalidate(quoteBadgeProvider);
       ref.invalidate(cartBadgeProvider);
       _showSnackBar('"$nombre" eliminado.', Colors.grey.shade700);
+    } catch (e) {
+      _showSnackBar('No se pudo eliminar el presupuesto: $e', Colors.red);
     } finally {
       if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
     }
@@ -822,7 +934,13 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           title: Row(
             children: [
               Expanded(child: Text(quote.nombre, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Color(0xFF1A1A1A)))),
-              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Cambiar nombre',
+                visualDensity: VisualDensity.compact,
+                onPressed: isProcessing ? null : () => _renameLocalQuote(quote),
+                icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.orange),
+              ),
+              const SizedBox(width: 4),
               _buildBadge('LOCAL', Colors.orange),
             ],
           ),
@@ -923,8 +1041,12 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
               const SizedBox(height: 14),
               _buildCardButtons(
                 onDelete: () => _eliminarPresupuesto(quote),
-                onSave: () => _guardarPresupuesto(quote),
+                onSave: () => _returnWebQuoteToLocal(quote),
                 onAccept: () => _aceptarPresupuesto(quote),
+                saveText: 'Volver a local',
+                saveIcon: Icons.phone_android_rounded,
+                saveColor: Colors.orange.shade800,
+                showDelete: false,
               ),
             ],
           ],
@@ -1204,7 +1326,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   // ──── ITEMS ────
   Widget _buildLocalItemTile(LocalQuote quote, LocalQuoteItem item) {
-    final itemKey = '${quote.orderId}_${item.productId}';
+    final itemKey = '${quote.orderId}_${item.productId}_${item.variationId}';
     final isDeleting = _deletingItemKey == itemKey;
 
     return _buildQuoteProductTile(
@@ -1221,6 +1343,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
         quote,
         item.productId,
         item.productName,
+        variationId: item.variationId,
       ),
     );
   }
@@ -1471,14 +1594,24 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   }
 
   // ──── BOTONES DE ACCIÓN ────
-  Widget _buildCardButtons({required VoidCallback onDelete, required VoidCallback onSave, required VoidCallback onAccept}) {
+  Widget _buildCardButtons({
+    required VoidCallback onDelete,
+    required VoidCallback onSave,
+    required VoidCallback onAccept,
+    String saveText = 'Guardar',
+    IconData saveIcon = Icons.save_outlined,
+    Color saveColor = const Color(0xFF1565C0),
+    bool showDelete = true,
+  }) {
     return Column(
       children: [
         Row(
           children: [
-            Expanded(child: _buildOutlinedButton('Eliminar', Icons.delete_outline_rounded, Colors.red.shade600, onDelete)),
-            const SizedBox(width: 10),
-            Expanded(child: _buildOutlinedButton('Guardar', Icons.save_outlined, const Color(0xFF1565C0), onSave)),
+            if (showDelete) ...[
+              Expanded(child: _buildOutlinedButton('Eliminar', Icons.delete_outline_rounded, Colors.red.shade600, onDelete)),
+              const SizedBox(width: 10),
+            ],
+            Expanded(child: _buildOutlinedButton(saveText, saveIcon, saveColor, onSave)),
           ],
         ),
         const SizedBox(height: 10),

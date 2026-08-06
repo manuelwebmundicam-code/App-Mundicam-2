@@ -27,10 +27,12 @@ class QuoteSyncService {
         items: localQuote.items
             .map((item) => {
                   'product_id': item.productId,
+                  if (item.variationId > 0) 'variation_id': item.variationId,
                   'quantity': item.quantity,
                 })
             .toList(),
         customerNote: localQuote.nombre,
+        sourceLocalQuoteUuid: localQuote.orderId,
       );
 
       if (!ok) {

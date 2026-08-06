@@ -8,34 +8,54 @@ import '../../data/models/local_quote_model.dart';
 
 // Provider para acceder al notifier
 final localQuotesProvider =
-StateNotifierProvider<LocalQuotesNotifier, List<LocalQuote>>((ref) {
+    StateNotifierProvider<LocalQuotesNotifier, List<LocalQuote>>((ref) {
   return LocalQuotesNotifier();
 });
 
 class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
   static const String _storageKey = 'mundicam_local_quotes';
+
   late final Future<void> _initialLoad;
 
   LocalQuotesNotifier() : super([]) {
     _initialLoad = _cargarPresupuestos();
   }
 
-  // Cargar presupuestos guardados
+  Future<void> _esperarCargaInicial() => _initialLoad;
+
+  // Cargar presupuestos guardados antes de aceptar mutaciones nuevas.
   Future<void> _cargarPresupuestos() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final jsonString = prefs.getString(_storageKey);
 
-      if (jsonString != null && jsonString.isNotEmpty) {
-        final List<dynamic> decoded = jsonDecode(jsonString);
-        final quotes = decoded
-            .map((e) => LocalQuote.fromJson(e as Map<String, dynamic>))
-            .toList();
+      if (jsonString == null || jsonString.isEmpty) {
+        state = [];
+        return;
+      }
 
-        // Filtrar presupuestos expirados
-        final noExpirados = quotes.where((q) => !q.isExpired).toList();
-        state = noExpirados;
-        await _guardarPresupuestos();
+      final decoded = jsonDecode(jsonString);
+      if (decoded is! List) {
+        throw const FormatException('Formato de presupuestos locales no válido.');
+      }
+
+      final quotes = decoded
+          .map((e) => LocalQuote.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      // Filtrar presupuestos expirados manteniendo disponible el contenido válido.
+      final noExpirados = quotes.where((q) => !q.isExpired).toList();
+      state = noExpirados;
+
+      if (noExpirados.length != quotes.length) {
+        try {
+          await _guardarPresupuestos(noExpirados);
+        } catch (e) {
+          // La limpieza automática no debe ocultar presupuestos válidos ya cargados.
+          if (kDebugMode) {
+            debugPrint('No se pudieron limpiar presupuestos expirados: $e');
+          }
+        }
       }
     } catch (e) {
       if (kDebugMode) {
@@ -45,16 +65,22 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     }
   }
 
-  // Guardar presupuestos
-  Future<void> _guardarPresupuestos() async {
+  // Persistencia comprobada. No cambia el estado en memoria si falla el disco.
+  Future<void> _guardarPresupuestos(List<LocalQuote> nextState) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonString = jsonEncode(state.map((e) => e.toJson()).toList());
-      await prefs.setString(_storageKey, jsonString);
+      final jsonString = jsonEncode(nextState.map((e) => e.toJson()).toList());
+      final saved = await prefs.setString(_storageKey, jsonString);
+      if (!saved) {
+        throw StateError('SharedPreferences rechazó el guardado.');
+      }
     } catch (e) {
       if (kDebugMode) {
         debugPrint('Error guardando presupuestos locales: $e');
       }
+      throw Exception(
+        'No se pudo guardar el presupuesto en este dispositivo. Inténtalo de nuevo.',
+      );
     }
   }
 
@@ -63,6 +89,8 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     required String orderId,
     required String nombre,
   }) async {
+    await _esperarCargaInicial();
+
     final nuevo = LocalQuote(
       orderId: orderId,
       nombre: nombre,
@@ -70,8 +98,9 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
       items: [],
     );
 
-    state = [...state, nuevo];
-    await _guardarPresupuestos();
+    final nextState = [...state, nuevo];
+    await _guardarPresupuestos(nextState);
+    state = nextState;
     return nuevo;
   }
 
@@ -80,21 +109,26 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     required String orderId,
     required LocalQuoteItem item,
   }) async {
+    await _esperarCargaInicial();
+
     final index = state.indexWhere((q) => q.orderId == orderId);
-    if (index == -1) return;
+    if (index == -1) {
+      throw Exception('Presupuesto local no encontrado.');
+    }
 
     final quote = state[index];
     final itemsActualizados = List<LocalQuoteItem>.from(quote.items);
 
-    // Buscar si el producto ya existe
-    final existingIndex =
-    itemsActualizados.indexWhere((i) => i.productId == item.productId);
+    // Producto y variación forman la identidad de una línea.
+    final existingIndex = itemsActualizados.indexWhere(
+      (i) => i.productId == item.productId && i.variationId == item.variationId,
+    );
 
     if (existingIndex != -1) {
-      // Actualizar cantidad
       final existing = itemsActualizados[existingIndex];
       itemsActualizados[existingIndex] = LocalQuoteItem(
         productId: existing.productId,
+        variationId: existing.variationId,
         productName: existing.productName,
         quantity: existing.quantity + item.quantity,
         price: existing.price,
@@ -104,61 +138,85 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     }
 
     final quoteActualizado = quote.copyWith(items: itemsActualizados);
-
-    state = [
+    final nextState = [
       ...state.take(index),
       quoteActualizado,
       ...state.skip(index + 1),
     ];
 
-    await _guardarPresupuestos();
+    await _guardarPresupuestos(nextState);
+    state = nextState;
   }
 
   // Eliminar item de un presupuesto
   Future<void> eliminarItem({
     required String orderId,
     required int productId,
+    int variationId = 0,
   }) async {
+    await _esperarCargaInicial();
+
     final index = state.indexWhere((q) => q.orderId == orderId);
-    if (index == -1) return;
+    if (index == -1) {
+      throw Exception('Presupuesto local no encontrado.');
+    }
 
     final quote = state[index];
-    final itemsActualizados =
-    quote.items.where((i) => i.productId != productId).toList();
+    final itemsActualizados = quote.items
+        .where(
+          (i) => !(i.productId == productId && i.variationId == variationId),
+        )
+        .toList();
 
     final quoteActualizado = quote.copyWith(items: itemsActualizados);
-
-    state = [
+    final nextState = [
       ...state.take(index),
       quoteActualizado,
       ...state.skip(index + 1),
     ];
 
-    await _guardarPresupuestos();
+    await _guardarPresupuestos(nextState);
+    state = nextState;
+  }
+
+  Future<void> renombrarPresupuesto({
+    required String orderId,
+    required String nombre,
+  }) async {
+    await _esperarCargaInicial();
+
+    final cleanName = nombre.trim();
+    if (cleanName.isEmpty) {
+      throw Exception('El nombre del presupuesto no puede estar vacío.');
+    }
+
+    final index = state.indexWhere((q) => q.orderId == orderId);
+    if (index == -1) {
+      throw Exception('Presupuesto local no encontrado.');
+    }
+
+    final updated = state[index].copyWith(nombre: cleanName);
+    final nextState = [
+      ...state.take(index),
+      updated,
+      ...state.skip(index + 1),
+    ];
+
+    await _guardarPresupuestos(nextState);
+    state = nextState;
   }
 
   // Eliminar presupuesto completo
   Future<void> eliminarPresupuesto(String orderId) async {
-    await _initialLoad;
-    state = state.where((q) => q.orderId != orderId).toList();
-    await _guardarPresupuestos();
-  }
+    await _esperarCargaInicial();
 
-  Future<void> eliminarPresupuestosConfirmados(
-    Iterable<String> orderIds,
-  ) async {
-    await _initialLoad;
-    final ids = orderIds
-        .map((id) => id.trim())
-        .where((id) => id.isNotEmpty)
-        .toSet();
-    if (ids.isEmpty) return;
+    final nextState = state.where((q) => q.orderId != orderId).toList();
+    if (nextState.length == state.length) {
+      return;
+    }
 
-    final updated = state.where((quote) => !ids.contains(quote.orderId)).toList();
-    if (updated.length == state.length) return;
-
-    state = updated;
-    await _guardarPresupuestos();
+    await _guardarPresupuestos(nextState);
+    state = nextState;
   }
 
   // Obtener presupuesto por ID
@@ -170,9 +228,40 @@ class LocalQuotesNotifier extends StateNotifier<List<LocalQuote>> {
     }
   }
 
+  // Restaurar o actualizar un presupuesto devuelto desde WooCommerce/YITH.
+  Future<void> restaurarPresupuesto(LocalQuote quote) async {
+    await _esperarCargaInicial();
+
+    if (quote.orderId.trim().isEmpty || quote.items.isEmpty) {
+      throw Exception('El presupuesto devuelto no contiene datos válidos.');
+    }
+
+    final index = state.indexWhere((q) => q.orderId == quote.orderId);
+    final List<LocalQuote> nextState;
+    if (index == -1) {
+      nextState = [...state, quote];
+    } else {
+      nextState = [
+        ...state.take(index),
+        quote,
+        ...state.skip(index + 1),
+      ];
+    }
+
+    await _guardarPresupuestos(nextState);
+    state = nextState;
+  }
+
   // Limpiar presupuestos expirados
   Future<void> limpiarExpirados() async {
-    state = state.where((q) => !q.isExpired).toList();
-    await _guardarPresupuestos();
+    await _esperarCargaInicial();
+
+    final nextState = state.where((q) => !q.isExpired).toList();
+    if (nextState.length == state.length) {
+      return;
+    }
+
+    await _guardarPresupuestos(nextState);
+    state = nextState;
   }
 }

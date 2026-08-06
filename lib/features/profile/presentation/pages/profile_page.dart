@@ -33,7 +33,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   String _roleLabel = 'Cliente';
   IconData _roleIcon = Icons.person_outline_rounded;
   String? _errorMessage;
-  bool _testingNotifications = false;
+  bool _requestingDataChange = false;
   bool _deletingAccount = false;
 
   Color get _roleColor {
@@ -659,6 +659,33 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   const SizedBox(height: 22),
                   _buildMenuCard(
                     context,
+                    title: "DATOS DE LA CUENTA",
+                    items: [
+                      _buildActionMenuItem(
+                        icon: Icons.manage_accounts_outlined,
+                        title: "Solicitar cambio de datos",
+                        subtitle: _requestingDataChange
+                            ? "Enviando solicitud..."
+                            : "Indica qué datos necesitas actualizar",
+                        onTap: _requestingDataChange
+                            ? null
+                            : _requestDataChange,
+                        trailing: _requestingDataChange
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: _brandColor,
+                                ),
+                              )
+                            : null,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  _buildMenuCard(
+                    context,
                     title: "SOPORTE Y REPARACIONES",
                     items: [
                       _buildMenuItem(
@@ -674,33 +701,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         "Tickets Técnicos",
                         "Habla con soporte",
                         const SupportTicketsPage(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  _buildMenuCard(
-                    context,
-                    title: "NOTIFICACIONES",
-                    items: [
-                      _buildActionMenuItem(
-                        icon: Icons.notifications_active_outlined,
-                        title: "Comprobar notificaciones",
-                        subtitle: _testingNotifications
-                            ? "Enviando prueba..."
-                            : "Envía una prueba real desde el servidor",
-                        onTap: _testingNotifications
-                            ? null
-                            : _testNotifications,
-                        trailing: _testingNotifications
-                            ? SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: _brandColor,
-                                ),
-                              )
-                            : null,
                       ),
                     ],
                   ),
@@ -1319,7 +1319,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(
-                  Icons.pause_circle_outline_rounded,
+                  Icons.lock_outline_rounded,
                   color: Colors.red,
                   size: 21,
                 ),
@@ -1341,7 +1341,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'Inhabilita el acceso a la app en todos tus dispositivos. La web seguirá activa.',
+                      'Se inhabilitará el acceso a la app y se cerrarán las sesiones abiertas en todos tus dispositivos.',
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.3,
@@ -1358,26 +1358,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           SizedBox(
             width: double.infinity,
             height: 46,
-            child: ElevatedButton.icon(
-              onPressed: _deletingAccount ? null : _confirmDeleteAccount,
-              icon: _deletingAccount
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.pause_circle_outline_rounded, size: 19),
-              label: Text(
-                _deletingAccount ? 'INHABILITANDO...' : 'INHABILITAR EN LA APP',
-                style: const TextStyle(
-                  fontFamily: 'Oswald',
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.6,
-                ),
-              ),
+            child: ElevatedButton(
+              onPressed: _deletingAccount ? null : _confirmDisableAccount,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red.shade700,
                 foregroundColor: Colors.white,
@@ -1387,6 +1369,38 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   borderRadius: BorderRadius.circular(15),
                 ),
               ),
+              child: _deletingAccount
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          'INHABILITANDO...',
+                          style: TextStyle(
+                            fontFamily: 'Oswald',
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      'INHABILITAR CUENTA',
+                      style: TextStyle(
+                        fontFamily: 'Oswald',
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -1541,65 +1555,131 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
-  Future<void> _testNotifications() async {
-    if (_testingNotifications) return;
+  Future<void> _requestDataChange() async {
+    if (_requestingDataChange) return;
 
-    setState(() => _testingNotifications = true);
+    String requestedChangesDraft = '';
+    String? errorText;
+
+    final requestedChanges = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Text('Solicitar cambio de datos'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Por seguridad, los datos del perfil no se pueden editar directamente. Indica qué información necesitas actualizar y enviaremos la solicitud al equipo de soporte de MundiCam.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  autofocus: true,
+                  minLines: 4,
+                  maxLines: 6,
+                  maxLength: 1200,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (value) {
+                    requestedChangesDraft = value;
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Datos que deseas cambiar',
+                    hintText: 'Ejemplo: cambiar teléfono, dirección de envío o razón social...',
+                    errorText: errorText,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('CANCELAR'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final clean = requestedChangesDraft.trim();
+                if (clean.length < 5) {
+                  setDialogState(() {
+                    errorText = 'Indica qué datos necesitas modificar.';
+                  });
+                  return;
+                }
+                Navigator.pop(dialogContext, clean);
+              },
+              child: const Text('ENVIAR SOLICITUD'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (requestedChanges == null ||
+        requestedChanges.trim().isEmpty ||
+        !mounted) {
+      return;
+    }
+
+    setState(() => _requestingDataChange = true);
 
     try {
-      // Asegura primero que el dispositivo actual esté registrado en el PHP.
-      await NotificationService().syncCurrentTokenWithBackend();
-
-      final result = await ApiService().testFcmNotification();
-      final sent = int.tryParse(result['sent']?.toString() ?? '') ?? 0;
-      final failed = int.tryParse(result['failed']?.toString() ?? '') ?? 0;
-      final tokens =
-          int.tryParse(result['tokens_found']?.toString() ?? '') ?? 0;
+      final result = await ApiService()
+          .solicitarCambioDatos(requestedChanges)
+          .timeout(const Duration(seconds: 30));
 
       if (!mounted) return;
-
-      final message = sent > 0
-          ? 'Prueba enviada correctamente a $sent dispositivo(s).'
-          : tokens == 0
-              ? 'No hay dispositivos registrados. Cierra sesión, vuelve a entrar y repite la prueba.'
-              : 'La prueba no se pudo enviar. Enviados: $sent · Fallidos: $failed.';
+      final reference = result['request_id']?.toString().trim() ?? '';
+      final message = reference.isEmpty
+          ? 'Solicitud enviada al equipo de soporte de MundiCam.'
+          : 'Solicitud enviada. Referencia: $reference';
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: sent > 0 ? _brandColor : Colors.red,
+          backgroundColor: _brandColor,
           behavior: SnackBarBehavior.floating,
         ),
       );
     } catch (e) {
       if (!mounted) return;
-
-      final clean = e.toString().replaceFirst('Exception: ', '');
+      final clean = e.toString().replaceFirst('Exception: ', '').trim();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error de prueba: $clean'),
+          content: Text(
+            clean.isEmpty
+                ? 'No se pudo enviar la solicitud. Inténtalo de nuevo.'
+                : clean,
+          ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
       );
     } finally {
       if (mounted) {
-        setState(() => _testingNotifications = false);
+        setState(() => _requestingDataChange = false);
       }
     }
   }
 
-  Future<void> _confirmDeleteAccount() async {
+  Future<void> _confirmDisableAccount() async {
     if (_deletingAccount) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Text('¿Inhabilitar cuenta en la app?'),
+        title: const Text('¿Inhabilitar el acceso a la app?'),
         content: const Text(
-          'Esta acción inhabilitará el acceso a la app MundiCam en todos tus dispositivos, eliminará las notificaciones y cerrará únicamente la sesión de la app.\n\n'
-          'Tu acceso a la web seguirá funcionando de forma independiente. El equipo de privacidad recibirá la solicitud para tramitar la eliminación o anonimización correspondiente.',
+          'Tu usuario dejará de poder acceder a la aplicación MundiCam. Enviaremos la solicitud al equipo de soporte para que gestione la inhabilitación.\n\n'
+          'La cuenta de la web, los pedidos y los datos de WooCommerce permanecerán activos y no se eliminarán.',
         ),
         actions: [
           TextButton(
@@ -1625,36 +1705,33 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
 
     if (confirmed != true || !mounted) return;
-    await _requestAccountDeletion();
+    await _requestAccountDisable();
   }
 
-  Future<void> _requestAccountDeletion() async {
+  Future<void> _requestAccountDisable() async {
     if (_deletingAccount) return;
     setState(() => _deletingAccount = true);
 
     final apiService = ApiService();
 
     try {
-      final sessionUser = await apiService.currentSessionUser();
-      final email = (await apiService.currentSessionEmail()) ??
-          _wooCustomer?['email']?.toString();
-      final username = sessionUser['username']?.toString() ??
-          sessionUser['user_login']?.toString() ??
-          _wooCustomer?['username']?.toString();
-      final wordpressId = await apiService.currentSessionWordPressId();
-
+      // El servidor es la autoridad. No se bloquea localmente ni se cierra la
+      // sesión hasta que el PHP confirme la inhabilitación global de la app.
       final result = await apiService
-          .solicitarEliminacionCuenta()
+          .solicitarInhabilitacionCuenta()
           .timeout(const Duration(seconds: 30));
 
-      await apiService.markAccountDeletionPendingLocally(
-        identifiers: <String?>[
-          email,
-          username,
-          wordpressId?.toString(),
-        ],
-      );
+      if (!result.success ||
+          !(result.accessBlocked || result.alreadyRequested)) {
+        throw Exception(
+          result.message.isNotEmpty
+              ? result.message
+              : 'El servidor no confirmó la inhabilitación de la cuenta.',
+        );
+      }
 
+      // El PHP ya ha revocado todos los tokens y FCM de la cuenta. Limpiamos
+      // también este dispositivo para cerrar completamente la sesión local.
       try {
         await NotificationService()
             .clearDeviceRegistration()
@@ -1663,7 +1740,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       try {
         await FirebaseAuth.instance.signOut();
       } catch (_) {}
-      await apiService.clearLocalAppDataPreservingDeletionBlocks();
+      await apiService.clearWordPressSession();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
 
       if (!mounted) return;
 
@@ -1675,16 +1754,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          icon: const Icon(
-            Icons.pause_circle_outline_rounded,
-            color: Colors.green,
+          icon: Icon(
+            Icons.lock_outline_rounded,
+            color: Colors.red.shade700,
             size: 48,
           ),
-          title: const Text('App inhabilitada'),
+          title: const Text('Cuenta inhabilitada en la app'),
           content: Text(
             reference.isEmpty
-                ? 'El acceso a la app ha quedado inhabilitado en todos tus dispositivos. La web seguirá activa. Recibirás la confirmación por correo.'
-                : 'El acceso a la app ha quedado inhabilitado en todos tus dispositivos. La web seguirá activa. Referencia: $reference.',
+                ? 'Las sesiones de la app se han cerrado en todos tus dispositivos. Tu cuenta web permanece activa y el equipo de soporte gestionará la solicitud.'
+                : 'Las sesiones de la app se han cerrado en todos tus dispositivos. Tu cuenta web permanece activa. Referencia de soporte: $reference.',
             textAlign: TextAlign.center,
           ),
           actions: [
@@ -1708,7 +1787,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         SnackBar(
           content: Text(
             clean.isEmpty
-                ? 'No se pudo inhabilitar la cuenta en la app. Inténtalo de nuevo.'
+                ? 'No se pudo inhabilitar la cuenta. Tu sesión continúa activa.'
                 : clean,
           ),
           backgroundColor: Colors.red,

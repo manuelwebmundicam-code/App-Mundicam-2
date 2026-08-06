@@ -8,8 +8,7 @@ class OrderMundicam {
   final DateTime? datePaid;
   final DateTime? dateCompleted;
   final bool isQuote;
-  final int sourceQuoteId;
-  final String sourceLocalQuoteUuid;
+  final bool isPaid;
 
   final String subtotal;
   final String taxTotal;
@@ -23,6 +22,8 @@ class OrderMundicam {
   final String paymentMethodTitle;
   final String shippingMethodTitle;
   final String customerNote;
+  final int sourceQuoteId;
+  final String sourceLocalQuoteUuid;
 
   final OrderAddress billing;
   final OrderAddress shipping;
@@ -41,8 +42,7 @@ class OrderMundicam {
     this.datePaid,
     this.dateCompleted,
     this.isQuote = false,
-    this.sourceQuoteId = 0,
-    this.sourceLocalQuoteUuid = '',
+    this.isPaid = false,
     this.subtotal = '0',
     this.taxTotal = '0',
     this.shippingTotal = '0',
@@ -53,6 +53,8 @@ class OrderMundicam {
     this.paymentMethodTitle = '',
     this.shippingMethodTitle = '',
     this.customerNote = '',
+    this.sourceQuoteId = 0,
+    this.sourceLocalQuoteUuid = '',
     OrderAddress? billing,
     OrderAddress? shipping,
     OrderActions? actions,
@@ -135,12 +137,7 @@ class OrderMundicam {
         json['date_completed'] ?? json['dateCompleted'],
       ),
       isQuote: _parseBool(json['is_quote'] ?? json['isQuote']),
-      sourceQuoteId: _parseInt(
-        json['source_quote_id'] ?? json['sourceQuoteId'],
-      ),
-      sourceLocalQuoteUuid: _safeString(
-        json['source_local_quote_uuid'] ?? json['sourceLocalQuoteUuid'],
-      ),
+      isPaid: _parseBool(json['is_paid'] ?? json['isPaid']),
       subtotal: _safeMoney(json['subtotal']),
       taxTotal: _safeMoney(json['tax_total'] ?? json['taxTotal']),
       shippingTotal: _safeMoney(json['shipping_total'] ?? json['shippingTotal']),
@@ -158,6 +155,10 @@ class OrderMundicam {
         json['shipping_method_title'] ?? json['shippingMethodTitle'],
       ),
       customerNote: _safeString(json['customer_note'] ?? json['customerNote']),
+      sourceQuoteId: _parseInt(json['source_quote_id'] ?? json['sourceQuoteId']),
+      sourceLocalQuoteUuid: _safeString(
+        json['source_local_quote_uuid'] ?? json['sourceLocalQuoteUuid'],
+      ),
       billing: OrderAddress.fromJson(json['billing']),
       shipping: OrderAddress.fromJson(json['shipping']),
       actions: OrderActions.fromJson(json['actions']),

@@ -632,10 +632,7 @@ class NotificationService {
       androidChannelId,
       androidChannelName,
       icon: 'ic_stat_mundicam',
-      largeIcon: const DrawableResourceAndroidBitmap(
-        'ic_mundicam_notification_large',
-      ),
-      color: const Color(0xFFB00000),
+      color: const Color(0xFFA60909),
       channelDescription: androidChannelDescription,
       importance: Importance.max,
       priority: Priority.high,
@@ -674,6 +671,7 @@ class NotificationService {
       payload: notification.toPayload(),
     );
   }
+
 
   int _notificationId(MundiCamOrderNotification notification) {
     final orderId = notification.orderId;

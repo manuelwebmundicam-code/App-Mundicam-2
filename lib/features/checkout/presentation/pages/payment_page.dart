@@ -50,7 +50,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   bool _openedExternalPayment = false;
   bool _waitingForConfirmation = false;
   bool _showSecureWebContent = false;
-  bool _returningCancelledQuote = false;
+  bool _cancellingQuoteOrder = false;
 
   String? _errorMessage;
   late String _bridgeHost;
@@ -140,10 +140,8 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
             }
 
             if (_isFailureUrl(url)) {
-              _handlePaymentFailure(
-                widget.quotePayment
-                    ? 'Pago cancelado. Volviendo a Mis presupuestos.'
-                    : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
+              _markPaymentError(
+                widget.quotePayment ? 'El pago no se ha completado. Puedes volver a intentarlo desde Mis presupuestos.' : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
               );
               return NavigationDecision.prevent;
             }
@@ -370,10 +368,8 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     }
 
     if (_isFailureUrl(url)) {
-      _handlePaymentFailure(
-        widget.quotePayment
-            ? 'Pago cancelado. Volviendo a Mis presupuestos.'
-            : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
+      _markPaymentError(
+        widget.quotePayment ? 'El pago no se ha completado. Puedes volver a intentarlo desde Mis presupuestos.' : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
       );
     }
   }
@@ -436,11 +432,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       }
 
       if (_failedStatuses.contains(status)) {
-        _handlePaymentFailure(
-          widget.quotePayment
-              ? 'Pago cancelado. Volviendo a Mis presupuestos.'
-              : 'El pago aparece como no completado.',
-        );
+        _markPaymentError('El pago aparece como no completado.');
         return;
       }
 
@@ -515,25 +507,6 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     }
 
     return limpio;
-  }
-
-  void _handlePaymentFailure(String message) {
-    if (!mounted || _paymentSuccess) return;
-
-    if (widget.quotePayment) {
-      if (_returningCancelledQuote) return;
-      _returningCancelledQuote = true;
-      _markPaymentError(message);
-      _trackPaymentReturn('cancelled');
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Navigator.of(context).pop(false);
-        }
-      });
-      return;
-    }
-
-    _markPaymentError(message);
   }
 
   void _markPaymentError(String message) {
@@ -627,10 +600,10 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     final shouldExit = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Salir del pago'),
+        title: Text(widget.quotePayment ? 'Cancelar pedido' : 'Salir del pago'),
         content: Text(
           widget.quotePayment
-              ? 'El pago todavía no se ha confirmado. El presupuesto seguirá visible en Mis presupuestos y podrás volver a pulsar “Aceptar y pagar” más tarde.'
+              ? 'El pedido creado para este presupuesto se marcará como cancelado y aparecerá en Mis pedidos. El presupuesto no volverá a la sección web de Presupuestos.'
               : 'El pedido ya está creado, pero el pago todavía no se ha confirmado. Podrás finalizarlo desde la web o contactando con MundiCam.',
         ),
         actions: [
@@ -641,10 +614,10 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: widget.quotePayment ? Colors.red.shade700 : AppColors.primary,
               foregroundColor: Colors.white,
             ),
-            child: Text(widget.quotePayment ? 'Volver a presupuestos' : 'Salir'),
+            child: Text(widget.quotePayment ? 'Cancelar pedido' : 'Salir'),
           ),
         ],
       ),
@@ -653,14 +626,69 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     return shouldExit ?? false;
   }
 
+  Future<bool> _cancelQuoteOrderAndExit() async {
+    if (_cancellingQuoteOrder || !mounted) return false;
+
+    setState(() => _cancellingQuoteOrder = true);
+    try {
+      final result = await ApiService().cancelarCheckoutPresupuesto(
+        orderId: widget.orderId,
+        orderKey: widget.orderKey,
+      );
+      if (!mounted) return false;
+
+      if (result['already_paid'] == true) {
+        setState(() => _cancellingQuoteOrder = false);
+        await _verifyOrderPaymentStatus(
+          showPendingAsWaiting: true,
+          source: 'cancel_race_paid',
+        );
+        return false;
+      }
+
+      if (result['cancelled'] != true) {
+        throw Exception(
+          result['message']?.toString() ?? 'El servidor no confirmó la cancelación.',
+        );
+      }
+
+      _trackPaymentReturn('cancelled');
+      Navigator.of(context).pop(false);
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+      setState(() => _cancellingQuoteOrder = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo cancelar el pedido: $e'),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return false;
+    }
+  }
+
   Future<bool> _handleBack() async {
+    if (_cancellingQuoteOrder) return false;
+
     if (_paymentSuccess) {
       Navigator.of(context).pop(true);
       return false;
     }
 
-    if (!_paymentStarted) {
+    if (!_paymentStarted && !widget.quotePayment) {
       Navigator.of(context).pop(false);
+      return false;
+    }
+
+    // Un checkout procedente de presupuesto no navega hacia atrás dentro de la
+    // WebView: salir significa cancelar de forma explícita el pedido creado.
+    if (widget.quotePayment) {
+      final shouldCancel = await _confirmExitPayment();
+      if (shouldCancel && mounted) {
+        await _cancelQuoteOrderAndExit();
+      }
       return false;
     }
 
@@ -723,7 +751,9 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 ),
                 leading: IconButton(
                   icon: const Icon(Icons.close_rounded),
-                  onPressed: () async => _handleBack(),
+                  onPressed: _cancellingQuoteOrder
+                      ? null
+                      : () async => _handleBack(),
                 ),
               ),
         body: _paymentSuccess
@@ -913,8 +943,18 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 SizedBox(
                   width: double.infinity,
                   child: TextButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: Text(widget.quotePayment ? 'Volver a presupuestos' : 'Volver al checkout'),
+                    onPressed: _cancellingQuoteOrder
+                        ? null
+                        : () async {
+                            if (widget.quotePayment) {
+                              await _handleBack();
+                            } else if (mounted) {
+                              Navigator.of(context).pop(false);
+                            }
+                          },
+                    child: Text(
+                      widget.quotePayment ? 'Cancelar pedido' : 'Volver al checkout',
+                    ),
                   ),
                 ),
               ],
@@ -1092,7 +1132,9 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           ),
           IconButton(
             tooltip: 'Cerrar',
-            onPressed: () async => _handleBack(),
+            onPressed: _cancellingQuoteOrder
+                ? null
+                : () async => _handleBack(),
             icon: const Icon(Icons.close_rounded),
           ),
         ],

@@ -13,6 +13,7 @@ import 'package:mundicam/features/home/data/models/banner.dart';
 import 'package:mundicam/features/home/data/models/noticia.dart';
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/features/quotes/data/models/quote_model.dart';
+import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/training/data/models/cursos_model.dart';
 
 
@@ -51,22 +52,6 @@ String? _firstNonEmptyString(List<dynamic> values) {
     if (text.isNotEmpty && text.toLowerCase() != 'null') return text;
   }
   return null;
-}
-
-String? _canonicalOrderPaymentMethod(dynamic value) {
-  final raw = value?.toString().trim().toLowerCase() ?? '';
-  switch (raw) {
-    case 'redsys':
-      return 'redsys';
-    case 'bacs':
-      return 'bacs';
-    case 'cheque':
-    case 'giro':
-    case 'aplazado':
-      return 'cheque';
-    default:
-      return null;
-  }
 }
 
 List<dynamic> _firstList(List<dynamic> values) {
@@ -273,7 +258,7 @@ class AccountDeleteRequestResult {
       requestId: (json['request_id'] ?? '').toString().trim(),
       accessBlocked: json['access_blocked'] == true,
       alreadyRequested: json['already_requested'] == true,
-      rgpdEmailSent: json['rgpd_email_sent'] == true,
+      rgpdEmailSent: json['support_email_sent'] == true || json['rgpd_email_sent'] == true,
       emailRetryScheduled: json['email_retry_scheduled'] == true,
       message: _firstNonEmptyString([json['message']]) ??
           'Solicitud de inhabilitación registrada.',
@@ -2799,8 +2784,6 @@ class ApiService {
   Future<List<ShippingOption>> getShippingMethods({
     required List<Map<String, dynamic>> lineItems,
     required Map<String, dynamic> shippingAddress,
-    int sourceQuoteId = 0,
-    String sourceLocalQuoteUuid = '',
   }) async {
     final cleanItems = _sanitizeLineItems(lineItems);
     if (cleanItems.isEmpty) return <ShippingOption>[];
@@ -2809,9 +2792,6 @@ class ApiService {
       final response = await _appPost('/shipping/methods', data: {
         'line_items': cleanItems,
         'shipping_address': shippingAddress,
-        if (sourceQuoteId > 0) 'source_quote_id': sourceQuoteId,
-        if (sourceLocalQuoteUuid.trim().isNotEmpty)
-          'source_local_quote_uuid': sourceLocalQuoteUuid.trim(),
       });
       final root = _responseMap(response.data);
       final nested = _asMap(root['data']);
@@ -2851,8 +2831,6 @@ class ApiService {
     required List<Map<String, dynamic>> lineItems,
     required Map<String, dynamic> shippingAddress,
     String? shippingMethodId,
-    int sourceQuoteId = 0,
-    String sourceLocalQuoteUuid = '',
   }) async {
     final cleanItems = _sanitizeLineItems(lineItems);
     if (cleanItems.isEmpty) return null;
@@ -2861,9 +2839,6 @@ class ApiService {
       final response = await _appPost('/order/preview', data: {
         'line_items': cleanItems,
         'shipping_address': shippingAddress,
-        if (sourceQuoteId > 0) 'source_quote_id': sourceQuoteId,
-        if (sourceLocalQuoteUuid.trim().isNotEmpty)
-          'source_local_quote_uuid': sourceLocalQuoteUuid.trim(),
         if ((shippingMethodId ?? '').trim().isNotEmpty) ...{
           'shipping_method_id': shippingMethodId!.trim(),
           'shipping_option_id': shippingMethodId!.trim(),
@@ -2893,26 +2868,12 @@ class ApiService {
         return OrderCreateResult.failure('No hay productos válidos para crear el pedido.');
       }
 
-      final paymentMethod =
-          _canonicalOrderPaymentMethod(orderData['payment_method']);
-      if (paymentMethod == null) {
-        return OrderCreateResult.failure(
-          'Selecciona un método de pago válido antes de crear el pedido.',
-        );
-      }
-
-      // El estado lo decide exclusivamente el PHP 1.9.36:
-      // redsys=pending, bacs=processing, cheque=on-hold.
-      final requestData = Map<String, dynamic>.from(orderData)
-        ..remove('status')
-        ..remove('set_paid')
-        ..['payment_method'] = paymentMethod
-        ..['line_items'] = lineItems;
-
       final enrichedOrderData =
-          await MundicamAnalyticsService.instance.enrichPayload(requestData);
-      final response =
-          await _appPost('/order/create', data: enrichedOrderData);
+          await MundicamAnalyticsService.instance.enrichPayload(orderData);
+      final response = await _appPost('/order/create', data: {
+        ...enrichedOrderData,
+        'line_items': lineItems,
+      });
 
       final data = _responseMap(response.data);
       if (data['success'] == false) {
@@ -2961,10 +2922,12 @@ class ApiService {
   Future<bool> crearPresupuestoConProductos({
     required List<Map<String, dynamic>> items,
     String? customerNote,
+    String? sourceLocalQuoteUuid,
   }) async {
     final result = await crearPresupuestoConProductosDetalle(
       items: items,
       customerNote: customerNote,
+      sourceLocalQuoteUuid: sourceLocalQuoteUuid,
     );
     return result.success && result.quoteId > 0;
   }
@@ -2972,6 +2935,7 @@ class ApiService {
   Future<QuoteCreateResult> crearPresupuestoConProductosDetalle({
     required List<Map<String, dynamic>> items,
     String? customerNote,
+    String? sourceLocalQuoteUuid,
   }) async {
     final cleanItems = _sanitizeLineItems(items);
     if (cleanItems.isEmpty) {
@@ -3029,6 +2993,8 @@ class ApiService {
       final createResponse = await _appPost('/quote/create', data: {
         if ((customerNote ?? '').trim().isNotEmpty)
           'customer_note': customerNote!.trim(),
+        if ((sourceLocalQuoteUuid ?? '').trim().isNotEmpty)
+          'source_local_quote_uuid': sourceLocalQuoteUuid!.trim(),
         ...analyticsContext,
       });
       final createData = _responseMap(createResponse.data);
@@ -3333,12 +3299,12 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> cancelarIntentoPagoPresupuesto({
+  Future<Map<String, dynamic>> cancelarCheckoutPresupuesto({
     required int orderId,
     required String orderKey,
   }) async {
     if (orderId <= 0 || orderKey.trim().isEmpty) {
-      throw Exception('No se pudo identificar el intento de pago.');
+      throw Exception('No se pudo identificar el pedido que se va a cancelar.');
     }
 
     try {
@@ -3347,10 +3313,10 @@ class ApiService {
         'order_key': orderKey.trim(),
       });
       final data = _responseMap(response.data);
-      if (data['success'] != true) {
+      if (data['success'] == false) {
         throw Exception(
-          data['message']?.toString() ??
-              'No se pudo cancelar el intento de pago del presupuesto.',
+          _firstNonEmptyString([data['message']]) ??
+              'No se pudo cancelar el pedido.',
         );
       }
       return data;
@@ -3359,9 +3325,91 @@ class ApiService {
     }
   }
 
-  Future<AccountDeleteRequestResult> solicitarEliminacionCuenta() async {
+  Future<OrderMundicam> cancelarPedido({
+    required int orderId,
+    required String orderKey,
+  }) async {
+    if (orderId <= 0 || orderKey.trim().isEmpty) {
+      throw Exception('No se pudo identificar el pedido.');
+    }
+
     try {
-      final response = await _appPost('/account/delete-request', data: {
+      final response = await _appPost('/order/cancel', data: {
+        'order_id': orderId,
+        'order_key': orderKey.trim(),
+      });
+      final data = _responseMap(response.data);
+      final orderData = _asMap(data['order']);
+      if (data['success'] == false || orderData.isEmpty) {
+        throw Exception(
+          _firstNonEmptyString([data['message']]) ??
+              'No se pudo cancelar el pedido.',
+        );
+      }
+      return OrderMundicam.fromJson(orderData);
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    }
+  }
+
+  Future<LocalQuote> devolverPresupuestoALocal({
+    required int quoteId,
+  }) async {
+    if (quoteId <= 0) {
+      throw Exception('No se pudo identificar el presupuesto.');
+    }
+
+    try {
+      final response = await _appPost('/quote/return-local', data: {
+        'quote_id': quoteId,
+      });
+      final data = _responseMap(response.data);
+      final localData = _asMap(data['local_quote']);
+      if (data['success'] == false || localData.isEmpty) {
+        throw Exception(
+          _firstNonEmptyString([data['message']]) ??
+              'No se pudo devolver el presupuesto al móvil.',
+        );
+      }
+      return LocalQuote.fromServerPayload(localData);
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    }
+  }
+
+  Future<Map<String, dynamic>> solicitarCambioDatos(
+    String requestedChanges,
+  ) async {
+    final clean = requestedChanges.trim();
+    if (clean.length < 5) {
+      throw Exception('Indica qué datos necesitas modificar.');
+    }
+
+    try {
+      final response = await _appPost(
+        '/account/data-change-request',
+        data: {
+          'requested_changes': clean,
+        },
+      );
+      final data = _responseMap(response.data);
+      final message = data['message']?.toString().trim() ?? '';
+      if (data['success'] != true) {
+        throw Exception(
+          message.isNotEmpty
+              ? message
+              : 'No se pudo enviar la solicitud de cambio de datos.',
+        );
+      }
+      return data;
+    } on DioException catch (e) {
+      throw Exception(_mapDioError(e));
+    }
+  }
+
+  Future<AccountDeleteRequestResult> solicitarInhabilitacionCuenta() async {
+    try {
+      final response = await _appPost('/account/disable-request', data: {
         'confirm': true,
       });
       final data = _responseMap(response.data);
@@ -3372,13 +3420,18 @@ class ApiService {
         throw Exception(
           result.message.isNotEmpty
               ? result.message
-              : 'El servidor no confirmó la inhabilitación de la app.',
+              : 'El servidor no confirmó la inhabilitación de la cuenta en la app.',
         );
       }
       return result;
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
     }
+  }
+
+  // Compatibilidad interna con llamadas antiguas del proyecto.
+  Future<AccountDeleteRequestResult> solicitarEliminacionCuenta() {
+    return solicitarInhabilitacionCuenta();
   }
 
   // ================================================================

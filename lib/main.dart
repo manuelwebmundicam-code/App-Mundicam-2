@@ -271,17 +271,6 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
 
   Future<bool> _validateSession() async {
     final api = ApiService();
-    final storedEmail = await api.currentSessionEmail();
-    final storedUserId = await api.currentSessionWordPressId();
-    final locallyBlocked =
-        await api.isAccountDeletionPendingLocally(storedEmail) ||
-        await api.isAccountDeletionPendingLocally(storedUserId?.toString());
-
-    if (locallyBlocked) {
-      await api.clearWordPressSession();
-      return false;
-    }
-
     final hasStoredToken = await api.hasStoredAppSession();
     final hasAppSession = hasStoredToken
         ? await api
