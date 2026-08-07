@@ -121,12 +121,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     for (final controller in [
       _addressController,
       _cityController,
-      _postCodeController,
       _stateController,
       _countryController,
     ]) {
       controller.addListener(_onShippingAddressChanged);
     }
+    _postCodeController.addListener(_onShippingPostcodeChanged);
     _cargarDatosCliente();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -156,12 +156,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     for (final controller in [
       _addressController,
       _cityController,
-      _postCodeController,
       _stateController,
       _countryController,
     ]) {
       controller.removeListener(_onShippingAddressChanged);
     }
+    _postCodeController.removeListener(_onShippingPostcodeChanged);
     _scrollController.dispose();
     for (var c in [
       _nameController,
@@ -498,6 +498,31 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     return _creditLimit > 0 && disponible > 0;
   }
 
+
+  void _onShippingPostcodeChanged() {
+    if (_loadingProfile) return;
+
+    final country = _normalizeCountryCode(_countryController.text);
+    if (country == 'ES') {
+      final stateCode = _normalizeSpanishProvinceCode(
+        country: country,
+        state: '',
+        postcode: _postCodeController.text,
+      );
+      if (stateCode.isNotEmpty) {
+        final provinceName = _spanishProvinceDisplayName(stateCode);
+        if (provinceName.isNotEmpty &&
+            _stateController.text.trim() != provinceName) {
+          _stateController.value = TextEditingValue(
+            text: provinceName,
+            selection: TextSelection.collapsed(offset: provinceName.length),
+          );
+        }
+      }
+    }
+
+    _onShippingAddressChanged();
+  }
 
   void _onShippingAddressChanged() {
     if (_loadingProfile) return;

@@ -3088,10 +3088,15 @@ class ApiService {
     required String orderId,
     required int productId,
     required int quantity,
+    int variationId = 0,
+    int lineItemId = 0,
   }) async {
     try {
       final response = await _appPost('/quote/update', data: {
+        'order_id': orderId,
         'product_id': productId,
+        'variation_id': variationId,
+        if (lineItemId > 0) 'line_item_id': lineItemId,
         'quantity': quantity <= 0 ? 1 : quantity,
       });
       return _responseMap(response.data)['success'] != false;

@@ -43,6 +43,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   bool _isLoadingAction = false;
   String? _processingQuoteId;
   String? _deletingItemKey;
+  String? _updatingItemKey;
 
   final Set<String> _hiddenQuoteIds = <String>{};
   final Set<String> _expandedQuoteIds = <String>{};
@@ -247,6 +248,37 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     return null;
   }
 
+  Widget _buildIncrementProductButton({
+    required bool isUpdating,
+    required VoidCallback onPressed,
+  }) {
+    return Material(
+      color: const Color(0xFFEAF8EF),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: isUpdating ? null : onPressed,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: isUpdating
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF008F49),
+                  ),
+                )
+              : const Icon(
+                  Icons.add_rounded,
+                  color: Color(0xFF008F49),
+                  size: 25,
+                ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildDeleteProductButton({
     required bool isDeleting,
     required VoidCallback onPressed,
@@ -339,6 +371,86 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     }
   }
 
+  Future<void> _incrementarProductoWeb(
+    QuoteMundicam quote,
+    _QuoteLineItem item,
+  ) async {
+    if (_isLoadingAction || _updatingItemKey != null || _deletingItemKey != null) {
+      return;
+    }
+
+    final itemKey = '${quote.id}_${item.lineItemId}_${item.productId}_${item.variationId}';
+    setState(() => _updatingItemKey = itemKey);
+
+    try {
+      final actualizado = await ApiService().actualizarPresupuesto(
+        orderId: _extractOrderId(quote),
+        lineItemId: item.lineItemId,
+        productId: item.productId,
+        variationId: item.variationId,
+        quantity: item.quantity + 1,
+      );
+      if (!actualizado) {
+        throw Exception('No se pudo actualizar la cantidad.');
+      }
+
+      _webItemsCache.remove(quote.id);
+      _webItemsFutures.remove(quote.id);
+      _webDetailsCache.remove(quote.id);
+      ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
+
+      if (mounted) {
+        setState(() {});
+        _showSnackBar(
+          'Cantidad actualizada: ${item.quantity + 1} ud.',
+          Colors.green.shade700,
+        );
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar('No se pudo aumentar la cantidad: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _updatingItemKey = null);
+    }
+  }
+
+  Future<void> _incrementarProductoLocal(
+    LocalQuote quote,
+    LocalQuoteItem item,
+  ) async {
+    if (_isLoadingAction || _updatingItemKey != null || _deletingItemKey != null) {
+      return;
+    }
+
+    final itemKey = '${quote.orderId}_${item.productId}_${item.variationId}';
+    setState(() => _updatingItemKey = itemKey);
+
+    try {
+      await ref.read(localQuotesProvider.notifier).anadirItem(
+            orderId: quote.orderId,
+            item: LocalQuoteItem(
+              productId: item.productId,
+              variationId: item.variationId,
+              productName: item.productName,
+              quantity: 1,
+              price: item.price,
+            ),
+          );
+      ref.invalidate(quoteBadgeProvider);
+      ref.invalidate(cartBadgeProvider);
+      if (mounted) {
+        _showSnackBar(
+          'Cantidad actualizada: ${item.quantity + 1} ud.',
+          Colors.green.shade700,
+        );
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar('No se pudo aumentar la cantidad: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _updatingItemKey = null);
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // ELIMINAR PRODUCTO INDIVIDUAL - WEB
   // ═══════════════════════════════════════════════════════════════
@@ -346,7 +458,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Future<void> _eliminarProductoWeb(QuoteMundicam quote, _QuoteLineItem item) async {
     if (_isLoadingAction || _deletingItemKey != null) return;
 
-    final itemKey = '${quote.id}_${item.productId}';
+    final itemKey = '${quote.id}_${item.lineItemId}_${item.productId}_${item.variationId}';
     setState(() { _deletingItemKey = itemKey; });
 
     try {
@@ -476,62 +588,6 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       }
     } catch (e) {
       if (mounted) _showSnackBar('No se pudo cambiar el nombre: $e', Colors.red);
-    }
-  }
-
-  Future<void> _returnWebQuoteToLocal(QuoteMundicam quote) async {
-    if (_isLoadingAction) return;
-    final confirmed = await _showConfirmDialog(
-      title: 'Volver a local',
-      icon: Icons.phone_android_rounded,
-      iconColor: Colors.orange,
-      content: 'El presupuesto #${quote.id} se retirará de la web, quedará como rechazado en WooCommerce/YITH y volverá al móvil como presupuesto local editable. No aparecerá como pedido cancelado.',
-      confirmText: 'VOLVER A LOCAL',
-      confirmColor: Colors.orange.shade800,
-    );
-    if (confirmed != true || !mounted) return;
-
-    setState(() {
-      _isLoadingAction = true;
-      _processingQuoteId = 'return_local_${quote.id}';
-    });
-
-    try {
-      final restored = await ApiService().devolverPresupuestoALocal(
-        quoteId: int.parse(_extractOrderId(quote)),
-      );
-      if (!mounted) return;
-
-      final chosenName = await _askLocalQuoteName(restored.nombre);
-      final finalQuote = chosenName != null && chosenName.trim().isNotEmpty
-          ? restored.copyWith(nombre: chosenName.trim())
-          : restored;
-
-      await ref
-          .read(localQuotesProvider.notifier)
-          .restaurarPresupuesto(finalQuote);
-      await _hideWebQuote(quote.id);
-      ref.invalidate(quotesProvider);
-      ref.invalidate(quoteBadgeProvider);
-      ref.invalidate(cartBadgeProvider);
-
-      if (mounted) {
-        _showSnackBar(
-          'Presupuesto devuelto a local. Ya puedes editarlo.',
-          Colors.green.shade700,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar('No se pudo devolver el presupuesto a local: $e', Colors.red);
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingAction = false;
-          _processingQuoteId = null;
-        });
-      }
     }
   }
 
@@ -1039,14 +1095,10 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             _buildWebExpandedContent(quote),
             if (!isProcessing) ...[
               const SizedBox(height: 14),
-              _buildCardButtons(
-                onDelete: () => _eliminarPresupuesto(quote),
-                onSave: () => _returnWebQuoteToLocal(quote),
-                onAccept: () => _aceptarPresupuesto(quote),
-                saveText: 'Volver a local',
-                saveIcon: Icons.phone_android_rounded,
-                saveColor: Colors.orange.shade800,
-                showDelete: false,
+              _buildGradientButton(
+                'ACEPTAR Y PAGAR',
+                Icons.shopping_cart_rounded,
+                () => _aceptarPresupuesto(quote),
               ),
             ],
           ],
@@ -1328,6 +1380,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Widget _buildLocalItemTile(LocalQuote quote, LocalQuoteItem item) {
     final itemKey = '${quote.orderId}_${item.productId}_${item.variationId}';
     final isDeleting = _deletingItemKey == itemKey;
+    final isUpdating = _updatingItemKey == itemKey;
 
     return _buildQuoteProductTile(
       accentColor: Colors.orange.shade300,
@@ -1339,6 +1392,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       imageUrl: '',
       sku: '',
       isDeleting: isDeleting,
+      isUpdating: isUpdating,
+      onIncrement: () => _incrementarProductoLocal(quote, item),
       onDelete: () => _eliminarProductoLocal(
         quote,
         item.productId,
@@ -1349,8 +1404,9 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   }
 
   Widget _buildWebItemTile(QuoteMundicam quote, _QuoteLineItem item) {
-    final itemKey = '${quote.id}_${item.productId}';
+    final itemKey = '${quote.id}_${item.lineItemId}_${item.productId}_${item.variationId}';
     final isDeleting = _deletingItemKey == itemKey;
+    final isUpdating = _updatingItemKey == itemKey;
 
     return _buildQuoteProductTile(
       accentColor: Colors.blue.shade300,
@@ -1363,6 +1419,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       imageUrl: item.imageUrl,
       sku: item.sku,
       isDeleting: isDeleting,
+      isUpdating: isUpdating,
+      onIncrement: () => _incrementarProductoWeb(quote, item),
       onDelete: () => _eliminarProductoWeb(quote, item),
     );
   }
@@ -1378,6 +1436,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     required String imageUrl,
     required String sku,
     required bool isDeleting,
+    required bool isUpdating,
+    required VoidCallback onIncrement,
     required VoidCallback onDelete,
   }) {
     final baseImageUrl = imageUrl.trim();
@@ -1403,6 +1463,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
         imageUrl: baseImageUrl,
         sku: baseSku,
         isDeleting: isDeleting,
+        isUpdating: isUpdating,
+        onIncrement: onIncrement,
         onDelete: onDelete,
       );
     }
@@ -1426,6 +1488,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           imageUrl: baseImageUrl.isNotEmpty ? baseImageUrl : (product?.imageUrl.trim() ?? ''),
           sku: baseSku.isNotEmpty ? baseSku : (product?.sku.trim() ?? ''),
           isDeleting: isDeleting,
+          isUpdating: isUpdating,
+          onIncrement: onIncrement,
           onDelete: onDelete,
         );
       },
@@ -1443,6 +1507,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     required String imageUrl,
     required String sku,
     required bool isDeleting,
+    required bool isUpdating,
+    required VoidCallback onIncrement,
     required VoidCallback onDelete,
   }) {
     final effectiveName = productName.trim().isNotEmpty ? productName.trim() : 'Producto';
@@ -1557,9 +1623,19 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                _buildDeleteProductButton(
-                  isDeleting: isDeleting,
-                  onPressed: onDelete,
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildIncrementProductButton(
+                      isUpdating: isUpdating,
+                      onPressed: onIncrement,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildDeleteProductButton(
+                      isDeleting: isDeleting,
+                      onPressed: onDelete,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1817,13 +1893,14 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 // ═══════════════════════════════════════════════════════════════
 
 class _QuoteLineItem {
-  final int lineItemId, productId, quantity;
+  final int lineItemId, productId, variationId, quantity;
   final String name, sku, imageUrl;
   final double total, taxTotal;
 
   const _QuoteLineItem({
     required this.lineItemId,
     required this.productId,
+    this.variationId = 0,
     required this.name,
     required this.quantity,
     required this.total,
@@ -1842,6 +1919,7 @@ class _QuoteLineItem {
     return _QuoteLineItem(
       lineItemId: _parseInt(map['id'] ?? map['line_item_id'] ?? map['item_id']),
       productId: _parseInt(map['product_id'] ?? map['productId'] ?? map['id_product']),
+      variationId: _parseInt(map['variation_id'] ?? map['variationId'] ?? map['id_variation']),
       name: (map['name']?.toString() ?? map['product_name']?.toString() ?? 'Producto').replaceAll(RegExp(r'<[^>]*>'), '').trim(),
       quantity: _parseInt(map['quantity'] ?? map['qty'], fallback: 1),
       total: total > 0 ? total : subtotal,
