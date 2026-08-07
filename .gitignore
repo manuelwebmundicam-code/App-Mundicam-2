@@ -1,7 +1,0 @@
-build/
-.dart_tool/
-*.apk
-*.aab
-*.jks
-key.properties
-android/key.properties
