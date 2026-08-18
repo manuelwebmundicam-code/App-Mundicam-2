@@ -4,6 +4,10 @@ class QuoteMundicam {
   final String description;
   final double total;
   final int daysLeft;
+
+  /// Estado bruto recibido desde WooCommerce/YITH.
+  /// PHP 1.9.26 debe devolver `ywraq-pending` para que en web aparezca
+  /// como `status-ywraq-pending` / "Presupuesto pendiente".
   final String status;
 
   QuoteMundicam({
@@ -30,9 +34,13 @@ class QuoteMundicam {
     final rawNote = _safeString(
       json['customer_note'] ?? json['description'] ?? json['note'] ?? json['title'],
     );
-    final rawStatus = _safeString(json['status']).isEmpty
-        ? 'pending'
-        : _safeString(json['status']);
+    final rawStatus = _safeString(
+      json['status'] ??
+          json['order_status'] ??
+          json['quote_status'] ??
+          json['post_status'],
+    );
+    final safeStatus = rawStatus.isEmpty ? 'pending' : rawStatus;
 
     return QuoteMundicam(
       id: 'PRE-$safeRawId',
@@ -42,9 +50,51 @@ class QuoteMundicam {
           : 'Presupuesto de equipos de seguridad',
       total: _parseTotal(json['total'] ?? json['amount'] ?? json['subtotal']),
       daysLeft: diff > 0 ? diff : 0,
-      status: rawStatus,
+      status: safeStatus,
     );
   }
+
+  /// Estado normalizado para comparar dentro de la app.
+  /// WooCommerce guarda los estados con `wc-`, pero `WC_Order::get_status()`
+  /// normalmente los devuelve sin ese prefijo.
+  String get normalizedStatus => status
+      .toLowerCase()
+      .trim()
+      .replaceFirst(RegExp(r'^wc-'), '');
+
+  /// Texto seguro para mostrar al usuario en la app.
+  String get statusLabel {
+    switch (normalizedStatus) {
+      case 'ywraq-pending':
+        return 'Presupuesto pendiente';
+      case 'ywraq-new':
+        return 'Nueva solicitud';
+      case 'ywraq-accepted':
+        return 'Presupuesto aceptado';
+      case 'ywraq-rejected':
+        return 'Presupuesto rechazado';
+      case 'pending':
+        return 'Pendiente de pago';
+      case 'on-hold':
+        return 'En espera';
+      case 'processing':
+        return 'En proceso';
+      case 'completed':
+        return 'Completado';
+      case 'checkout-draft':
+        return 'Borrador';
+      default:
+        if (normalizedStatus.startsWith('ywraq-')) {
+          return normalizedStatus
+              .replaceAll('ywraq-', '')
+              .replaceAll('-', ' ')
+              .trim();
+        }
+        return status.isEmpty ? 'Presupuesto' : status;
+    }
+  }
+
+  bool get isYithPending => normalizedStatus == 'ywraq-pending';
 
   static String _safeString(dynamic value) {
     if (value == null) return '';

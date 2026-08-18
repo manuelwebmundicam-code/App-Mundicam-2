@@ -49,9 +49,15 @@ class CategoryGrid extends ConsumerWidget {
           return true;
         }).toList();
 
+        // v1.9.69: SOLO EN INICIO aplicamos un orden visual estable.
+        // La pantalla de Categorías/Subcategorías sigue respetando exactamente
+        // el menu_order que entrega WooCommerce. Aquí únicamente agrupamos las
+        // tarjetas principales para que INTRUSIÓN y ACCESOS queden juntas y
+        // COMPLEMENTOS no rompa visualmente ese bloque. El resto conserva el
+        // orden original del servidor.
         indexedCategories.sort((a, b) {
-          final priorityA = _categoryPriority(a.value.name);
-          final priorityB = _categoryPriority(b.value.name);
+          final priorityA = _homeVisualPriority(a.value.name);
+          final priorityB = _homeVisualPriority(b.value.name);
 
           if (priorityA != priorityB) {
             return priorityA.compareTo(priorityB);
@@ -144,12 +150,12 @@ class CategoryGrid extends ConsumerWidget {
         .replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  static int _categoryPriority(String name) {
+  static int _homeVisualPriority(String name) {
     final n = _normalizeCategoryName(name);
 
     if (n.contains('video cctv') ||
         n.contains('cctv hd') ||
-        n.contains('cctv')) {
+        (n.contains('cctv') && !n.contains('ip'))) {
       return 0;
     }
 
@@ -171,7 +177,15 @@ class CategoryGrid extends ConsumerWidget {
       return 3;
     }
 
-    return 99;
+    if (n.contains('complemento') ||
+        n.contains('complementos') ||
+        n.contains('accesorio') ||
+        n.contains('accesorios')) {
+      return 4;
+    }
+
+    // Las demás categorías mantienen entre sí el orden que llega de WooCommerce.
+    return 100;
   }
 }
 

@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:mundicam/features/support/presentation/providers/tickets_providers.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class SupportTicketsPage extends ConsumerWidget {
@@ -17,6 +18,8 @@ class SupportTicketsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'support');
     final ticketsAsync = ref.watch(ticketsProvider);
 
     return Scaffold(

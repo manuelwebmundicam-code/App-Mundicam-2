@@ -3,12 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
-import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
-import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
 import 'package:mundicam/features/support/presentation/pages/support_tickets_page.dart';
 
@@ -31,7 +31,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   String _roleLabel = 'Cliente';
   IconData _roleIcon = Icons.person_outline_rounded;
   String? _errorMessage;
-  bool _testingNotifications = false;
+  bool _requestingDataChange = false;
+  bool _deletingAccount = false;
 
   Color get _roleColor {
     final label = _roleLabel.toLowerCase();
@@ -416,14 +417,199 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
 
   // ================= MÉTODOS MEJORADOS =================
-  String _getAssignedManager() {
-    final manager = _getMeta('assigned_manager').trim();
-    if (manager.isEmpty ||
-        manager == '—' ||
-        manager.toLowerCase() == 'null') {
-      return 'Mundicam';
+  String _cleanManagerValue(dynamic value) {
+    final manager = value?.toString().trim() ?? '';
+    if (manager.isEmpty || manager == '—') return '';
+    final lower = manager.toLowerCase();
+    if (lower == 'null' ||
+        lower == 'false' ||
+        lower == 'sin asignar' ||
+        lower == 'no asignado' ||
+        lower == '__mc_add_new_gestor__') {
+      return '';
     }
+
+    // El gestor de MundiCam viene del selector web wpuef_cid_c30 y debe
+    // mostrarse como nombre/texto, no como email. Si el backend sigue
+    // devolviendo solo un email, no lo usamos como nombre de gestor.
+    if (manager.contains('@')) return '';
+
     return manager;
+  }
+
+  static const Map<String, Map<String, String>> _localManagerContacts = {
+    'damian mateo': {
+      'email': 'dmateo@mundicam.com',
+      'phone': '633806898',
+    },
+    'juan garcia': {
+      'email': 'jgarcia@mundicam.com',
+      'phone': '622943654',
+    },
+    'manuel': {
+      'email': 'mreynaldo@mundicam.com',
+      'phone': '619078632',
+    },
+    'proshop murcia': {
+      'email': 'proshop.murcia@mundicam.com',
+      'phone': '616545669',
+    },
+    'ricardo': {
+      'email': 'rcano@mundicam.com',
+      'phone': '606111983',
+    },
+  };
+
+  String _normalizeManagerLookupKey(String value) {
+    var normalized = value.trim().toLowerCase();
+    const replacements = <String, String>{
+      'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a',
+      'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+      'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
+      'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o',
+      'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
+      'ñ': 'n',
+    };
+    replacements.forEach((from, to) {
+      normalized = normalized.replaceAll(from, to);
+    });
+    normalized = normalized.replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+    return normalized.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _getAssignedManagerNameCandidate() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
+
+    final directCandidates = <dynamic>[
+      nestedManager['name'],
+      _wooCustomer?['manager_name'],
+      _wooCustomer?['gestor_asignado'],
+      _wooCustomer?['assigned_manager'],
+      _wooCustomer?['wpuef_cid_c30'],
+      _wooCustomer?['commercial_manager'],
+      _wooCustomer?['sales_manager'],
+    ];
+
+    for (final value in directCandidates) {
+      final manager = _cleanManagerValue(value);
+      if (manager.isNotEmpty) return manager;
+    }
+
+    final keys = [
+      'wpuef_cid_c30',
+      'manager_name',
+      'gestor_asignado',
+      'assigned_manager',
+      'commercial_manager',
+      'sales_manager',
+    ];
+
+    for (final key in keys) {
+      final manager = _cleanManagerValue(_getMeta(key));
+      if (manager.isNotEmpty) return manager;
+    }
+
+    return '';
+  }
+
+  Map<String, String>? _getLocalManagerContact() {
+    final name = _getAssignedManagerNameCandidate();
+    if (name.isEmpty) return null;
+    return _localManagerContacts[_normalizeManagerLookupKey(name)];
+  }
+
+  String _getAssignedManager() {
+    final manager = _getAssignedManagerNameCandidate();
+    if (manager.isNotEmpty) return manager;
+
+    return _getManagerEmail().contains('@')
+        ? 'Gestor / técnico asignado'
+        : 'No asignado';
+  }
+
+  String _getManagerEmail() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
+    final candidates = <dynamic>[
+      nestedManager['email'],
+      _wooCustomer?['manager_email'],
+      _getMeta('manager_email'),
+    ];
+
+    for (final value in candidates) {
+      final email = value?.toString().trim() ?? '';
+      if (email.isNotEmpty &&
+          email != '—' &&
+          email.toLowerCase() != 'null' &&
+          email.contains('@')) {
+        return email;
+      }
+    }
+
+    final localEmail = _getLocalManagerContact()?['email']?.trim() ?? '';
+    if (localEmail.contains('@')) return localEmail;
+
+    return '—';
+  }
+
+  String _getManagerPhone() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
+    final candidates = <dynamic>[
+      nestedManager['phone'],
+      _wooCustomer?['manager_phone'],
+      _getMeta('manager_phone'),
+    ];
+
+    for (final value in candidates) {
+      final phone = value?.toString().trim() ?? '';
+      if (phone.isNotEmpty &&
+          phone != '—' &&
+          phone.toLowerCase() != 'null') {
+        return phone;
+      }
+    }
+    final localPhone = _getLocalManagerContact()?['phone']?.trim() ?? '';
+    if (localPhone.isNotEmpty) return localPhone;
+
+    return '—';
+  }
+
+  Future<void> _callManager() async {
+    final phone = _getManagerPhone();
+    if (phone == '—') return;
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir la aplicación de teléfono.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _emailManager() async {
+    final email = _getManagerEmail();
+    if (!email.contains('@')) return;
+
+    final uri = Uri(
+      scheme: 'mailto',
+      path: email,
+      queryParameters: const <String, String>{
+        'subject': 'Consulta desde la app MundiCam',
+      },
+    );
+
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir la aplicación de correo.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   String _getCifNif() {
@@ -485,6 +671,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'profile');
     return Scaffold(
       backgroundColor: _pageBg,
       appBar: _ProfilePageAppBar(
@@ -509,20 +697,31 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 children: [
                   _buildMainCard(),
                   const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      _quickButton(
-                        context,
-                        Icons.request_quote_outlined,
-                        "Presupuestos",
-                        const QuotesPage(),
-                      ),
-                      const SizedBox(width: 12),
-                      _quickButton(
-                        context,
-                        Icons.local_shipping_outlined,
-                        "Mis Pedidos",
-                        const OrdersPage(),
+                  _buildManagerCard(),
+                  const SizedBox(height: 22),
+                  _buildMenuCard(
+                    context,
+                    title: "DATOS DE LA CUENTA",
+                    items: [
+                      _buildActionMenuItem(
+                        icon: Icons.manage_accounts_outlined,
+                        title: "Solicitar cambio de datos",
+                        subtitle: _requestingDataChange
+                            ? "Enviando solicitud..."
+                            : "Indica qué datos necesitas actualizar",
+                        onTap: _requestingDataChange
+                            ? null
+                            : _requestDataChange,
+                        trailing: _requestingDataChange
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: _brandColor,
+                                ),
+                              )
+                            : null,
                       ),
                     ],
                   ),
@@ -548,32 +747,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     ],
                   ),
                   const SizedBox(height: 22),
-                  _buildMenuCard(
-                    context,
-                    title: "NOTIFICACIONES",
-                    items: [
-                      _buildActionMenuItem(
-                        icon: Icons.notifications_active_outlined,
-                        title: "Comprobar notificaciones",
-                        subtitle: _testingNotifications
-                            ? "Enviando prueba..."
-                            : "Envía una prueba real desde el servidor",
-                        onTap: _testingNotifications
-                            ? null
-                            : _testNotifications,
-                        trailing: _testingNotifications
-                            ? SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: _brandColor,
-                                ),
-                              )
-                            : null,
-                      ),
-                    ],
-                  ),
+                  _buildDeleteAccountCard(),
                 ],
               ),
             ),
@@ -584,8 +758,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Widget _buildHeader() {
-    final email = _wooCustomer?['email']?.toString() ?? '';
-
     return Container(
       width: double.infinity,
       color: _pageBg,
@@ -670,18 +842,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         fontWeight: FontWeight.w900,
                         fontFamily: 'Oswald',
                         height: 1.1,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      email,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _muted,
-                        fontSize: 12.2,
-                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -1105,6 +1265,177 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
+  Widget _buildManagerCard() {
+    final managerName = _getAssignedManager();
+    final managerEmail = _getManagerEmail();
+    final managerPhone = _getManagerPhone();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _mainCardHeader('GESTOR ASIGNADO', Icons.support_agent_outlined),
+          const SizedBox(height: 14),
+          _dataGroup(
+            title: 'Contacto comercial',
+            children: [
+              _infoRow(
+                Icons.person_pin_circle_outlined,
+                'Gestor / comercial',
+                managerName,
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: managerEmail.contains('@') ? _emailManager : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: _infoRow(
+                    Icons.email_outlined,
+                    'Email del gestor',
+                    managerEmail,
+                  ),
+                ),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: managerPhone != '—' ? _callManager : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: _infoRow(
+                    Icons.phone_outlined,
+                    'Teléfono del gestor',
+                    managerPhone,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeleteAccountCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.red.withOpacity(0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.lock_outline_rounded,
+                  color: Colors.red,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'INHABILITAR CUENTA EN LA APP',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Oswald',
+                        letterSpacing: 0.5,
+                        color: _dark,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Se inhabilitará el acceso a la app y se cerrarán las sesiones abiertas en todos tus dispositivos.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.3,
+                        color: _muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton(
+              onPressed: _deletingAccount ? null : _confirmDisableAccount,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade700,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.red.shade300,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              child: _deletingAccount
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          'INHABILITANDO...',
+                          style: TextStyle(
+                            fontFamily: 'Oswald',
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      'INHABILITAR CUENTA',
+                      style: TextStyle(
+                        fontFamily: 'Oswald',
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMenuCard(
       BuildContext context, {
         required String title,
@@ -1252,51 +1583,247 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
-  Future<void> _testNotifications() async {
-    if (_testingNotifications) return;
+  Future<void> _requestDataChange() async {
+    if (_requestingDataChange) return;
 
-    setState(() => _testingNotifications = true);
+    String requestedChangesDraft = '';
+    String? errorText;
+
+    final requestedChanges = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Text('Solicitar cambio de datos'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Por seguridad, los datos del perfil no se pueden editar directamente. Indica qué información necesitas actualizar y enviaremos la solicitud al equipo de soporte de MundiCam.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  autofocus: true,
+                  minLines: 4,
+                  maxLines: 6,
+                  maxLength: 1200,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (value) {
+                    requestedChangesDraft = value;
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Datos que deseas cambiar',
+                    hintText: 'Ejemplo: cambiar teléfono, dirección de envío o razón social...',
+                    errorText: errorText,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('CANCELAR'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final clean = requestedChangesDraft.trim();
+                if (clean.length < 5) {
+                  setDialogState(() {
+                    errorText = 'Indica qué datos necesitas modificar.';
+                  });
+                  return;
+                }
+                Navigator.pop(dialogContext, clean);
+              },
+              child: const Text('ENVIAR SOLICITUD'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (requestedChanges == null ||
+        requestedChanges.trim().isEmpty ||
+        !mounted) {
+      return;
+    }
+
+    setState(() => _requestingDataChange = true);
 
     try {
-      // Asegura primero que el dispositivo actual esté registrado en el PHP.
-      await NotificationService().syncCurrentTokenWithBackend();
-
-      final result = await ApiService().testFcmNotification();
-      final sent = int.tryParse(result['sent']?.toString() ?? '') ?? 0;
-      final failed = int.tryParse(result['failed']?.toString() ?? '') ?? 0;
-      final tokens =
-          int.tryParse(result['tokens_found']?.toString() ?? '') ?? 0;
+      final result = await ApiService()
+          .solicitarCambioDatos(requestedChanges)
+          .timeout(const Duration(seconds: 30));
 
       if (!mounted) return;
-
-      final message = sent > 0
-          ? 'Prueba enviada correctamente a $sent dispositivo(s).'
-          : tokens == 0
-              ? 'No hay dispositivos registrados. Cierra sesión, vuelve a entrar y repite la prueba.'
-              : 'La prueba no se pudo enviar. Enviados: $sent · Fallidos: $failed.';
+      final reference = result['request_id']?.toString().trim() ?? '';
+      final message = reference.isEmpty
+          ? 'Solicitud enviada al equipo de soporte de MundiCam.'
+          : 'Solicitud enviada. Referencia: $reference';
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: sent > 0 ? _brandColor : Colors.red,
+          backgroundColor: _brandColor,
           behavior: SnackBarBehavior.floating,
         ),
       );
     } catch (e) {
       if (!mounted) return;
-
-      final clean = e.toString().replaceFirst('Exception: ', '');
+      final clean = e.toString().replaceFirst('Exception: ', '').trim();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error de prueba: $clean'),
+          content: Text(
+            clean.isEmpty
+                ? 'No se pudo enviar la solicitud. Inténtalo de nuevo.'
+                : clean,
+          ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
       );
     } finally {
       if (mounted) {
-        setState(() => _testingNotifications = false);
+        setState(() => _requestingDataChange = false);
       }
+    }
+  }
+
+  Future<void> _confirmDisableAccount() async {
+    if (_deletingAccount) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text('¿Inhabilitar el acceso a la app?'),
+        content: const Text(
+          'Tu usuario dejará de poder acceder a la aplicación MundiCam. Enviaremos la solicitud al equipo de soporte para que gestione la inhabilitación.\n\n'
+          'La cuenta de la web, los pedidos y los datos de WooCommerce permanecerán activos y no se eliminarán.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCELAR'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'SÍ, INHABILITAR',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await _requestAccountDisable();
+  }
+
+  Future<void> _requestAccountDisable() async {
+    if (_deletingAccount) return;
+    setState(() => _deletingAccount = true);
+
+    final apiService = ApiService();
+
+    try {
+      // El servidor es la autoridad. No se bloquea localmente ni se cierra la
+      // sesión hasta que el PHP confirme la inhabilitación global de la app.
+      final result = await apiService
+          .solicitarInhabilitacionCuenta()
+          .timeout(const Duration(seconds: 30));
+
+      if (!result.success ||
+          !(result.accessBlocked || result.alreadyRequested)) {
+        throw Exception(
+          result.message.isNotEmpty
+              ? result.message
+              : 'El servidor no confirmó la inhabilitación de la cuenta.',
+        );
+      }
+
+      // El PHP ya ha revocado todos los tokens y FCM de la cuenta. Limpiamos
+      // también este dispositivo para cerrar completamente la sesión local.
+      try {
+        await NotificationService()
+            .clearDeviceRegistration()
+            .timeout(const Duration(seconds: 6));
+      } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (_) {}
+      await apiService.clearWordPressSession();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+
+      if (!mounted) return;
+
+      final reference = result.requestId.trim();
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          icon: Icon(
+            Icons.lock_outline_rounded,
+            color: Colors.red.shade700,
+            size: 48,
+          ),
+          title: const Text('Cuenta inhabilitada en la app'),
+          content: Text(
+            reference.isEmpty
+                ? 'Las sesiones de la app se han cerrado en todos tus dispositivos. Tu cuenta web permanece activa y el equipo de soporte gestionará la solicitud.'
+                : 'Las sesiones de la app se han cerrado en todos tus dispositivos. Tu cuenta web permanece activa. Referencia de soporte: $reference.',
+            textAlign: TextAlign.center,
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('ENTENDIDO'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final clean = e.toString().replaceFirst('Exception: ', '').trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            clean.isEmpty
+                ? 'No se pudo inhabilitar la cuenta. Tu sesión continúa activa.'
+                : clean,
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _deletingAccount = false);
     }
   }
 

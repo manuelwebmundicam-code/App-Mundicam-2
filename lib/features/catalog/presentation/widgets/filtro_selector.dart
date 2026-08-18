@@ -2,9 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/core/network/api_service.dart';
-import 'package:mundicam/features/catalog/data/models/category_model.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
-import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
@@ -12,6 +10,8 @@ class FiltroSelector extends ConsumerStatefulWidget {
   final int parentCategoryId;
   final String categoryName;
   final List<Product> productosEnPantalla;
+  final int? lockedBrandId;
+  final String? lockedBrandName;
   final VoidCallback? onApplyFilters;
 
   const FiltroSelector({
@@ -19,6 +19,8 @@ class FiltroSelector extends ConsumerStatefulWidget {
     required this.parentCategoryId,
     required this.categoryName,
     required this.productosEnPantalla,
+    this.lockedBrandId,
+    this.lockedBrandName,
     this.onApplyFilters,
   });
 
@@ -36,15 +38,26 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   bool _loading = true;
   String? _error;
   List<CatalogFilterGroup> _availableFilterGroups = [];
-  List<CategoryModel> _availableSubcategories = [];
   int _loadToken = 0;
   late MundiFilters _draftFilters;
   bool _applyingFiltersAndClosing = false;
 
+  bool get _hasLockedBrand =>
+      (widget.lockedBrandId ?? 0) > 0 &&
+      (widget.lockedBrandName ?? '').trim().isNotEmpty;
+
+  MundiFilters _withLockedBrand(MundiFilters filters) {
+    if (!_hasLockedBrand) return filters;
+    return filters.copyWith(
+      brand: widget.lockedBrandName!.trim(),
+      brandId: widget.lockedBrandId,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
-    _draftFilters = ref.read(productFilterProvider);
+    _draftFilters = _withLockedBrand(ref.read(productFilterProvider));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadFilterData();
     });
@@ -59,7 +72,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
       if (previous != next) {
         setState(() {
-          _draftFilters = next;
+          _draftFilters = _withLockedBrand(next);
         });
         _loadFilterData();
       }
@@ -117,24 +130,6 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _sectionCard(
-                      title: 'Categorías del producto',
-                      icon: Icons.folder_special_rounded,
-                      subtitle: 'Subfamilias dentro de ${widget.categoryName}',
-                      child: _loading && _availableSubcategories.isEmpty
-                          ? _loadingBox('Cargando categorías...')
-                          : _availableSubcategories.isEmpty
-                          ? _emptyInfo(
-                        'No hay más subcategorías en este apartado.',
-                        Icons.folder_off_outlined,
-                      )
-                          : Column(
-                        children: _availableSubcategories
-                            .map(_buildSubcategoryRow)
-                            .toList(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     if (_loading && _availableFilterGroups.isEmpty)
                       _sectionCard(
                         title: 'Filtros',
@@ -172,7 +167,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     bool forceRefresh = false,
   }) async {
     final requestToken = ++_loadToken;
-    final filters = ref.read(productFilterProvider);
+    final filters = _withLockedBrand(ref.read(productFilterProvider));
     final cacheKey = _buildCacheKey(filters);
 
     if (!forceRefresh) {
@@ -180,8 +175,9 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       if (cached != null) {
         if (!mounted || requestToken != _loadToken) return;
         setState(() {
-          _availableFilterGroups = cached.availableFilterGroups;
-          _availableSubcategories = cached.availableSubcategories;
+          _availableFilterGroups = _hasLockedBrand
+              ? cached.availableFilterGroups.where((group) => !_isBrandGroup(group)).toList()
+              : cached.availableFilterGroups;
           _loading = false;
           _error = null;
         });
@@ -211,11 +207,13 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         forceRefresh: forceRefresh,
       );
 
-      final subcategories = await _loadSubcategoriesFast();
+
+      final visibleGroups = _hasLockedBrand
+          ? groups.where((group) => !_isBrandGroup(group)).toList()
+          : groups;
 
       final cacheEntry = _FilterDataCacheEntry(
-        availableFilterGroups: groups,
-        availableSubcategories: subcategories,
+        availableFilterGroups: visibleGroups,
         createdAt: DateTime.now(),
       );
 
@@ -223,16 +221,14 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
       if (!mounted || requestToken != _loadToken) return;
       setState(() {
-        _availableFilterGroups = groups;
-        _availableSubcategories = subcategories;
+        _availableFilterGroups = visibleGroups;
         _loading = false;
         _error = null;
       });
 
       if (kDebugMode) {
         debugPrint(
-          '📊 Filtros web cargados: ${groups.length} grupos, '
-              '${subcategories.length} subcats',
+          '📊 Filtros web cargados: ${groups.length} grupos',
         );
       }
     } catch (e) {
@@ -247,22 +243,6 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     }
   }
 
-  Future<List<CategoryModel>> _loadSubcategoriesFast() async {
-    try {
-      final subcategories = await _apiService.getSubcategoriasDe(
-        widget.parentCategoryId,
-      );
-
-      final list = subcategories.where((category) => category.count > 0).toList()
-        ..sort(
-              (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-        );
-
-      return list;
-    } catch (_) {
-      return [];
-    }
-  }
 
   String _buildCacheKey(MundiFilters filters) {
     return [
@@ -408,43 +388,32 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     return filters.attributeTermIds.containsKey(group.taxonomy);
   }
 
-  void _irAProductos(CategoryModel cat) {
-    final categoryId = cat.id;
-    if (categoryId <= 0) return;
-
-    _filterCache.clear();
-    ref.read(productFilterProvider.notifier).reset();
-
-    final navigator = Navigator.of(context);
-    navigator.pop();
-    navigator.push(
-      MaterialPageRoute(
-        builder: (_) => ProductosPorCategoriaScreen(
-          categoryId: categoryId,
-          categoryName: cat.name,
-        ),
-      ),
-    );
-  }
 
   void _limpiarFiltros() {
     setState(() {
-      _draftFilters = const MundiFilters();
+      _draftFilters = _hasLockedBrand
+          ? MundiFilters(
+              brand: widget.lockedBrandName!.trim(),
+              brandId: widget.lockedBrandId,
+            )
+          : const MundiFilters();
     });
   }
 
   void _aplicarYCerrar() {
     _applyingFiltersAndClosing = true;
 
+    final effectiveDraft = _withLockedBrand(_draftFilters);
+
     ref.read(productFilterProvider.notifier).update(
-      brand: _draftFilters.brand,
-      brandId: _draftFilters.brandId,
-      search: _draftFilters.search,
-      orderBy: _draftFilters.orderBy,
-      attributeTermIds: Map<String, int>.from(_draftFilters.attributeTermIds),
-      attributeLabels: Map<String, String>.from(_draftFilters.attributeLabels),
+      brand: effectiveDraft.brand,
+      brandId: effectiveDraft.brandId,
+      search: effectiveDraft.search,
+      orderBy: effectiveDraft.orderBy,
+      attributeTermIds: Map<String, int>.from(effectiveDraft.attributeTermIds),
+      attributeLabels: Map<String, String>.from(effectiveDraft.attributeLabels),
       attributeGroupLabels:
-      Map<String, String>.from(_draftFilters.attributeGroupLabels),
+      Map<String, String>.from(effectiveDraft.attributeGroupLabels),
     );
 
     Navigator.pop(context);
@@ -523,47 +492,6 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     }
   }
 
-  IconData _subcategoryIcon(String name) {
-    final n = _normalize(name);
-
-    if (n.contains('camara') || n.contains('cctv') || n.contains('video')) {
-      return Icons.videocam_rounded;
-    }
-
-    if (n.contains('grabador') || n.contains('nvr') || n.contains('xvr')) {
-      return Icons.dns_rounded;
-    }
-
-    if (n.contains('software') || n.contains('licencia')) {
-      return Icons.terminal_rounded;
-    }
-
-    if (n.contains('radar')) {
-      return Icons.radar_rounded;
-    }
-
-    if (n.contains('videoportero') || n.contains('portero')) {
-      return Icons.doorbell_rounded;
-    }
-
-    if (n.contains('accesorio') ||
-        n.contains('soporte') ||
-        n.contains('caja') ||
-        n.contains('alimentacion') ||
-        n.contains('cable')) {
-      return Icons.extension_rounded;
-    }
-
-    if (n.contains('detector') || n.contains('sensor')) {
-      return Icons.sensors_rounded;
-    }
-
-    if (n.contains('central')) {
-      return Icons.settings_input_component_rounded;
-    }
-
-    return Icons.folder_rounded;
-  }
 
   Widget _header(MundiFilters filtroState) {
     final contextParts = <String>[
@@ -1012,78 +940,11 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     );
   }
 
-  Widget _buildSubcategoryRow(CategoryModel cat) {
-    final icon = _subcategoryIcon(cat.name);
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () => _irAProductos(cat),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 7),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE6EAF0)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                icon,
-                size: 18,
-                color: AppColors.primary,
-              ),
-            ),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Text(
-                cat.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13.2,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            if (cat.count > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '${cat.count}',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ),
-            const Icon(
-              Icons.chevron_right_rounded,
-              size: 21,
-              color: Color(0xFF9CA3AF),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _bottomButtons(MundiFilters filtroState) {
-    final hasFilters = filtroState.hasActiveFilters;
+    final hasFilters = _hasLockedBrand
+        ? filtroState.hasSearch || filtroState.hasOrder || filtroState.hasAttributes
+        : filtroState.hasActiveFilters;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 14),
@@ -1163,12 +1024,10 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
 class _FilterDataCacheEntry {
   final List<CatalogFilterGroup> availableFilterGroups;
-  final List<CategoryModel> availableSubcategories;
   final DateTime createdAt;
 
   const _FilterDataCacheEntry({
     required this.availableFilterGroups,
-    required this.availableSubcategories,
     required this.createdAt,
   });
 

@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/shared/widgets/mundicam_webview_page.dart';
@@ -75,9 +76,10 @@ class _LoginPageState extends State<LoginPage> {
         _isLoadingSavedCredentials = false;
       });
 
+      final apiService = ApiService();
       final hasStoredToken = await _hasStoredWordPressSession();
       final hasWpSession = hasStoredToken
-          ? await ApiService()
+          ? await apiService
               .validateStoredAppSession()
               .timeout(const Duration(seconds: 15), onTimeout: () {
               debugPrint(
@@ -90,17 +92,15 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       if (hasWpSession) {
-        unawaited(NotificationService().syncCurrentTokenWithBackend());
-
         if (kDebugMode) {
           debugPrint(
             '✅ Sesión WordPress/WooCommerce detectada. Entrando a la app.',
           );
         }
 
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-          (route) => false,
+        _openMainScreen(
+          afterFirstFrame: () =>
+              NotificationService().syncCurrentTokenWithBackend(),
         );
         return;
       }
@@ -187,6 +187,14 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _abrirRegistro() async {
     if (!mounted) return;
+
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'registration_started',
+        dedupeKey: 'registration_started',
+        dedupeWindow: const Duration(seconds: 2),
+      ),
+    );
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -387,6 +395,8 @@ class _LoginPageState extends State<LoginPage> {
     ];
 
     Object? lastError;
+    final analyticsContext =
+        await MundicamAnalyticsService.instance.requestContext();
 
     for (final uri in attempts) {
       try {
@@ -404,6 +414,7 @@ class _LoginPageState extends State<LoginPage> {
             'username': email,
             'login': email,
             'password': password,
+            ...analyticsContext,
           }),
         );
 
@@ -438,10 +449,6 @@ class _LoginPageState extends State<LoginPage> {
           return body;
         }
 
-        final dataMap = body['data'] is Map
-            ? Map<String, dynamic>.from(body['data'] as Map)
-            : <String, dynamic>{};
-        final status = dataMap['status'] ?? response.statusCode;
         final message = body['message']?.toString().trim();
 
         throw Exception(
@@ -590,6 +597,45 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  void _openMainScreen({Future<void> Function()? afterFirstFrame}) {
+    if (!mounted) return;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    debugPrint('🍎 LOGIN_OK');
+    debugPrint('🍎 OPENING_MAINSCREEN');
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    navigator.pushAndRemoveUntil<void>(
+      PageRouteBuilder<void>(
+        settings: const RouteSettings(name: '/main'),
+        opaque: true,
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (context, animation, secondaryAnimation) {
+          debugPrint('🍎 MAINSCREEN_ROUTE_CREATED');
+          return const MainScreen();
+        },
+      ),
+      (route) => false,
+    );
+
+    if (afterFirstFrame != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(
+          Future<void>.delayed(const Duration(milliseconds: 450), () async {
+            try {
+              await afterFirstFrame();
+            } catch (e, stack) {
+              debugPrint('⚠️ Tarea post-login no crítica: $e');
+              debugPrintStack(stackTrace: stack);
+            }
+          }),
+        );
+      });
+    }
+  }
+
   Future<void> _handleLogin({bool fromAutoLogin = false}) async {
     if (!fromAutoLogin) {
       if (!_formKey.currentState!.validate()) return;
@@ -605,8 +651,17 @@ class _LoginPageState extends State<LoginPage> {
         throw Exception('Introduce usuario y contraseña.');
       }
 
+      final apiService = ApiService();
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'login_attempt',
+          dedupeKey: 'login_attempt',
+          dedupeWindow: const Duration(milliseconds: 800),
+        ),
+      );
+
       // Limpiamos restos antiguos antes de iniciar sesión nueva.
-      await ApiService().clearWordPressSession();
+      await apiService.clearWordPressSession();
 
       // 1. Autenticar contra WordPress/WooCommerce.
       final wpResponse = await _authenticateWithWordPress(
@@ -649,14 +704,6 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
 
-      // Firebase, Firestore y FCM se sincronizan en segundo plano para no dejar
-      // al usuario ni a Apple Review esperando en una pantalla de carga.
-      unawaited(_postLoginBackgroundSync(
-        email: email,
-        password: password,
-        wpResponse: wpResponse,
-      ));
-
       // 8. Guardar email si Recuérdame. Nunca guardar contraseña.
       final prefs = await SharedPreferences.getInstance();
 
@@ -671,9 +718,12 @@ class _LoginPageState extends State<LoginPage> {
       // 9. Entrar a la app.
       if (!mounted) return;
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-            (route) => false,
+      _openMainScreen(
+        afterFirstFrame: () => _postLoginBackgroundSync(
+          email: email,
+          password: password,
+          wpResponse: wpResponse,
+        ),
       );
     } on FirebaseAuthException catch (e) {
       // No debería llegar aquí porque Firebase se maneja como apoyo, pero si llega
@@ -686,11 +736,10 @@ class _LoginPageState extends State<LoginPage> {
           : false;
 
       if (hasWpSession) {
-        unawaited(NotificationService().syncCurrentTokenWithBackend());
         if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-          (route) => false,
+        _openMainScreen(
+          afterFirstFrame: () =>
+              NotificationService().syncCurrentTokenWithBackend(),
         );
         return;
       }

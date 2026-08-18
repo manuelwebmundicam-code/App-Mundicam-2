@@ -14,6 +14,7 @@ import 'package:mundicam/core/cache/category_cache_service.dart';
 import 'package:mundicam/core/cache/storage_cache_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
@@ -65,8 +66,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
-void main() async {
+final _mundicamAnalyticsLifecycleObserver =
+    _MundicamAnalyticsLifecycleObserver();
+
+class _MundicamAnalyticsLifecycleObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    MundicamAnalyticsService.instance.handleLifecycleState(state);
+  }
+}
+
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding.instance.addObserver(_mundicamAnalyticsLifecycleObserver);
+  unawaited(MundicamAnalyticsService.instance.bootstrap());
 
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -122,53 +135,55 @@ void main() async {
     );
   };
 
-  try {
-    await ensureFirebaseReady().timeout(const Duration(seconds: 12));
-
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    debugPrint('✅ Handler FCM background registrado para Android/iOS');
-  } catch (e) {
-    debugPrint('❌ Error al conectar Firebase: $e');
-  }
-
-  try {
-    final remoteConfig = FirebaseRemoteConfig.instance;
-
-    await remoteConfig.setConfigSettings(
-      RemoteConfigSettings(
-        fetchTimeout: const Duration(seconds: 10),
-        minimumFetchInterval: const Duration(hours: 12),
-      ),
-    );
-
-    await remoteConfig.setDefaults({
-      'api_base_url': 'https://www.mundicam.com',
-    });
-
-    await remoteConfig.fetchAndActivate().timeout(const Duration(seconds: 12));
-    debugPrint('✅ Remote Config inicializado correctamente');
-  } catch (e) {
-    debugPrint('⚠️ Error al inicializar Remote Config: $e');
-  }
-
+  // El handler debe registrarse al arrancar, pero Firebase/Remote Config no
+  // deben retrasar el primer frame de iOS. La interfaz se muestra primero.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   runApp(const ProviderScope(child: MyApp()));
-
   unawaited(_postRunAppBootstrap());
 }
 
 Future<void> _postRunAppBootstrap() async {
-  if (Firebase.apps.isNotEmpty) {
+  var firebaseReady = false;
+
+  try {
+    await ensureFirebaseReady().timeout(const Duration(seconds: 12));
+    firebaseReady = true;
+    debugPrint('✅ Handler FCM background registrado para Android/iOS');
+  } catch (e) {
+    debugPrint('⚠️ Firebase no disponible al arrancar; la app continúa: $e');
+  }
+
+  if (firebaseReady) {
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      await remoteConfig.setConfigSettings(
+        RemoteConfigSettings(
+          fetchTimeout: const Duration(seconds: 10),
+          minimumFetchInterval: const Duration(hours: 12),
+        ),
+      );
+      await remoteConfig.setDefaults({
+        'api_base_url': 'https://www.mundicam.com',
+      });
+      await remoteConfig.fetchAndActivate().timeout(
+        const Duration(seconds: 12),
+      );
+      debugPrint('✅ Remote Config inicializado correctamente');
+    } catch (e) {
+      debugPrint('⚠️ Remote Config no crítico: $e');
+    }
+
     try {
       await NotificationService()
           .initialize()
           .timeout(const Duration(seconds: 15), onTimeout: () {
-        debugPrint('⚠️ Inicialización FCM tardó demasiado. Se reintentará después.');
+        debugPrint(
+          '⚠️ Inicialización FCM tardó demasiado. Se reintentará después.',
+        );
       });
     } catch (e) {
       debugPrint('⚠️ Error inicializando notificaciones: $e');
     }
-  } else {
-    debugPrint('⚠️ Firebase no está inicializado. Se omiten notificaciones FCM.');
   }
 
   try {

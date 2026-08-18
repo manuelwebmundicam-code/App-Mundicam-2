@@ -12,6 +12,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 
 class MundiCamOrderNotification {
   final String event;
@@ -397,18 +398,28 @@ class NotificationService {
 
   bool _initialized = false;
   bool _localNotificationsInitialized = false;
+  Future<void>? _initializationFuture;
 
   Stream<MundiCamOrderNotification> get orderNotifications =>
       _orderController.stream;
 
-  Future<void> initialize() async {
+  Future<void> initialize() {
     if (_initialized) {
-      await syncCurrentTokenWithBackend();
-      return;
+      return syncCurrentTokenWithBackend();
     }
 
-    _initialized = true;
+    final running = _initializationFuture;
+    if (running != null) return running;
 
+    final future = _initializeInternal();
+    _initializationFuture = future;
+
+    return future.whenComplete(() {
+      _initializationFuture = null;
+    });
+  }
+
+  Future<void> _initializeInternal() async {
     await _initializeLocalNotifications();
 
     final settings = await _messaging.requestPermission(
@@ -425,17 +436,14 @@ class NotificationService {
       debugPrint('🔔 Permiso notificaciones: ${settings.authorizationStatus}');
     }
 
-    // FCM no muestra avisos en primer plano en Android. En iOS se desactiva
-    // la presentación automática para evitar duplicados, porque el aviso visible
-    // se crea con flutter_local_notifications en ambas plataformas.
     await _messaging.setForegroundNotificationPresentationOptions(
       alert: false,
       badge: false,
       sound: false,
     );
 
-    await syncCurrentTokenWithBackend();
-
+    // Registrar listeners antes de pedir el token evita perder un refresco APNs/FCM
+    // durante los primeros segundos de arranque en iOS.
     FirebaseMessaging.onMessage.listen((message) {
       unawaited(_handleForegroundRemoteMessage(message));
     });
@@ -444,15 +452,18 @@ class NotificationService {
       _handleRemoteMessageOpenedByUser(message);
     });
 
+    _messaging.onTokenRefresh.listen((token) async {
+      final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
+      await _saveToken(token, apnsToken: apnsToken);
+    });
+
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
       _handleRemoteMessageOpenedByUser(initialMessage);
     }
 
-    _messaging.onTokenRefresh.listen((token) async {
-      final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
-      await _saveToken(token, apnsToken: apnsToken);
-    });
+    await syncCurrentTokenWithBackend();
+    _initialized = true;
   }
 
   static Future<void> handleBackgroundRemoteMessage(
@@ -484,7 +495,7 @@ class NotificationService {
     if (_localNotificationsInitialized) return;
 
     const androidSettings = AndroidInitializationSettings(
-      'ic_stat_mundicam',
+      'mundicam_notification_logo',
     );
 
     const darwinSettings = DarwinInitializationSettings(
@@ -575,6 +586,18 @@ class NotificationService {
     );
 
     if (notification == null) return;
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'push_opened',
+        objectType: notification.orderId != null ? 'order' : 'notification',
+        objectId: notification.orderId,
+        metadata: <String, dynamic>{
+          'event': notification.event,
+          if ((notification.status ?? '').trim().isNotEmpty)
+            'status': notification.status!.trim(),
+        },
+      ),
+    );
     _emitNotification(notification);
   }
 
@@ -585,6 +608,18 @@ class NotificationService {
     );
 
     if (notification == null) return;
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'push_opened',
+        objectType: notification.orderId != null ? 'order' : 'notification',
+        objectId: notification.orderId,
+        metadata: <String, dynamic>{
+          'event': notification.event,
+          if ((notification.status ?? '').trim().isNotEmpty)
+            'status': notification.status!.trim(),
+        },
+      ),
+    );
     _emitNotification(notification);
   }
 
@@ -596,11 +631,8 @@ class NotificationService {
     final androidDetails = AndroidNotificationDetails(
       androidChannelId,
       androidChannelName,
-      icon: 'ic_stat_mundicam',
-      largeIcon: const DrawableResourceAndroidBitmap(
-        'ic_mundicam_notification_large',
-      ),
-      color: const Color(0xFFB00000),
+      icon: 'mundicam_notification_logo',
+      color: const Color(0xFFA60909),
       channelDescription: androidChannelDescription,
       importance: Importance.max,
       priority: Priority.high,
@@ -639,6 +671,7 @@ class NotificationService {
       payload: notification.toPayload(),
     );
   }
+
 
   int _notificationId(MundiCamOrderNotification notification) {
     final orderId = notification.orderId;

@@ -99,7 +99,7 @@ class MundicamProduct {
 
   String get stockText {
     if (!canViewStock) return '';
-    if (stockQuantity == null) return isInStock ? 'Disponible' : 'Sin stock';
+    if (stockQuantity == null) return isInStock ? 'Disponible 24/48h' : 'Sin Existencias';
     return 'Stock: $stockQuantity';
   }
 

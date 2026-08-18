@@ -21,6 +21,13 @@ class CategoryModel {
 
   final int parent;
   final int count;
+
+  /// null = backend antiguo/no informa; true/false = dato explícito del PHP.
+  /// Permite abrir una hoja directamente sin hacer una petición extra, pero
+  /// conserva compatibilidad con servidores anteriores.
+  final bool? hasChildren;
+  final int childrenCount;
+
   final int menuOrder;
 
   /// Compatibilidad con respuestas WooCommerce / Store API / plugin propio.
@@ -34,6 +41,8 @@ class CategoryModel {
     this.imageUrl = '',
     this.parent = 0,
     this.count = 0,
+    this.hasChildren,
+    this.childrenCount = 0,
     this.menuOrder = 0,
     this.description = '',
     this.display = '',
@@ -64,6 +73,14 @@ class CategoryModel {
       ),
       parent: _parseInt(json['parent'] ?? json['parent_id']),
       count: _parseInt(json['count'] ?? json['product_count'] ?? json['total']),
+      hasChildren: _parseNullableBool(
+        json.containsKey('has_children')
+            ? json['has_children']
+            : json.containsKey('hasChildren')
+                ? json['hasChildren']
+                : null,
+      ),
+      childrenCount: _parseInt(json['children_count'] ?? json['childrenCount']),
       menuOrder: _parseInt(json['menu_order'] ?? json['menuOrder'] ?? json['order']),
       description: _decodeHtml(json['description']?.toString() ?? ''),
       display: json['display']?.toString() ?? '',
@@ -83,6 +100,8 @@ class CategoryModel {
       'image_url': imageUrl,
       'parent': parent,
       'count': count,
+      if (hasChildren != null) 'has_children': hasChildren,
+      'children_count': childrenCount,
       'menu_order': menuOrder,
       'description': description,
       'display': display,
@@ -98,6 +117,9 @@ class CategoryModel {
     String? imageSrc,
     int? parent,
     int? count,
+    bool? hasChildren,
+    bool clearHasChildren = false,
+    int? childrenCount,
     int? menuOrder,
     String? description,
     String? display,
@@ -109,10 +131,24 @@ class CategoryModel {
       imageUrl: imageUrl ?? image ?? imageSrc ?? this.imageUrl,
       parent: parent ?? this.parent,
       count: count ?? this.count,
+      hasChildren: clearHasChildren ? null : (hasChildren ?? this.hasChildren),
+      childrenCount: childrenCount ?? this.childrenCount,
       menuOrder: menuOrder ?? this.menuOrder,
       description: description ?? this.description,
       display: display ?? this.display,
     );
+  }
+
+  static bool? _parseNullableBool(dynamic value) {
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+
+    final normalized = value.toString().trim().toLowerCase();
+    if (normalized.isEmpty || normalized == 'null') return null;
+    if (['1', 'true', 'yes', 'si', 'sí'].contains(normalized)) return true;
+    if (['0', 'false', 'no'].contains(normalized)) return false;
+    return null;
   }
 
   static int _parseInt(dynamic value, {int fallback = 0}) {

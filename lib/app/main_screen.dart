@@ -9,6 +9,7 @@ import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/providers/badge_provider.dart';
 import 'package:mundicam/shared/providers/order_badge_provider.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/features/home/presentation/pages/home_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_page.dart';
@@ -17,6 +18,7 @@ import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
+import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -33,12 +35,14 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _lastIndexBeforeCart = 0;
   bool _loadBadges = false;
   bool _showingOrderNotificationDialog = false;
+  bool _didLogFirstBuild = false;
   StreamSubscription<MundiCamOrderNotification>? _orderNotificationSub;
 
   final Set<String> _confirmedQuoteIds = <String>{};
 
   final List<bool> _loadedTabs = [
     true,
+    false,
     false,
     false,
     false,
@@ -51,15 +55,29 @@ class _MainScreenState extends ConsumerState<MainScreen>
     GlobalKey<NavigatorState>(),
     GlobalKey<NavigatorState>(),
     GlobalKey<NavigatorState>(),
+    GlobalKey<NavigatorState>(),
   ];
 
   @override
   void initState() {
     super.initState();
+    debugPrint('🍎 MAINSCREEN_INIT');
     WidgetsBinding.instance.addObserver(this);
+    unawaited(MundicamAnalyticsService.instance.screenView('home'));
 
-    _loadConfirmedQuoteIdsFromPrefs();
-    _listenOrderNotifications();
+    unawaited(
+      _loadConfirmedQuoteIdsFromPrefs().catchError((Object error, StackTrace stack) {
+        debugPrint('⚠️ No se pudieron cargar badges iniciales: $error');
+        debugPrintStack(stackTrace: stack);
+      }),
+    );
+
+    try {
+      _listenOrderNotifications();
+    } catch (error, stack) {
+      debugPrint('⚠️ Listener de notificaciones no crítico: $error');
+      debugPrintStack(stackTrace: stack);
+    }
 
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
@@ -135,9 +153,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
             title: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _NotificationLogoIcon(
-                  isGeneralNotification: isGeneralNotification,
-                ),
+                const _NotificationLogoIcon(),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -289,6 +305,20 @@ class _MainScreenState extends ConsumerState<MainScreen>
   void _switchToTab(int index, {bool popToRoot = false}) {
     if (index < 0 || index >= _navigatorKeys.length) return;
 
+    const analyticsScreenNames = <String>[
+      'home',
+      'catalog',
+      'orders',
+      'quotes',
+      'cart',
+      'rma',
+    ];
+    unawaited(
+      MundicamAnalyticsService.instance.screenView(
+        analyticsScreenNames[index],
+      ),
+    );
+
     if (index == 4 && _selectedIndex != 4) {
       _lastIndexBeforeCart = _selectedIndex;
     }
@@ -383,6 +413,14 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (!_didLogFirstBuild) {
+      _didLogFirstBuild = true;
+      debugPrint('🍎 MAINSCREEN_BUILD');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        debugPrint('🍎 MAINSCREEN_FIRST_FRAME');
+      });
+    }
+
     final int cartItemCount = _loadBadges ? ref.watch(cartBadgeProvider) : 0;
     final int orderCount = _loadBadges ? ref.watch(newOrderBadgeProvider) : 0;
     final int rawQuoteCount = _loadBadges ? ref.watch(quoteBadgeProvider) : 0;
@@ -444,6 +482,14 @@ class _MainScreenState extends ConsumerState<MainScreen>
               child: CartPage(
                 onGoHome: () => _switchToTab(0, popToRoot: true),
                 onGoBack: _goBackFromCart,
+                onGoQuotes: () => _switchToTab(3, popToRoot: true),
+              ),
+            ),
+            _buildTabNavigator(
+              index: 5,
+              child: RmaPage(
+                onGoHome: () => _switchToTab(0, popToRoot: true),
+                onGoOrders: () => _switchToTab(2, popToRoot: true),
               ),
             ),
           ],
@@ -475,9 +521,16 @@ class _MainScreenState extends ConsumerState<MainScreen>
                 _BottomTabItem(
                   icon: Icons.grid_view,
                   activeIcon: Icons.grid_view_rounded,
-                  label: 'Productos',
+                  label: 'Categorías',
                   isSelected: _selectedIndex == 1,
                   onTap: () => _onItemTapped(1),
+                ),
+                _BottomTabItem(
+                  icon: Icons.assignment_return_outlined,
+                  activeIcon: Icons.assignment_return_rounded,
+                  label: 'RMA',
+                  isSelected: _selectedIndex == 5,
+                  onTap: () => _onItemTapped(5),
                 ),
                 _BottomTabItem(
                   icon: Icons.local_shipping_outlined,
@@ -519,24 +572,30 @@ class _MainScreenState extends ConsumerState<MainScreen>
       return const SizedBox.shrink();
     }
 
+    Route<void> buildRootRoute(RouteSettings settings) {
+      return MaterialPageRoute<void>(
+        builder: (context) => KeyedSubtree(
+          key: ValueKey<String>('tab_root_$index'),
+          child: child,
+        ),
+        settings: settings,
+      );
+    }
+
     return Navigator(
       key: _navigatorKeys[index],
-      onGenerateRoute: (routeSettings) {
-        return MaterialPageRoute(
-          builder: (context) => child,
-          settings: routeSettings,
-        );
-      },
+      initialRoute: '/tab/$index',
+      onGenerateInitialRoutes: (navigator, initialRoute) => <Route<void>>[
+        buildRootRoute(RouteSettings(name: initialRoute)),
+      ],
+      onGenerateRoute: buildRootRoute,
+      onUnknownRoute: buildRootRoute,
     );
   }
 }
 
 class _NotificationLogoIcon extends StatelessWidget {
-  final bool isGeneralNotification;
-
-  const _NotificationLogoIcon({
-    required this.isGeneralNotification,
-  });
+  const _NotificationLogoIcon();
 
   @override
   Widget build(BuildContext context) {
@@ -547,7 +606,7 @@ class _NotificationLogoIcon extends StatelessWidget {
         color: AppColors.primary,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.85),
+          color: Colors.white.withValues(alpha: 0.9),
           width: 1.2,
         ),
         boxShadow: [
@@ -559,26 +618,20 @@ class _NotificationLogoIcon extends StatelessWidget {
         ],
       ),
       alignment: Alignment.center,
-      child: isGeneralNotification
-          ? Padding(
-              padding: const EdgeInsets.all(8),
-              child: Image.asset(
-                'assets/images/mundicam_notification_logo.png',
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Icon(
-                    Icons.notifications_active_rounded,
-                    color: Colors.white,
-                    size: 23,
-                  );
-                },
-              ),
-            )
-          : const Icon(
-              Icons.local_shipping_rounded,
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Image.asset(
+          'assets/images/mundicam_notification_logo.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return const Icon(
+              Icons.notifications_active_rounded,
               color: Colors.white,
-              size: 24,
-            ),
+              size: 23,
+            );
+          },
+        ),
+      ),
     );
   }
 }

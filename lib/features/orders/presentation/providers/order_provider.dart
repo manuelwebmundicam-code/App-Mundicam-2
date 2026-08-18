@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 
 /// Provider que obtiene los pedidos del usuario
 final ordersProvider = FutureProvider<List<OrderMundicam>>((ref) async {
@@ -37,6 +38,25 @@ final ordersProvider = FutureProvider<List<OrderMundicam>>((ref) async {
 
   debugPrint('🔍 Buscando pedidos para: $email');
   final pedidos = await apiService.getOrders(email);
+
+  // La web es la autoridad del pago. Si WooCommerce confirma como pagado un
+  // pedido procedente de presupuesto local (incluso tras una callback tardía),
+  // se retira únicamente esa copia local para evitar duplicados visuales.
+  for (final pedido in pedidos) {
+    final localUuid = pedido.sourceLocalQuoteUuid.trim();
+    if (localUuid.isNotEmpty && pedido.isPaid) {
+      try {
+        await ref
+            .read(localQuotesProvider.notifier)
+            .eliminarPresupuesto(localUuid);
+      } catch (e) {
+        debugPrint(
+          'No se pudo retirar la copia local $localUuid del pedido pagado: $e',
+        );
+      }
+    }
+  }
+
   debugPrint('📦 Pedidos encontrados: ${pedidos.length}');
   return pedidos;
 });

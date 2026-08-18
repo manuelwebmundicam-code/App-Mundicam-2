@@ -1,4 +1,5 @@
 // busqueda_resultados_page.dart
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,9 +7,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
+import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
@@ -57,6 +60,7 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
   String _selectedBrand = '';
   String _orderBy = '';
   int _requestToken = 0;
+  bool _searchEventTracked = false;
 
   final ScrollController _scrollController = ScrollController();
   bool _loadingMore = false;
@@ -74,6 +78,10 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
     super.initState();
     _cleanedQuery = _SearchEngine.cleanQuery(widget.query);
     _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      MundicamAnalyticsService.instance
+          .trackScreenViewForRoute(context, 'search_results');
+    });
     _loadResults();
   }
 
@@ -135,7 +143,9 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
       }
 
       if (!mounted || token != _requestToken) return;
-      final sorted = _SearchEngine.sortByRelevance(result.products, _cleanedQuery);
+      final sorted = _orderBy.trim().isEmpty
+          ? _SearchEngine.sortByRelevance(result.products, _cleanedQuery)
+          : result.products;
       final localCategoryFacets = _categoryFacets(sorted, onlyMainLike: true);
       final brandFacets = _brandFacets(_SearchEngine.productsForFilterFacets(sorted, _cleanedQuery));
 
@@ -152,6 +162,21 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         _loadingMore = false;
         _error = null;
       });
+
+      if (!_searchEventTracked) {
+        _searchEventTracked = true;
+        unawaited(
+          MundicamAnalyticsService.instance.track(
+            eventName: 'search',
+            metadata: <String, dynamic>{
+              'query': _cleanedQuery,
+              'results': _totalItems > 0 ? _totalItems : sorted.length,
+            },
+            dedupeKey: 'search:$_cleanedQuery',
+            dedupeWindow: const Duration(seconds: 2),
+          ),
+        );
+      }
 
       _webLikeCategoryFacets(sorted).then((categoryFacets) {
         if (!mounted || token != _requestToken || categoryFacets.isEmpty) return;
@@ -208,7 +233,9 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         ..._productos,
         ...result.products,
       ]);
-      final sorted = _SearchEngine.sortByRelevance(merged, _cleanedQuery);
+      final sorted = _orderBy.trim().isEmpty
+          ? _SearchEngine.sortByRelevance(merged, _cleanedQuery)
+          : merged;
       final localCategoryFacets = _categoryFacets(sorted, onlyMainLike: true);
       final brandFacets = _brandFacets(_SearchEngine.productsForFilterFacets(sorted, _cleanedQuery));
 
@@ -278,9 +305,33 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
           brands: brands,
           onApply: ({required categoryId, required categoryName, required brand, required orderBy}) {
             Navigator.of(context).pop();
+
+            final cleanCategoryName = categoryName.trim();
+
+            // Si el usuario elige una categoría desde los filtros de búsqueda,
+            // no hacemos un filtrado local/genérico. Entramos en la pantalla real
+            // de esa categoría para reutilizar sus productos y sus filtros propios
+            // tal como vienen de la web/PHP. Así VIDEO CCTV HD, INTRUSIÓN,
+            // ACCESOS, etc. muestran sus filtros reales y no facetas mezcladas
+            // del buscador global.
+            if (categoryId > 0 && cleanCategoryName.isNotEmpty) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => ProductosPorCategoriaScreen(
+                    categoryId: categoryId,
+                    categoryName: cleanCategoryName,
+                    initialSearch: _cleanedQuery,
+                    onGoCart: widget.onGoCart,
+                    onGoQuotes: widget.onGoQuotes,
+                  ),
+                ),
+              );
+              return;
+            }
+
             setState(() {
-              _selectedCategoryId = categoryId;
-              _selectedCategoryName = categoryName;
+              _selectedCategoryId = 0;
+              _selectedCategoryName = '';
               _selectedBrand = brand;
               _orderBy = orderBy;
             });
@@ -668,14 +719,16 @@ class _SearchResultsHeader extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.search_rounded, size: 18, color: AppColors.primary),
-              const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  totalItems > loadedItems
-                      ? '$totalItems productos encontrados'
-                      : '$loadedItems producto${loadedItems != 1 ? 's' : ''} encontrado${loadedItems != 1 ? 's' : ''}',
-                  style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w900, fontSize: 13),
+                  _resultText(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: Color(0xFF6B7280),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               InkWell(
@@ -702,25 +755,39 @@ class _SearchResultsHeader extends StatelessWidget {
           ),
           if (hasActiveFilters) ...[
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _chip('Búsqueda: $query'),
-                if (selectedCategoryName.trim().isNotEmpty) _chip(selectedCategoryName),
-                if (selectedBrand.trim().isNotEmpty) _chip('Fabricante: $selectedBrand'),
-                if (orderBy.trim().isNotEmpty) _chip(_orderLabel(orderBy)),
+                Expanded(
+                  child: Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: [
+                      if (selectedCategoryName.trim().isNotEmpty) _chip('Categoría', selectedCategoryName.trim()),
+                      if (selectedBrand.trim().isNotEmpty) _chip('Fabricante', selectedBrand.trim()),
+                      if (orderBy.trim().isNotEmpty) _chip('Orden', _orderLabel(orderBy)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
                 InkWell(
                   onTap: onReset,
                   borderRadius: BorderRadius.circular(999),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFDECEC),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: const Color(0xFFD9DEE7)),
                     ),
-                    child: const Text('Quitar filtros', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.primary)),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
+                        SizedBox(width: 4),
+                        Text('Limpiar', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: AppColors.primary)),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -731,15 +798,39 @@ class _SearchResultsHeader extends StatelessWidget {
     );
   }
 
-  Widget _chip(String text) {
+
+  String _resultText() {
+    // Igual que en la pantalla de categoría: no mostramos contador numérico
+    // porque el total puede variar mientras se completa la paginación/caché.
+    if (loadedItems > 0 || totalItems > 0) {
+      return 'Productos encontrados';
+    }
+
+    return 'Sin resultados';
+  }
+
+  Widget _chip(String label, String value) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+        color: const Color(0xFFFFF7F7),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFF0D4D4)),
       ),
-      child: Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.primary)),
+      child: RichText(
+        text: TextSpan(
+          children: [
+            TextSpan(
+              text: '$label: ',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF8A1D1D)),
+            ),
+            TextSpan(
+              text: value,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.primary),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -808,6 +899,54 @@ class _SearchFiltersSheetState extends State<_SearchFiltersSheet> {
     _orderBy = widget.orderBy;
   }
 
+  List<_SearchFacet> get _visibleBrands {
+    final normalizedSelected = _normalizeBrand(_brand);
+    final byKey = <String, _SearchFacet>{};
+
+    for (final brand in widget.brands) {
+      final cleanName = brand.name.trim();
+      if (cleanName.isEmpty) continue;
+
+      final key = _normalizeBrand(cleanName);
+      if (key.isEmpty) continue;
+
+      final existing = byKey[key];
+      if (existing == null || brand.count > existing.count) {
+        byKey[key] = _SearchFacet(
+          id: brand.id,
+          name: cleanName,
+          count: brand.count,
+        );
+      }
+    }
+
+    final values = byKey.values.toList()
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return a.name.compareTo(b.name);
+      });
+
+    // En búsqueda general no enseñamos una sección de fabricante con una sola
+    // opción, porque queda como un filtro roto y confunde al usuario. Si no hay
+    // varias marcas reales, ocultamos la sección; dentro de categorías se usan
+    // los filtros propios de ProductosPorCategoriaScreen.
+    if (normalizedSelected.isEmpty && values.length < 2) {
+      return const <_SearchFacet>[];
+    }
+
+    return values;
+  }
+
+  String _normalizeBrand(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9áéíóúüñ]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -847,14 +986,16 @@ class _SearchFiltersSheetState extends State<_SearchFiltersSheet> {
                             ? [_emptyInfo('No hay categorías disponibles para esta búsqueda.')]
                             : widget.categories.map((item) => _facetTile(item, isCategory: true)).toList(),
                       ),
-                      const SizedBox(height: 12),
-                      _sectionCard(
-                        title: 'Fabricante',
-                        icon: Icons.factory_rounded,
-                        children: widget.brands.isEmpty
-                            ? [_emptyInfo('No hay fabricantes disponibles para esta búsqueda.')]
-                            : widget.brands.map((item) => _facetTile(item, isCategory: false)).toList(),
-                      ),
+                      if (_visibleBrands.isNotEmpty || _brand.trim().isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _sectionCard(
+                          title: 'Fabricante',
+                          icon: Icons.factory_rounded,
+                          children: _visibleBrands.isEmpty
+                              ? [_emptyInfo('No hay fabricantes disponibles para esta búsqueda.')]
+                              : _visibleBrands.map((item) => _facetTile(item, isCategory: false)).toList(),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1776,7 +1917,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       label: Text(
                         p.isUnderConsultation
                             ? 'BAJO CONSULTA'
-                            : (p.hasStock ? 'AÑADIR CARRITO' : 'SIN STOCK'),
+                            : (p.hasStock ? 'AÑADIR CARRITO' : 'SIN EXISTENCIAS'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -1826,13 +1967,11 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                   size: 17,
                 ),
                 label: Text(
-                  p.isUnderConsultation
-                      ? 'NO PRESUPUESTAR'
-                      : !p.hasStock
-                      ? 'NO PRESUPUESTAR'
-                      : _isAddingToQuote
+                  _isAddingToQuote
                       ? 'AÑADIENDO...'
-                      : 'AÑADIR AL PRESUPUESTO',
+                      : p.canRequestQuote
+                      ? 'AÑADIR AL PRESUPUESTO'
+                      : 'NO PRESUPUESTAR',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -1867,8 +2006,9 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
   }
 
   Widget _quantitySelector(Product p) {
+    final canChangeQuantity = p.canAddToCart || p.canRequestQuote;
     return Opacity(
-      opacity: p.canAddToCart ? 1.0 : 0.55,
+      opacity: canChangeQuantity ? 1.0 : 0.55,
       child: Container(
         height: 44,
         decoration: BoxDecoration(
@@ -1881,7 +2021,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
           children: [
             _qtyBtn(
               Icons.remove,
-              enabled: p.canAddToCart,
+              enabled: canChangeQuantity && cantidad > 1,
               onTap: () {
                 if (cantidad > 1) setState(() => cantidad--);
               },
@@ -1900,10 +2040,12 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
             ),
             _qtyBtn(
               Icons.add,
-              enabled: p.canAddToCart,
-              isPrimary: p.canAddToCart,
+              enabled: canChangeQuantity && (p.maxPurchaseQty <= 0 || cantidad < p.maxPurchaseQty),
+              isPrimary: canChangeQuantity,
               onTap: () {
-                if (p.canAddToCart) setState(() => cantidad++);
+                if (canChangeQuantity && (p.maxPurchaseQty <= 0 || cantidad < p.maxPurchaseQty)) {
+                  setState(() => cantidad++);
+                }
               },
             ),
           ],
@@ -1928,8 +2070,8 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     final label = bajoConsulta
         ? 'Bajo consulta'
         : hasStock
-        ? 'En stock'
-        : 'Sin stock';
+        ? 'Disponible 24/48h'
+        : 'Sin Existencias';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1998,11 +2140,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            product.isUnderConsultation
-                ? '"${product.name}" está bajo consulta y no puede añadirse al presupuesto.'
-                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
-          ),
+          content: Text('No se puede añadir "${product.name}" al presupuesto.'),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),

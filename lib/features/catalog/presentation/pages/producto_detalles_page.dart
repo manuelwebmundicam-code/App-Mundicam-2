@@ -1,6 +1,8 @@
 // ARCHIVO: lib/features/catalog/presentation/pages/producto_detalles_page.dart
 // Sustituye el archivo completo por este contenido.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -9,11 +11,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
-import 'package:mundicam/features/quotes/presentation/widgets/quote_selection_dialog.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
@@ -166,6 +168,25 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     super.initState();
     _cargarStockDetalladoSiHaceFalta();
     _cargarRecomendados();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      MundicamAnalyticsService.instance.trackScreenViewForRoute(
+        context,
+        'product_detail',
+      );
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'product_view',
+          objectType: 'product',
+          objectId: widget.product.id,
+          metadata: <String, dynamic>{
+            if (widget.product.sku.trim().isNotEmpty)
+              'sku': widget.product.sku.trim(),
+          },
+          dedupeKey: 'product_view:${widget.product.id}',
+          dedupeWindow: const Duration(seconds: 2),
+        ),
+      );
+    });
   }
 
   Future<void> _cargarStockDetalladoSiHaceFalta() async {
@@ -475,18 +496,31 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   }
 
   int _safeQuoteQuantity(Product p) {
-    if (!p.canRequestQuote) return 0;
+    final selectedQty = _cantidad < 1 ? 1 : _cantidad;
+    final internalQty = p.generalStockQuantity + p.murciaStockQuantity;
 
-    final maxQty = p.hasMundicamInternalStock
-        ? p.generalStockQuantity + p.murciaStockQuantity
-        : (p.stockQuantity > 0 ? p.stockQuantity : 999);
+    // En varios productos el PHP marca el producto como presupuestable/en stock,
+    // pero los campos de stock interno General/Murcia llegan a 0. En ese caso
+    // no debemos bloquear el presupuesto: usamos la cantidad elegida por el usuario.
+    if (p.maxPurchaseQty > 0) {
+      return selectedQty.clamp(1, p.maxPurchaseQty).toInt();
+    }
+    if (internalQty > 0) {
+      return selectedQty.clamp(1, internalQty).toInt();
+    }
+    if (p.stockQuantity > 0) {
+      return selectedQty.clamp(1, p.stockQuantity).toInt();
+    }
 
-    if (maxQty <= 0) return 0;
-    return _cantidad.clamp(1, maxQty).toInt();
+    return selectedQty;
   }
 
   bool _canIncreaseQuantity(Product p) {
-    if (!p.canAddToCart) return false;
+    if (!p.canAddToCart) {
+      // Para presupuesto no limitamos por stock: se puede solicitar presupuesto
+      // de productos agotados o pendientes de reposición.
+      return p.canRequestQuote;
+    }
     final maxPurchaseQty = p.maxPurchaseQty;
     return maxPurchaseQty <= 0 || _cantidad < maxPurchaseQty;
   }
@@ -1167,7 +1201,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         : enStock
         ? const Color(0xFF218047)
         : const Color(0xFFC62828);
-    final label = bajoConsulta ? 'Bajo consulta' : enStock ? 'En stock' : 'Sin stock';
+    final label = bajoConsulta ? 'Bajo consulta' : enStock ? 'Disponible 24/48h' : 'Sin Existencias';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1306,7 +1340,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         ? 'Bajo consulta'
                         : canAddToCart
                         ? 'Añadir carrito'
-                        : 'Sin stock',
+                        : 'Sin Existencias',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900),
@@ -1329,7 +1363,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               child: SizedBox(
                 height: 48,
                 child: OutlinedButton.icon(
-                  onPressed: canAddToQuote && !_isAddingToQuote ? _addToQuote : null,
+                  onPressed: canAddToQuote && !_isAddingToQuote ? () => _addToQuote(p) : null,
                   icon: _isAddingToQuote
                       ? const SizedBox(
                     width: 16,
@@ -1343,8 +1377,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   label: Text(
                     _isAddingToQuote
                         ? 'Añadiendo...'
-                        : bajoConsulta
-                        ? 'No presupuestar'
                         : canAddToQuote
                         ? 'Presupuesto'
                         : 'No presupuestar',
@@ -2020,7 +2052,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                       disabledBackgroundColor: Colors.grey.shade300,
                                     ),
                                     child: Text(
-                                      rp.canAddToCart ? 'Añadir' : (rp.isUnderConsultation ? 'Consulta' : 'Sin stock'),
+                                      rp.canAddToCart ? 'Añadir' : (rp.isUnderConsultation ? 'Consulta' : 'Sin Existencias'),
                                       style: const TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
@@ -2079,21 +2111,27 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
-  Future<void> _addToQuote() async {
+  Future<void> _addToQuote(Product product) async {
     if (_isAddingToQuote) return;
 
-    final prod = widget.product;
-    if (prod.id == 0) return;
+    final prod = _productWithFreshStock ?? product;
+    if (prod.id == 0) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo identificar el producto para presupuesto.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     if (!prod.canRequestQuote) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            prod.isUnderConsultation
-                ? '"${prod.name}" está bajo consulta y no puede añadirse al presupuesto.'
-                : 'No se puede añadir "${prod.name}" al presupuesto porque no hay stock.',
-          ),
+          content: Text('No se puede añadir "${prod.name}" al presupuesto.'),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
@@ -2102,97 +2140,62 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       return;
     }
 
-    final qty = _safeQuoteQuantity(prod);
-    if (qty <= 0) return;
-
-    final precio = _precioDouble(prod);
-
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => QuoteSelectionDialog(
-        productName: prod.name,
-        productId: prod.id,
-        price: precio,
-        quantity: qty,
-      ),
-    );
-
-    if (result == null || !mounted) return;
+    final calculatedQty = _safeQuoteQuantity(prod);
+    final qty = calculatedQty > 0 ? calculatedQty : 1;
 
     setState(() => _isAddingToQuote = true);
+    HapticFeedback.selectionClick();
 
     try {
-      final action = result['action']?.toString() ?? '';
       final notifier = ref.read(localQuotesProvider.notifier);
-      String mensaje = '';
+      final activeQuotes = ref
+          .read(localQuotesProvider)
+          .where((quote) => !quote.isExpired)
+          .toList();
 
-      if (action == 'crear_y_anadir') {
-        final nombre = result['nombre']?.toString().trim() ?? '';
+      final LocalQuote quote;
+      if (activeQuotes.isNotEmpty) {
+        quote = activeQuotes.first;
+      } else {
         final orderId = DateTime.now().millisecondsSinceEpoch.toString();
-        final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
-
-        await notifier.crearPresupuesto(
+        quote = await notifier.crearPresupuesto(
           orderId: orderId,
-          nombre: nombreFinal,
+          nombre: 'Presupuesto #$orderId',
         );
-
-        await notifier.anadirItem(
-          orderId: orderId,
-          item: LocalQuoteItem(
-            productId: prod.id,
-            productName: prod.name,
-            quantity: qty,
-            price: precio,
-          ),
-        );
-
-        mensaje = '$qty x ${prod.name} añadido a "$nombreFinal"';
-      } else if (action == 'anadir_existente') {
-        final orderId = result['orderId']?.toString() ?? '';
-        final nombre = result['nombre']?.toString() ?? 'presupuesto';
-
-        if (orderId.isEmpty) {
-          throw Exception('No se pudo identificar el presupuesto seleccionado.');
-        }
-
-        await notifier.anadirItem(
-          orderId: orderId,
-          item: LocalQuoteItem(
-            productId: prod.id,
-            productName: prod.name,
-            quantity: qty,
-            price: precio,
-          ),
-        );
-
-        mensaje = '$qty x ${prod.name} añadido a "$nombre"';
       }
+
+      await notifier.anadirItem(
+        orderId: quote.orderId,
+        item: LocalQuoteItem(
+          productId: prod.id,
+          productName: prod.name,
+          quantity: qty,
+          price: _precioDouble(prod),
+        ),
+      );
 
       if (!mounted) return;
-
-      if (mensaje.isNotEmpty) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(mensaje),
-            backgroundColor: Colors.green.shade700,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-            action: SnackBarAction(
-              label: 'VER',
-              textColor: Colors.white,
-              onPressed: _goToQuotesKeepingTabs,
-            ),
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$qty x ${prod.name} añadido al presupuesto'),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+          action: SnackBarAction(
+            label: 'VER',
+            textColor: Colors.white,
+            onPressed: _goToQuotesKeepingTabs,
           ),
-        );
-      }
+        ),
+      );
     } catch (e) {
       debugPrint('❌ Error en _addToQuote: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text('Error añadiendo al presupuesto: $e'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),

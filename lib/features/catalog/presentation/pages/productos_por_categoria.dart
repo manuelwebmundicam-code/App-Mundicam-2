@@ -13,6 +13,7 @@ import 'package:mundicam/core/cache/product_cache_service.dart';
 import 'package:mundicam/core/firebase/firebase_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
+import 'package:mundicam/features/catalog/data/models/category_model.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
@@ -140,6 +141,9 @@ class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
   final int categoryId;
   final String categoryName;
   final String? initialSearch;
+  final int? initialBrandId;
+  final String? initialBrandName;
+  final String? initialBrandTaxonomy;
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
 
@@ -148,6 +152,9 @@ class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
     required this.categoryId,
     required this.categoryName,
     this.initialSearch,
+    this.initialBrandId,
+    this.initialBrandName,
+    this.initialBrandTaxonomy,
     this.onGoCart,
     this.onGoQuotes,
   });
@@ -173,10 +180,59 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   bool _showScrollTopButton = false;
   int _suggestionsToken = 0;
   List<_CatalogSearchSuggestion> _searchSuggestions = [];
+  late Future<List<CategoryModel>> _subcategoriesFuture;
+  bool _subcategoriesExpanded = false;
+  late int _activeCatalogCategoryId;
+  late String _activeCatalogCategoryName;
+
+  bool get _isBrandContext =>
+      (widget.initialBrandId ?? 0) > 0 ||
+      (widget.initialBrandName ?? '').trim().isNotEmpty;
+
+  int? get _brandContextId =>
+      (widget.initialBrandId ?? 0) > 0 ? widget.initialBrandId : null;
+
+  String get _brandContextName =>
+      (widget.initialBrandName ?? '').trim();
+
+  String get _brandContextTaxonomy =>
+      (widget.initialBrandTaxonomy ?? '').trim();
+
+  void _restoreBrandContext() {
+    if (!_isBrandContext) return;
+    ref.read(productFilterProvider.notifier).setBrand(
+      name: _brandContextName,
+      id: _brandContextId ?? 0,
+    );
+  }
+
+  // v1.9.93: al salir de una hoja de productos abierta desde MARCAS no dejamos
+  // búsquedas, ordenaciones ni atributos arrastrados para la siguiente rama.
+  // Se ejecuta por acción de volver (no en dispose/build), por lo que es seguro
+  // con Riverpod.
+  void _clearBrandFiltersBeforeBack() {
+    if (!_isBrandContext) return;
+
+    _hideSearchSuggestions();
+    _searchDebounce?.cancel();
+    _suggestionsDebounce?.cancel();
+    FocusScope.of(context).unfocus();
+    _searchController.clear();
+    _preserveFiltersForNextCategoryOpen = false;
+    ref.read(productFilterProvider.notifier).reset();
+  }
+
+  void _handleBack() {
+    _clearBrandFiltersBeforeBack();
+    Navigator.of(context).pop();
+  }
 
   @override
   void initState() {
     super.initState();
+    _activeCatalogCategoryId = widget.categoryId;
+    _activeCatalogCategoryName = widget.categoryName;
+    _subcategoriesFuture = _loadSubcategoriesForCurrentCategory();
 
     final previousCategoryId = _lastOpenedCategoryId;
     final preserveFilters = _preserveFiltersForNextCategoryOpen;
@@ -186,36 +242,74 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     final currentFilters = ref.read(productFilterProvider);
     final initialSearch = widget.initialSearch?.trim() ?? '';
     final hasInitialSearch = initialSearch.isNotEmpty;
-    final shouldClearFiltersFromOtherCategory = !preserveFilters &&
-        previousCategoryId != null &&
-        previousCategoryId != widget.categoryId &&
-        currentFilters.hasActiveFilters &&
-        !hasInitialSearch;
 
-    _searchController.text = hasInitialSearch ? initialSearch : currentFilters.search;
+    if (_isBrandContext) {
+      _searchController.text = initialSearch;
+
+      final brandAlreadyPrepared =
+          currentFilters.brandId == _brandContextId &&
+          currentFilters.brand.trim().toLowerCase() ==
+              _brandContextName.toLowerCase();
+
+      // v1.9.92: no modificamos un provider durante initState. La pantalla
+      // Marcas -> Categorías ya fija la marca antes del Navigator.push().
+      // Este post-frame queda como fallback para rutas antiguas/deep links.
+      if (!brandAlreadyPrepared ||
+          currentFilters.search.trim() != initialSearch ||
+          currentFilters.orderBy.isNotEmpty ||
+          currentFilters.attributeTermIds.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+
+          ref.read(productFilterProvider.notifier).reset();
+          _restoreBrandContext();
+          if (hasInitialSearch) {
+            ref.read(productFilterProvider.notifier).update(
+              search: initialSearch,
+            );
+          }
+          _reloadCurrentCategory(scrollTop: true);
+          _prewarmCategorySearchCache();
+        });
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _prewarmCategorySearchCache();
+        });
+      }
+    } else {
+      final shouldClearFiltersFromOtherCategory = !preserveFilters &&
+          currentFilters.hasActiveFilters &&
+          !hasInitialSearch &&
+          (previousCategoryId == null || previousCategoryId != widget.categoryId);
+
+      _searchController.text = hasInitialSearch ? initialSearch : currentFilters.search;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        if (hasInitialSearch) {
+          ref.read(productFilterProvider.notifier).update(
+            search: initialSearch,
+            orderBy: '',
+            brand: '',
+            brandId: null,
+            attributeTermIds: const <String, int>{},
+            attributeLabels: const <String, String>{},
+            attributeGroupLabels: const <String, String>{},
+          );
+          _reloadCurrentCategory(scrollTop: true);
+        } else if (shouldClearFiltersFromOtherCategory) {
+          _searchController.clear();
+          ref.read(productFilterProvider.notifier).reset();
+          _reloadCurrentCategory(scrollTop: true);
+        }
+
+        _prewarmCategorySearchCache();
+      });
+    }
 
     _scrollController.addListener(_onScrollThrottled);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-
-      if (hasInitialSearch) {
-        ref.read(productFilterProvider.notifier).update(
-          search: initialSearch,
-          orderBy: '',
-          brand: '',
-          brandId: null,
-          attributeTermIds: const <String, int>{},
-          attributeLabels: const <String, String>{},
-          attributeGroupLabels: const <String, String>{},
-        );
-        _reloadCurrentCategory(scrollTop: true);
-      } else if (shouldClearFiltersFromOtherCategory) {
-        _searchController.clear();
-        ref.read(productFilterProvider.notifier).reset();
-      }
-
-      _prewarmCategorySearchCache();
-    });
   }
 
   @override
@@ -244,7 +338,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
       if (currentOffset >= _scrollController.position.maxScrollExtent - 300) {
         final notifier = ref.read(
-          productsPaginatedProvider(widget.categoryId).notifier,
+          productsPaginatedProvider(_activeCatalogCategoryId).notifier,
         );
         if (!notifier.isLoading && notifier.hasMore && !_isLoadingMore) {
           _isLoadingMore = true;
@@ -341,7 +435,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     _isLoadingMore = false;
 
     final notifier = ref.read(
-      productsPaginatedProvider(widget.categoryId).notifier,
+      productsPaginatedProvider(_activeCatalogCategoryId).notifier,
     );
 
     notifier.clearCacheForCurrentCategory();
@@ -437,7 +531,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   String _suggestionsCacheKey(String query) {
-    return 'search_suggestions|cat:${widget.categoryId}|name:${widget.categoryName.toLowerCase().trim()}|q:${query.toLowerCase().trim()}';
+    return 'search_suggestions|cat:${_activeCatalogCategoryId}|name:${_activeCatalogCategoryName.toLowerCase().trim()}|q:${query.toLowerCase().trim()}';
   }
 
   List<_CatalogSearchSuggestion>? _readSuggestionsCache(String key) {
@@ -534,7 +628,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       return cachedSuggestions;
     }
 
-    final categoryContext = widget.categoryName;
+    final categoryContext = _activeCatalogCategoryName;
     final queryIntents = _detectSearchIntents(cleanQuery);
     final categoryIntents = _detectSearchIntents(categoryContext);
     final tokens = _meaningfulTokens(cleanQuery);
@@ -586,7 +680,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     }
 
     await addProducts(
-      categoryId: widget.categoryId,
+      categoryId: _activeCatalogCategoryId,
       target: localProductsById,
       perPage: 10,
     );
@@ -651,7 +745,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         : null;
 
     final suggestionTarget = redirectTarget != null &&
-        redirectTarget.id != widget.categoryId
+        redirectTarget.id != _activeCatalogCategoryId
         ? redirectTarget
         : null;
 
@@ -667,7 +761,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     final externalAccessorySearch = queryIntents.contains('accessory') &&
         suggestionTarget != null &&
-        suggestionTarget.id != widget.categoryId;
+        suggestionTarget.id != _activeCatalogCategoryId;
 
     // Si el usuario está en una familia equivocada y busca un componente
     // (cable, RJ45, pila, fuente...), priorizamos el salto al apartado correcto
@@ -1005,7 +1099,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
             onGoQuotes: widget.onGoQuotes,
             contextCategoryName: suggestion.global
                 ? 'Catálogo MundiCam'
-                : widget.categoryName,
+                : _activeCatalogCategoryName,
           ),
         ),
       );
@@ -1712,6 +1806,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     _searchController.clear();
     ref.read(productFilterProvider.notifier).reset();
+    _restoreBrandContext();
 
     if (!previousFilters.hasActiveFilters) {
       _reloadCurrentCategory();
@@ -1724,11 +1819,71 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     _isLoadingMore = false;
 
     final notifier = ref.read(
-      productsPaginatedProvider(widget.categoryId).notifier,
+      productsPaginatedProvider(_activeCatalogCategoryId).notifier,
     );
 
     notifier.clearCacheForCurrentCategory();
     await notifier.loadFirstPage(forceRefresh: true);
+  }
+
+  Future<List<CategoryModel>> _loadSubcategoriesForCurrentCategory() async {
+    try {
+      final subcategories = _isBrandContext
+          ? await ApiService().getCategoriasPorMarca(
+              brandId: _brandContextId ?? 0,
+              brandName: _brandContextName,
+              brandTaxonomy: _brandContextTaxonomy,
+              parent: widget.categoryId,
+            )
+          : await ApiService().getSubcategoriasDe(widget.categoryId);
+      // v1.9.54: el PHP devuelve las categorías en `menu_order` de
+      // WooCommerce. No volvemos a ordenarlas alfabéticamente en Flutter porque
+      // rompería la prioridad comercial definida en la web.
+      return subcategories
+          .where((category) => category.id > 0)
+          .toList();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error cargando subcategorías de ${widget.categoryName}: $e');
+      }
+      return const <CategoryModel>[];
+    }
+  }
+
+  void _toggleSubcategories() {
+    setState(() {
+      _subcategoriesExpanded = !_subcategoriesExpanded;
+    });
+  }
+
+  void _openSubcategory(CategoryModel category) {
+    if (category.id <= 0) return;
+
+    _hideSearchSuggestions();
+    _searchDebounce?.cancel();
+    FocusScope.of(context).unfocus();
+
+    // v1.9.59: seleccionar una categoría hoja NO abre otra pantalla.
+    // Cambia el contexto de productos/filtros y cierra el desplegable para que
+    // el usuario vea inmediatamente el resultado. El botón Subcategorías sigue
+    // disponible arriba y puede reabrirse sin volver atrás.
+    _searchController.clear();
+
+    setState(() {
+      _activeCatalogCategoryId = category.id;
+      _activeCatalogCategoryName = category.name;
+      _subcategoriesExpanded = false;
+    });
+
+    // Los filtros de una categoría anterior no deben contaminar la nueva rama.
+    // El drawer se reconstruye usando el ID activo y recarga sus filtros reales.
+    ref.read(productFilterProvider.notifier).reset();
+    _restoreBrandContext();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _reloadCurrentCategory(scrollTop: true);
+    });
   }
 
   void _openFilters() {
@@ -1754,28 +1909,36 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     });
 
     final productosState = ref.watch(
-      productsPaginatedProvider(widget.categoryId),
+      productsPaginatedProvider(_activeCatalogCategoryId),
     );
     final notifier = ref.watch(
-      productsPaginatedProvider(widget.categoryId).notifier,
+      productsPaginatedProvider(_activeCatalogCategoryId).notifier,
     );
     final filters = ref.watch(productFilterProvider);
     final hasActiveFilters = filters.hasActiveFilters;
     final totalItems = notifier.totalItems;
     final loadedItems = productosState.length;
 
-    return Scaffold(
-      key: _scaffoldKey,
+    return WillPopScope(
+      onWillPop: () async {
+        _clearBrandFiltersBeforeBack();
+        return true;
+      },
+      child: Scaffold(
+        key: _scaffoldKey,
       backgroundColor: const Color(0xFFF5F6F8),
       endDrawer: FiltroSelector(
-        parentCategoryId: widget.categoryId,
-        categoryName: widget.categoryName,
+        key: ValueKey('catalog_filters_$_activeCatalogCategoryId'),
+        parentCategoryId: _activeCatalogCategoryId,
+        categoryName: _activeCatalogCategoryName,
         productosEnPantalla: productosState,
+        lockedBrandId: _brandContextId,
+        lockedBrandName: _isBrandContext ? _brandContextName : null,
         onApplyFilters: () => _reloadCurrentCategory(scrollTop: true),
       ),
       appBar: _CatalogCategoryAppBar(
         title: widget.categoryName,
-        onBack: () => Navigator.of(context).pop(),
+        onBack: _handleBack,
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       floatingActionButton: AnimatedSwitcher(
@@ -1813,6 +1976,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
               child: _CatalogControls(
                 controller: _searchController,
                 categoryName: widget.categoryName,
+                activeSubcategoryName: _activeCatalogCategoryId != widget.categoryId
+                    ? _activeCatalogCategoryName
+                    : '',
                 filters: filters,
                 totalItems: totalItems,
                 loadedItems: loadedItems,
@@ -1823,13 +1989,20 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                 onSubmitted: _applySearchNow,
                 onClearSearch: _clearSearch,
                 onOpenFilters: _openFilters,
+                subcategoriesFuture: _subcategoriesFuture,
+                subcategoriesExpanded: _subcategoriesExpanded,
+                onToggleSubcategories: _toggleSubcategories,
+                onSubcategoryTap: _openSubcategory,
                 onSuggestionTap: _handleSuggestionTap,
+                brandContextId: _brandContextId,
+                brandContextName: _brandContextName,
+                brandContextTaxonomy: _brandContextTaxonomy,
               ),
             ),
             if (hasActiveFilters)
               SliverToBoxAdapter(
                 child: _ActiveFiltersBar(
-                  categoryName: widget.categoryName,
+                  categoryName: _activeCatalogCategoryName,
                   filters: filters,
                   onClearAll: _resetFilters,
                 ),
@@ -1907,6 +2080,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
               ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -2031,6 +2205,7 @@ class _CatalogCategoryAppBar extends StatelessWidget implements PreferredSizeWid
 class _CatalogControls extends StatelessWidget {
   final TextEditingController controller;
   final String categoryName;
+  final String activeSubcategoryName;
   final MundiFilters filters;
   final int totalItems;
   final int loadedItems;
@@ -2041,11 +2216,19 @@ class _CatalogControls extends StatelessWidget {
   final VoidCallback onSubmitted;
   final VoidCallback onClearSearch;
   final VoidCallback onOpenFilters;
+  final Future<List<CategoryModel>> subcategoriesFuture;
+  final bool subcategoriesExpanded;
+  final VoidCallback onToggleSubcategories;
+  final ValueChanged<CategoryModel> onSubcategoryTap;
   final ValueChanged<_CatalogSearchSuggestion> onSuggestionTap;
+  final int? brandContextId;
+  final String brandContextName;
+  final String brandContextTaxonomy;
 
   const _CatalogControls({
     required this.controller,
     required this.categoryName,
+    required this.activeSubcategoryName,
     required this.filters,
     required this.totalItems,
     required this.loadedItems,
@@ -2056,13 +2239,18 @@ class _CatalogControls extends StatelessWidget {
     required this.onSubmitted,
     required this.onClearSearch,
     required this.onOpenFilters,
+    required this.subcategoriesFuture,
+    required this.subcategoriesExpanded,
+    required this.onToggleSubcategories,
+    required this.onSubcategoryTap,
     required this.onSuggestionTap,
+    this.brandContextId,
+    this.brandContextName = '',
+    this.brandContextTaxonomy = '',
   });
 
   @override
   Widget build(BuildContext context) {
-    final String resultText = _resultText();
-
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 14, 12, 8),
       padding: const EdgeInsets.all(12),
@@ -2145,14 +2333,59 @@ class _CatalogControls extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  resultText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: Color(0xFF6B7280),
-                    fontWeight: FontWeight.w700,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: onToggleSubcategories,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Subcategorías',
+                          style: TextStyle(
+                            fontSize: 12.8,
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        if (activeSubcategoryName.trim().isNotEmpty) ...[
+                          const SizedBox(width: 7),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                activeSubcategoryName.trim(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11.2,
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(width: 5),
+                        AnimatedRotation(
+                          turns: subcategoriesExpanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          child: const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            size: 21,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -2203,28 +2436,378 @@ class _CatalogControls extends StatelessWidget {
               ),
             ],
           ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 180),
+            crossFadeState: subcategoriesExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: FutureBuilder<List<CategoryModel>>(
+                future: subcategoriesFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const _SubcategoriesLoadingPanel();
+                  }
+
+                  final subcategories = snapshot.data ?? const <CategoryModel>[];
+                  if (subcategories.isEmpty) {
+                    return const _NoSubcategoriesPanel();
+                  }
+
+                  return Column(
+                    children: subcategories
+                        .map(
+                          (category) => _CatalogSubcategoryRow(
+                            category: category,
+                            onLeafTap: onSubcategoryTap,
+                            brandId: brandContextId,
+                            brandName: brandContextName,
+                            brandTaxonomy: brandContextTaxonomy,
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  String _resultText() {
-    if (isLoading && loadedItems == 0) {
-      return 'Cargando productos...';
-    }
-
-    // No mostramos contador aquí porque WooCommerce puede devolver totales
-    // globales o aproximados según categoría/filtros. El listado real ya se
-    // controla por la carga paginada y por los contadores del panel de filtros.
-    if (loadedItems > 0 || totalItems > 0) {
-      return 'Productos encontrados';
-    }
-
-    return 'Sin resultados';
-  }
 }
 
 
+
+class _SubcategoriesLoadingPanel extends StatelessWidget {
+  const _SubcategoriesLoadingPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppColors.primary,
+            ),
+          ),
+          SizedBox(width: 9),
+          Text(
+            'Cargando subcategorías...',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoSubcategoriesPanel extends StatelessWidget {
+  const _NoSubcategoriesPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: const Text(
+        'No hay subcategorías en este apartado.',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF6B7280),
+        ),
+      ),
+    );
+  }
+}
+
+class _CatalogSubcategoryRow extends StatefulWidget {
+  final CategoryModel category;
+  final ValueChanged<CategoryModel> onLeafTap;
+  final int? brandId;
+  final String brandName;
+  final String brandTaxonomy;
+  final int depth;
+
+  const _CatalogSubcategoryRow({
+    required this.category,
+    required this.onLeafTap,
+    this.brandId,
+    this.brandName = '',
+    this.brandTaxonomy = '',
+    this.depth = 0,
+  });
+
+  @override
+  State<_CatalogSubcategoryRow> createState() => _CatalogSubcategoryRowState();
+}
+
+class _CatalogSubcategoryRowState extends State<_CatalogSubcategoryRow> {
+  bool _expanded = false;
+  bool _loadingChildren = false;
+  bool _childrenResolved = false;
+  List<CategoryModel> _children = const <CategoryModel>[];
+
+  bool get _backendConfirmsChildren =>
+      widget.category.hasChildren == true || widget.category.childrenCount > 0;
+
+  bool get _backendConfirmsLeaf =>
+      widget.category.hasChildren == false && widget.category.childrenCount <= 0;
+
+  bool get _canExpand =>
+      _backendConfirmsChildren || (_childrenResolved && _children.isNotEmpty);
+
+  Future<void> _handleTap() async {
+    if (_loadingChildren) return;
+
+    // v1.9.54 UX CATÁLOGO TIPO WEB:
+    // - Una categoría intermedia (p.ej. Cámaras HD) NUNCA abre productos.
+    //   Primero despliega debajo sus hijos reales de WooCommerce.
+    // - Solo una categoría hoja abre el listado de productos.
+    // - Si el backend antiguo no informa has_children, consultamos una vez antes
+    //   de decidir para mantener compatibilidad.
+    if (_childrenResolved) {
+      if (_children.isNotEmpty) {
+        setState(() {
+          _expanded = !_expanded;
+        });
+        return;
+      }
+
+      if (_backendConfirmsChildren && (widget.brandId ?? 0) <= 0) {
+        // Incoherencia puntual de datos/caché: no enviamos al usuario a productos
+        // de una categoría que el servidor identifica como contenedora.
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudieron mostrar las subcategorías de este apartado.'),
+          ),
+        );
+        return;
+      }
+
+      // En contexto de marca, un backend anterior puede marcar hijos globales que
+      // esa marca concreta no tiene. En ese caso la categoría sí actúa como hoja.
+      widget.onLeafTap(widget.category);
+      return;
+    }
+
+    if (_backendConfirmsLeaf) {
+      widget.onLeafTap(widget.category);
+      return;
+    }
+
+    setState(() {
+      _loadingChildren = true;
+    });
+
+    try {
+      final children = (widget.brandId ?? 0) > 0
+          ? await ApiService().getCategoriasPorMarca(
+              brandId: widget.brandId!,
+              brandName: widget.brandName,
+              brandTaxonomy: widget.brandTaxonomy,
+              parent: widget.category.id,
+            )
+          : await ApiService().getSubcategoriasDe(widget.category.id);
+      final cleanChildren = children
+          .where(
+            (child) =>
+                child.id > 0 &&
+                child.id != widget.category.id,
+          )
+          .toList();
+
+      if (!mounted) return;
+
+      if (cleanChildren.isEmpty) {
+        setState(() {
+          _childrenResolved = true;
+          _loadingChildren = false;
+          _children = const <CategoryModel>[];
+        });
+
+        if (_backendConfirmsChildren && (widget.brandId ?? 0) <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No se pudieron mostrar las subcategorías de este apartado.'),
+            ),
+          );
+          return;
+        }
+
+        widget.onLeafTap(widget.category);
+        return;
+      }
+
+      setState(() {
+        _childrenResolved = true;
+        _loadingChildren = false;
+        _children = cleanChildren;
+        _expanded = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loadingChildren = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudieron cargar las subcategorías.'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final category = widget.category;
+    final nested = widget.depth > 0;
+    final leftIndent = (widget.depth * 10.0).clamp(0.0, 30.0).toDouble();
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: 7,
+        left: leftIndent,
+      ),
+      child: Column(
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: _handleTap,
+              child: Ink(
+                padding: EdgeInsets.symmetric(
+                  horizontal: nested ? 10 : 11,
+                  vertical: nested ? 9 : 10,
+                ),
+                decoration: BoxDecoration(
+                  color: nested
+                      ? const Color(0xFFFFFFFF)
+                      : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: nested
+                        ? const Color(0xFFE4E9F0)
+                        : const Color(0xFFE6EAF0),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        category.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: nested ? 12.6 : 13.2,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: _loadingChildren
+                          ? const Padding(
+                              padding: EdgeInsets.all(3),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primary,
+                              ),
+                            )
+                          : _canExpand
+                              ? AnimatedRotation(
+                                  // Chevron a la derecha = cerrado; hacia abajo = abierto.
+                                  // Así el usuario entiende que hay otro nivel, igual
+                                  // que en el menú de categorías de la web.
+                                  turns: _expanded ? 0.25 : 0.0,
+                                  duration: const Duration(milliseconds: 180),
+                                  child: const Icon(
+                                    Icons.chevron_right_rounded,
+                                    size: 22,
+                                    color: AppColors.primary,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 21,
+                                  color: Color(0xFF9CA3AF),
+                                ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 190),
+            crossFadeState: _expanded && _children.isNotEmpty
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: const SizedBox.shrink(),
+            secondChild: Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 7, left: 9),
+              padding: const EdgeInsets.fromLTRB(7, 8, 7, 1),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE6EAF0)),
+              ),
+              child: Column(
+                children: _children
+                    .map(
+                      (child) => _CatalogSubcategoryRow(
+                        category: child,
+                        onLeafTap: widget.onLeafTap,
+                        brandId: widget.brandId,
+                        brandName: widget.brandName,
+                        brandTaxonomy: widget.brandTaxonomy,
+                        depth: widget.depth + 1,
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// v1.9.74: subcategorías sin imagen/icono decorativo.
+// WooCommerce sigue determinando jerarquía, orden y navegación.
 
 enum _CatalogSearchSuggestionType { product, query, redirect, brand }
 
@@ -2638,49 +3221,96 @@ class _ActiveFiltersBar extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF7F7),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFF0D4D4)),
+        border: Border.all(color: const Color(0xFFE1E5EC)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.025),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.filter_alt_outlined,
-            size: 18,
-            color: AppColors.primary,
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.filter_alt_outlined,
+              size: 17,
+              color: AppColors.primary,
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              chips.join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w800,
-              ),
+            child: Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: chips
+                  .where((chip) => chip.trim().isNotEmpty)
+                  .map(_activeChip)
+                  .toList(),
             ),
           ),
           const SizedBox(width: 8),
           InkWell(
             borderRadius: BorderRadius.circular(999),
             onTap: onClearAll,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Text(
-                'Quitar',
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0xFFD9DEE7)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
+                  SizedBox(width: 4),
+                  Text(
+                    'Limpiar',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _activeChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7F7),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFF0D4D4)),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 11.5,
+          color: AppColors.primary,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -2954,18 +3584,26 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   int get _cantidadPresupuestoSegura {
-    if (!widget.p.canRequestQuote) return 0;
+    final selectedQty = cantidad < 1 ? 1 : cantidad;
+    final internalQty = widget.p.generalStockQuantity + widget.p.murciaStockQuantity;
 
-    final maxQty = widget.p.hasMundicamInternalStock
-        ? widget.p.generalStockQuantity + widget.p.murciaStockQuantity
-        : (widget.p.stockQuantity > 0 ? widget.p.stockQuantity : 999);
+    // El botón de presupuesto no debe fallar solo porque el stock interno
+    // General/Murcia venga a 0 si el producto viene marcado como presupuestable.
+    if (widget.p.maxPurchaseQty > 0) {
+      return selectedQty.clamp(1, widget.p.maxPurchaseQty).toInt();
+    }
+    if (internalQty > 0) {
+      return selectedQty.clamp(1, internalQty).toInt();
+    }
+    if (widget.p.stockQuantity > 0) {
+      return selectedQty.clamp(1, widget.p.stockQuantity).toInt();
+    }
 
-    if (maxQty <= 0) return 0;
-    return cantidad.clamp(1, maxQty).toInt();
+    return selectedQty;
   }
   bool get _puedeComprar => widget.p.canAddToCart && _cantidadSegura > 0;
   bool get _puedeAnadirPresupuesto => widget.p.canRequestQuote && !_isAddingToQuote;
-  bool get _puedeCambiarCantidad => widget.p.canAddToCart;
+  bool get _puedeCambiarCantidad => widget.p.canAddToCart || widget.p.canRequestQuote;
 
   void _goToQuotesKeepingTabs() {
     if (widget.onGoQuotes != null) {
@@ -3132,7 +3770,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           color: Colors.white,
                         ),
                         label: Text(
-                          _bajoConsulta ? 'BAJO CONSULTA' : (_tieneStock ? 'AÑADIR CARRITO' : 'SIN STOCK'),
+                          _bajoConsulta ? 'BAJO CONSULTA' : (_tieneStock ? 'AÑADIR CARRITO' : 'SIN EXISTENCIAS'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -3181,13 +3819,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     size: 17,
                   ),
                   label: Text(
-                    _bajoConsulta
-                        ? 'NO PRESUPUESTAR'
-                        : !_tieneStock
-                        ? 'NO PRESUPUESTAR'
-                        : _isAddingToQuote
+                    _isAddingToQuote
                         ? 'AÑADIENDO...'
-                        : 'AÑADIR AL PRESUPUESTO',
+                        : _puedeAnadirPresupuesto
+                        ? 'AÑADIR AL PRESUPUESTO'
+                        : 'NO PRESUPUESTAR',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -3281,8 +3917,8 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     final label = _bajoConsulta
         ? 'Bajo consulta'
         : _tieneStock
-        ? 'En stock'
-        : 'Sin stock';
+        ? 'Disponible 24/48h'
+        : 'Sin Existencias';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -3351,11 +3987,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            product.isUnderConsultation
-                ? '"${product.name}" está bajo consulta y no puede añadirse al presupuesto.'
-                : 'No se puede añadir "${product.name}" al presupuesto porque no hay stock.',
-          ),
+          content: Text('No se puede añadir "${product.name}" al presupuesto.'),
           backgroundColor: Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
@@ -3364,8 +3996,8 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       return;
     }
 
-    final qty = _cantidadPresupuestoSegura;
-    if (qty <= 0) return;
+    final calculatedQty = _cantidadPresupuestoSegura;
+    final qty = calculatedQty > 0 ? calculatedQty : 1;
 
     final precio = _precioDouble(product);
 

@@ -1,9 +1,11 @@
 // pages/payment_page.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 class PaymentPage extends StatefulWidget {
@@ -13,6 +15,8 @@ class PaymentPage extends StatefulWidget {
   final String? orderNumber;
   final double? amount;
   final String paymentMethodTitle;
+  final bool quotePayment;
+  final String? quoteNumber;
 
   const PaymentPage({
     super.key,
@@ -22,6 +26,8 @@ class PaymentPage extends StatefulWidget {
     this.orderNumber,
     this.amount,
     this.paymentMethodTitle = 'Pago con tarjeta',
+    this.quotePayment = false,
+    this.quoteNumber,
   });
 
   @override
@@ -30,6 +36,10 @@ class PaymentPage extends StatefulWidget {
 
 class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   late final WebViewController _controller;
+  late String _currentPaymentUrl;
+  Timer? _bridgeTimeout;
+  bool _paymentFailureTracked = false;
+  bool _paymentReturnTracked = false;
 
   int _progress = 0;
 
@@ -39,8 +49,11 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   bool _checkingPayment = false;
   bool _openedExternalPayment = false;
   bool _waitingForConfirmation = false;
+  bool _showSecureWebContent = false;
+  bool _cancellingQuoteOrder = false;
 
   String? _errorMessage;
+  late String _bridgeHost;
 
   static const Set<String> _paidStatuses = {'processing', 'completed'};
 
@@ -56,11 +69,20 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _currentPaymentUrl = widget.paymentUrl;
+    _bridgeHost =
+        Uri.tryParse(_currentPaymentUrl)?.host.toLowerCase().trim() ?? '';
     _initWebView();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _startSecurePayment();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _bridgeTimeout?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -84,7 +106,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
         onMessageReceived: (JavaScriptMessage message) {
           final url = message.message.trim();
           if (url.isNotEmpty) {
-            _openExternalUrl(url);
+            _handleWindowOpenUrl(url);
           }
         },
       )
@@ -96,10 +118,12 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           },
           onPageStarted: (url) {
             debugPrint('🌐 PaymentPage started: $url');
+            _updateSecureContentVisibility(url);
             _checkUrlForPaymentResult(url);
           },
           onPageFinished: (url) async {
             debugPrint('🌐 PaymentPage finished: $url');
+            _updateSecureContentVisibility(url);
             await _injectWindowOpenHandler();
             _checkUrlForPaymentResult(url);
           },
@@ -117,7 +141,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 
             if (_isFailureUrl(url)) {
               _markPaymentError(
-                'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
+                widget.quotePayment ? 'El pago no se ha completado. Puedes volver a intentarlo desde Mis presupuestos.' : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
               );
               return NavigationDecision.prevent;
             }
@@ -141,6 +165,16 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   Future<void> _startSecurePayment() async {
     if (_paymentStarted) return;
 
+    final uri = Uri.tryParse(_currentPaymentUrl);
+    if (uri == null ||
+        !uri.hasScheme ||
+        !_currentPaymentUrl.contains('mundicam_app_payment_token=')) {
+      _markPaymentError(
+        'El servidor no ha devuelto un enlace seguro válido para Redsys.',
+      );
+      return;
+    }
+
     setState(() {
       _paymentStarted = true;
       _paymentError = false;
@@ -148,9 +182,11 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       _openedExternalPayment = false;
       _errorMessage = null;
       _progress = 0;
+      _showSecureWebContent = false;
     });
 
-    await _controller.loadRequest(Uri.parse(widget.paymentUrl));
+    _startBridgeTimeout();
+    await _controller.loadRequest(uri);
   }
 
   Future<void> _injectWindowOpenHandler() async {
@@ -197,6 +233,51 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('⚠️ No se pudo inyectar JS para window.open: $e');
     }
+  }
+
+  void _updateSecureContentVisibility(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !mounted) return;
+
+    final host = uri.host.toLowerCase().trim();
+    final isHttp = uri.scheme == 'http' || uri.scheme == 'https';
+    final isBridgeHost = isHttp &&
+        host.isNotEmpty &&
+        (_bridgeHost.isNotEmpty
+            ? host == _bridgeHost ||
+                host.endsWith('.$_bridgeHost') ||
+                _bridgeHost.endsWith('.$host')
+            : host.contains('mundicam.com'));
+
+    final shouldShow = isHttp &&
+        host.isNotEmpty &&
+        !isBridgeHost &&
+        !_isSuccessUrl(url) &&
+        !_isFailureUrl(url);
+
+    if (shouldShow) {
+      _bridgeTimeout?.cancel();
+    }
+
+    if (_showSecureWebContent != shouldShow) {
+      setState(() => _showSecureWebContent = shouldShow);
+    }
+  }
+
+  Future<void> _handleWindowOpenUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      _markPaymentError('La pasarela ha devuelto una dirección no válida.');
+      return;
+    }
+
+    if (uri.scheme == 'http' || uri.scheme == 'https') {
+      // Redsys, 3D Secure y el banco permanecen dentro de la misma ventana.
+      await _controller.loadRequest(uri);
+      return;
+    }
+
+    await _openExternalUrl(url);
   }
 
   bool _isSuccessUrl(String url) {
@@ -288,7 +369,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 
     if (_isFailureUrl(url)) {
       _markPaymentError(
-        'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
+        widget.quotePayment ? 'El pago no se ha completado. Puedes volver a intentarlo desde Mis presupuestos.' : 'El pago no se ha completado. Puedes intentarlo de nuevo o volver al pedido.',
       );
     }
   }
@@ -320,7 +401,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
         setState(() {
           _checkingPayment = false;
           _paymentError = true;
-          _errorMessage = 'No se pudo comprobar el estado del pedido. Intenta de nuevo.';
+          _errorMessage = widget.quotePayment ? 'No se pudo comprobar el estado del pago. El presupuesto seguirá disponible.' : 'No se pudo comprobar el estado del pedido. Intenta de nuevo.';
         });
         return;
       }
@@ -333,13 +414,14 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       debugPrint('🔑 Order key local: ${widget.orderKey}');
       debugPrint('🔑 Order key WooCommerce: $remoteOrderKey');
 
-      if (remoteOrderKey != null &&
+      if (widget.orderKey.trim().isNotEmpty &&
+          remoteOrderKey != null &&
           remoteOrderKey.isNotEmpty &&
           remoteOrderKey != widget.orderKey) {
         setState(() {
           _checkingPayment = false;
           _paymentError = true;
-          _errorMessage = 'La verificación del pedido no coincide. Contacta con MundiCam.';
+          _errorMessage = 'La verificación del pago no coincide. Contacta con MundiCam.';
         });
         return;
       }
@@ -361,7 +443,9 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           _paymentError = !showPendingAsWaiting;
           _errorMessage = showPendingAsWaiting
               ? null
-              : 'El pedido todavía aparece pendiente de pago. Si acabas de pagar, espera unos segundos y pulsa “Comprobar pago”.';
+              : (widget.quotePayment
+                  ? 'El pago todavía no aparece confirmado. El presupuesto seguirá disponible para intentarlo de nuevo.'
+                  : 'El pedido todavía aparece pendiente de pago. Si acabas de pagar, espera unos segundos y pulsa “Comprobar pago”.');
         });
         return;
       }
@@ -387,6 +471,8 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 
   void _markPaymentSuccess() {
     if (!mounted || _paymentSuccess) return;
+    _bridgeTimeout?.cancel();
+    _trackPaymentReturn('paid');
 
     setState(() {
       _paymentSuccess = true;
@@ -425,6 +511,20 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 
   void _markPaymentError(String message) {
     if (!mounted || _paymentSuccess) return;
+    _bridgeTimeout?.cancel();
+    if (!_paymentFailureTracked) {
+      _paymentFailureTracked = true;
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'payment_failed',
+          objectType: 'order',
+          objectId: widget.orderId,
+          metadata: <String, dynamic>{
+            'quote_payment': widget.quotePayment,
+          },
+        ),
+      );
+    }
 
     setState(() {
       _paymentError = true;
@@ -435,6 +535,25 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   }
 
   Future<void> _reloadPaymentPage() async {
+    final refreshedUrl = await ApiService().getSecureCardPaymentUrl(
+      orderId: widget.orderId,
+      orderKey: widget.orderKey,
+    );
+
+    if (refreshedUrl == null ||
+        refreshedUrl.trim().isEmpty ||
+        !refreshedUrl.contains('mundicam_app_payment_token=')) {
+      _markPaymentError(
+        'No se pudo renovar el acceso seguro a Redsys. Inténtalo de nuevo.',
+      );
+      return;
+    }
+
+    _currentPaymentUrl = refreshedUrl.trim();
+    _bridgeHost =
+        Uri.tryParse(_currentPaymentUrl)?.host.toLowerCase().trim() ?? '';
+    _paymentFailureTracked = false;
+
     setState(() {
       _paymentStarted = true;
       _paymentError = false;
@@ -442,9 +561,37 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       _waitingForConfirmation = false;
       _checkingPayment = false;
       _progress = 0;
+      _showSecureWebContent = false;
     });
 
-    await _controller.loadRequest(Uri.parse(widget.paymentUrl));
+    _startBridgeTimeout();
+    await _controller.loadRequest(Uri.parse(_currentPaymentUrl));
+  }
+
+  void _startBridgeTimeout() {
+    _bridgeTimeout?.cancel();
+    _bridgeTimeout = Timer(const Duration(seconds: 25), () {
+      if (!mounted || _paymentSuccess || _showSecureWebContent) return;
+      _markPaymentError(
+        'No se pudo abrir el entorno seguro de Redsys. Comprueba la conexión e inténtalo de nuevo.',
+      );
+    });
+  }
+
+  void _trackPaymentReturn(String result) {
+    if (_paymentReturnTracked) return;
+    _paymentReturnTracked = true;
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'payment_returned',
+        objectType: 'order',
+        objectId: widget.orderId,
+        metadata: <String, dynamic>{
+          'result': result,
+          'quote_payment': widget.quotePayment,
+        },
+      ),
+    );
   }
 
   Future<bool> _confirmExitPayment() async {
@@ -453,10 +600,11 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     final shouldExit = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Salir del pago'),
-        content: const Text(
-          'El pedido ya está creado, pero el pago todavía no se ha confirmado. '
-          'Podrás finalizarlo desde la web o contactando con MundiCam.',
+        title: Text(widget.quotePayment ? 'Cancelar pedido' : 'Salir del pago'),
+        content: Text(
+          widget.quotePayment
+              ? 'El pedido creado para este presupuesto se marcará como cancelado y aparecerá en Mis pedidos. El presupuesto no volverá a la sección web de Presupuestos.'
+              : 'El pedido ya está creado, pero el pago todavía no se ha confirmado. Podrás finalizarlo desde la web o contactando con MundiCam.',
         ),
         actions: [
           TextButton(
@@ -466,10 +614,10 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: widget.quotePayment ? Colors.red.shade700 : AppColors.primary,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Salir'),
+            child: Text(widget.quotePayment ? 'Cancelar pedido' : 'Salir'),
           ),
         ],
       ),
@@ -478,14 +626,69 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
     return shouldExit ?? false;
   }
 
+  Future<bool> _cancelQuoteOrderAndExit() async {
+    if (_cancellingQuoteOrder || !mounted) return false;
+
+    setState(() => _cancellingQuoteOrder = true);
+    try {
+      final result = await ApiService().cancelarCheckoutPresupuesto(
+        orderId: widget.orderId,
+        orderKey: widget.orderKey,
+      );
+      if (!mounted) return false;
+
+      if (result['already_paid'] == true) {
+        setState(() => _cancellingQuoteOrder = false);
+        await _verifyOrderPaymentStatus(
+          showPendingAsWaiting: true,
+          source: 'cancel_race_paid',
+        );
+        return false;
+      }
+
+      if (result['cancelled'] != true) {
+        throw Exception(
+          result['message']?.toString() ?? 'El servidor no confirmó la cancelación.',
+        );
+      }
+
+      _trackPaymentReturn('cancelled');
+      Navigator.of(context).pop(false);
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+      setState(() => _cancellingQuoteOrder = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo cancelar el pedido: $e'),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return false;
+    }
+  }
+
   Future<bool> _handleBack() async {
+    if (_cancellingQuoteOrder) return false;
+
     if (_paymentSuccess) {
       Navigator.of(context).pop(true);
       return false;
     }
 
-    if (!_paymentStarted) {
+    if (!_paymentStarted && !widget.quotePayment) {
       Navigator.of(context).pop(false);
+      return false;
+    }
+
+    // Un checkout procedente de presupuesto no navega hacia atrás dentro de la
+    // WebView: salir significa cancelar de forma explícita el pedido creado.
+    if (widget.quotePayment) {
+      final shouldCancel = await _confirmExitPayment();
+      if (shouldCancel && mounted) {
+        await _cancelQuoteOrderAndExit();
+      }
       return false;
     }
 
@@ -500,6 +703,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 
     final shouldExit = await _confirmExitPayment();
     if (shouldExit && mounted) {
+      _trackPaymentReturn('interrupted');
       Navigator.of(context).pop(false);
     }
 
@@ -512,6 +716,10 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
   }
 
   String get _orderLabel {
+    if (widget.quotePayment) {
+      final quote = widget.quoteNumber?.trim();
+      if (quote != null && quote.isNotEmpty) return quote;
+    }
     final number = widget.orderNumber?.trim();
     if (number != null && number.isNotEmpty) return '#$number';
     return '#${widget.orderId}';
@@ -526,53 +734,63 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
         await _handleBack();
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFFF8F9FB),
-        appBar: AppBar(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          title: const Text(
-            'PAGO SEGURO',
-            style: TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Oswald'),
-          ),
-          leading: IconButton(
-            icon: const Icon(Icons.close_rounded),
-            onPressed: () async => _handleBack(),
-          ),
-          actions: [
-            if (_paymentStarted && !_paymentSuccess)
-              IconButton(
-                tooltip: 'Comprobar pago',
-                icon: _checkingPayment
-                    ? const SizedBox(
-                        width: 19,
-                        height: 19,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.verified_outlined),
-                onPressed: _checkingPayment
-                    ? null
-                    : () => _verifyOrderPaymentStatus(),
+        backgroundColor:
+            _paymentStarted ? Colors.black54 : const Color(0xFFF8F9FB),
+        appBar: _paymentStarted
+            ? null
+            : AppBar(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                title: Text(
+                  widget.quotePayment ? 'PAGO PRESUPUESTO' : 'PAGO SEGURO',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'Oswald',
+                  ),
+                ),
+                leading: IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: _cancellingQuoteOrder
+                      ? null
+                      : () async => _handleBack(),
+                ),
               ),
-            if (_paymentStarted && !_paymentSuccess)
-              IconButton(
-                tooltip: 'Recargar pasarela',
-                icon: const Icon(Icons.refresh_rounded),
-                onPressed: _reloadPaymentPage,
-              ),
-          ],
-        ),
         body: _paymentSuccess
             ? _buildSuccessState()
             : !_paymentStarted
                 ? _buildIntroState()
-                : _buildPaymentWebViewState(),
+                : SafeArea(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 620),
+                          child: Container(
+                            width: double.infinity,
+                            height: MediaQuery.of(context).size.height * 0.92,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(24),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x33000000),
+                                  blurRadius: 32,
+                                  offset: Offset(0, 16),
+                                ),
+                              ],
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: _buildPaymentWebViewState(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
       ),
     );
   }
+
 
   Widget _buildIntroState() {
     return SafeArea(
@@ -651,7 +869,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Pedido $_orderLabel · ${widget.paymentMethodTitle}',
+                  widget.quotePayment ? 'Presupuesto $_orderLabel · ${widget.paymentMethodTitle}' : 'Pedido $_orderLabel · ${widget.paymentMethodTitle}',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 13,
@@ -725,8 +943,18 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 SizedBox(
                   width: double.infinity,
                   child: TextButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: const Text('Volver al checkout'),
+                    onPressed: _cancellingQuoteOrder
+                        ? null
+                        : () async {
+                            if (widget.quotePayment) {
+                              await _handleBack();
+                            } else if (mounted) {
+                              Navigator.of(context).pop(false);
+                            }
+                          },
+                    child: Text(
+                      widget.quotePayment ? 'Cancelar pedido' : 'Volver al checkout',
+                    ),
                   ),
                 ),
               ],
@@ -780,22 +1008,70 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
             minHeight: 3,
           ),
         _buildPaymentHeader(),
-        if (_openedExternalPayment) _buildExternalPaymentNotice(),
         if (_waitingForConfirmation) _buildWaitingNotice(),
         if (_paymentError) _buildErrorNotice(),
         Expanded(
-          child: ClipRect(
-            child: WebViewWidget(controller: _controller),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              IgnorePointer(
+                ignoring: !_showSecureWebContent,
+                child: AnimatedOpacity(
+                  opacity: _showSecureWebContent ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: WebViewWidget(controller: _controller),
+                ),
+              ),
+              if (!_showSecureWebContent && !_paymentError)
+                Container(
+                  color: const Color(0xFFF7F9FC),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      const SizedBox(height: 18),
+                      const Text(
+                        'Abriendo el entorno seguro de Redsys',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'La preparación interna de WooCommerce permanece oculta. '
+                        'Solo se mostrará Redsys o la autenticación de tu banco.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.35,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
         ),
       ],
     );
   }
 
+
   Widget _buildPaymentHeader() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
       color: Colors.white,
       child: Row(
         children: [
@@ -817,7 +1093,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Pasarela segura Redsys',
+                  'Pago seguro Redsys',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w900,
@@ -826,7 +1102,9 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Pedido $_orderLabel · ${_formatAmount(widget.amount)}',
+                  widget.quotePayment
+                      ? 'Presupuesto $_orderLabel · ${_formatAmount(widget.amount)}'
+                      : 'Pedido $_orderLabel · ${_formatAmount(widget.amount)}',
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey.shade600,
@@ -836,11 +1114,34 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
               ],
             ),
           ),
-          const Icon(Icons.lock_outline_rounded, size: 18, color: Colors.grey),
+          IconButton(
+            tooltip: 'Comprobar pago',
+            onPressed: _checkingPayment
+                ? null
+                : () => _verifyOrderPaymentStatus(
+                      showPendingAsWaiting: true,
+                      source: 'modal_header',
+                    ),
+            icon: _checkingPayment
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.verified_outlined),
+          ),
+          IconButton(
+            tooltip: 'Cerrar',
+            onPressed: _cancellingQuoteOrder
+                ? null
+                : () async => _handleBack(),
+            icon: const Icon(Icons.close_rounded),
+          ),
         ],
       ),
     );
   }
+
 
   Widget _buildExternalPaymentNotice() {
     return Container(
@@ -1024,7 +1325,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'El pedido $_orderLabel se ha recibido correctamente. Te enviaremos la confirmación por email.',
+                  widget.quotePayment ? 'El pago del presupuesto $_orderLabel se ha confirmado correctamente. Pasará a pedidos cuando el servidor actualice el estado.' : 'El pedido $_orderLabel se ha recibido correctamente. Te enviaremos la confirmación por email.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,

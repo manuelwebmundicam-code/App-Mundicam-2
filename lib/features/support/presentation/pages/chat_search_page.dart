@@ -6,12 +6,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_provider.dart';
+import 'package:mundicam/features/support/data/mundicam_assistant_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 // ================================================================
 // CONFIGURACIÓN CONTACTO MUNDICAM
-// Cambia estos valores aquí, sin tocar el resto de la pantalla.
 // ================================================================
 
 const String mundicamSupportPhone = '968629383';
@@ -22,210 +22,125 @@ const String mundicamSupportEmail = 'info@mundicam.com';
 const String mundicamWebsiteUrl = 'https://www.mundicam.com';
 
 // ================================================================
-// PROVIDER DE ESTADO DEL CHAT
-// Usa Riverpod, igual que el resto de la app. El buscador de productos usa
-// el SearchProvider EXISTENTE: searchProductsProvider(query).
+// ESTADO DEL CHAT
+// Mantiene la conversación original y añade consultas reales a la API.
 // ================================================================
 
 final chatSearchControllerProvider =
     StateNotifierProvider<ChatSearchController, ChatSearchState>((ref) {
-  return ChatSearchController();
+  return ChatSearchController(MundiCamAssistantService());
 });
 
 class ChatSearchController extends StateNotifier<ChatSearchState> {
-  ChatSearchController()
-      : super(
-          ChatSearchState(
-            messages: const <ChatSearchMessage>[
-              ChatSearchMessage(
-                fromBot: true,
-                text:
-                    'Hola. Soy el asistente de MundiCam. Escribe una referencia, SKU, marca o producto y te ayudo a encontrarlo.',
-              ),
-            ],
-          ),
-        );
+  ChatSearchController(this._assistant) : super(ChatSearchState.initial());
+
+  final MundiCamAssistantService _assistant;
+  int _requestToken = 0;
 
   void reset() {
-    state = ChatSearchState(
-      messages: const <ChatSearchMessage>[
-        ChatSearchMessage(
-          fromBot: true,
-          text:
-              'Hola. Soy el asistente de MundiCam. Escribe una referencia, SKU, marca o producto y te ayudo a encontrarlo.',
-        ),
-      ],
-    );
+    _requestToken++;
+    state = ChatSearchState.initial();
   }
-
 
   void clearSearchOnly() {
     state = state.copyWith(lastSearchQuery: '');
   }
 
-  void ask(String rawText) {
+  Future<void> ask(String rawText) async {
     final text = rawText.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (text.isEmpty) return;
+    if (text.isEmpty || state.isLoading) return;
 
-    final messages = <ChatSearchMessage>[
-      ...state.messages,
-      ChatSearchMessage(fromBot: false, text: text),
-    ];
-
-    final lower = _normalize(text);
-    final answer = _answerForText(lower, text);
-    final shouldSearch = _shouldSearchProduct(lower);
-
+    final token = ++_requestToken;
     state = state.copyWith(
       messages: <ChatSearchMessage>[
-        ...messages,
-        ChatSearchMessage(fromBot: true, text: answer),
+        ...state.messages,
+        ChatSearchMessage(fromBot: false, text: text),
       ],
-      // Si el usuario pregunta por pedidos, crédito, contacto, etc., limpiamos
-      // la búsqueda anterior para que no se queden productos viejos en pantalla.
-      lastSearchQuery: shouldSearch ? text : '',
+      lastSearchQuery: '',
+      isLoading: true,
     );
+
+    try {
+      final reply = await _assistant.answer(text);
+      if (token != _requestToken) return;
+
+      state = state.copyWith(
+        messages: <ChatSearchMessage>[
+          ...state.messages,
+          ChatSearchMessage(fromBot: true, text: reply.text),
+        ],
+        lastSearchQuery: reply.searchProducts ? reply.searchQuery.trim() : '',
+        isLoading: false,
+      );
+    } catch (_) {
+      if (token != _requestToken) return;
+      state = state.copyWith(
+        messages: <ChatSearchMessage>[
+          ...state.messages,
+          const ChatSearchMessage(
+            fromBot: true,
+            text:
+                'Ahora mismo no puedo consultar el servidor. Prueba otra vez o utiliza WhatsApp, llamada o email.',
+          ),
+        ],
+        lastSearchQuery: '',
+        isLoading: false,
+      );
+    }
   }
 
   void searchDirect(String query) {
     final clean = query.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (clean.isEmpty) return;
 
+    _requestToken++;
     state = state.copyWith(
       messages: <ChatSearchMessage>[
         ...state.messages,
         ChatSearchMessage(fromBot: false, text: clean),
         ChatSearchMessage(
           fromBot: true,
-          text: 'Buscando "$clean" en el catálogo profesional...',
+          text: 'Buscando “$clean” en el catálogo profesional...',
         ),
       ],
       lastSearchQuery: clean,
+      isLoading: false,
     );
-  }
-
-  String _answerForText(String lower, String original) {
-    if (_containsAny(lower, const <String>[
-      'telefono',
-      'teléfono',
-      'llamar',
-      'whatsapp',
-      'contacto',
-      'comercial',
-      'gestor',
-    ])) {
-      return 'Puedes llamar a MundiCam o abrir WhatsApp desde los botones grandes de contacto.';
-    }
-
-    if (_containsAny(lower, const <String>[
-      'pedido',
-      'pedidos',
-      'seguimiento',
-      'estado',
-      'envio',
-      'envío',
-      'transporte',
-    ])) {
-      return 'Para ver el estado de tu pedido, entra en la sección Pedidos de la app. Si no lo encuentras, escribe el número de pedido o contacta con MundiCam por WhatsApp.';
-    }
-
-    if (_containsAny(lower, const <String>[
-      'credito',
-      'crédito',
-      'giro',
-      'aplazado',
-      'pago aplazado',
-    ])) {
-      return 'El pago aplazado depende del límite de crédito asignado en tu ficha de cliente. Si no aparece disponible, contacta con tu gestor.';
-    }
-
-    if (_containsAny(lower, const <String>[
-      'rma',
-      'garantia',
-      'garantía',
-      'averia',
-      'avería',
-      'devolucion',
-      'devolución',
-    ])) {
-      return 'Para RMA o garantías, indícanos el pedido, producto y número de serie. También puedes contactar con soporte por WhatsApp.';
-    }
-
-    return 'Voy a buscar "$original" en el catálogo. Puedes usar SKU, marca, modelo o descripción del producto.';
-  }
-
-  bool _shouldSearchProduct(String lower) {
-    if (lower.length < 2) return false;
-
-    if (_containsAny(lower, const <String>[
-      'telefono',
-      'teléfono',
-      'llamar',
-      'whatsapp',
-      'contacto',
-      'credito',
-      'crédito',
-      'giro',
-      'aplazado',
-      'pedido',
-      'pedidos',
-      'rma',
-      'garantia',
-      'garantía',
-    ])) {
-      return false;
-    }
-
-    return true;
-  }
-
-  bool _containsAny(String text, List<String> words) {
-    return words.any(text.contains);
-  }
-
-  String _normalize(String text) {
-    return text
-        .toLowerCase()
-        .replaceAll('á', 'a')
-        .replaceAll('à', 'a')
-        .replaceAll('ä', 'a')
-        .replaceAll('â', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('è', 'e')
-        .replaceAll('ë', 'e')
-        .replaceAll('ê', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ì', 'i')
-        .replaceAll('ï', 'i')
-        .replaceAll('î', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ò', 'o')
-        .replaceAll('ö', 'o')
-        .replaceAll('ô', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ù', 'u')
-        .replaceAll('ü', 'u')
-        .replaceAll('û', 'u')
-        .replaceAll('ñ', 'n');
   }
 }
 
 class ChatSearchState {
   final List<ChatSearchMessage> messages;
   final String lastSearchQuery;
+  final bool isLoading;
 
   const ChatSearchState({
     required this.messages,
     this.lastSearchQuery = '',
+    this.isLoading = false,
   });
+
+  factory ChatSearchState.initial() {
+    return const ChatSearchState(
+      messages: <ChatSearchMessage>[
+        ChatSearchMessage(
+          fromBot: true,
+          text:
+              'Hola. Soy el asistente de MundiCam. Puedes escribirme como hablarías con una persona: buscaré productos y también puedo consultar tus pedidos, presupuestos, gestor, pagos, envíos o garantías.',
+        ),
+      ],
+    );
+  }
 
   ChatSearchState copyWith({
     List<ChatSearchMessage>? messages,
     String? lastSearchQuery,
+    bool? isLoading,
   }) {
     return ChatSearchState(
       messages: messages ?? this.messages,
       lastSearchQuery: lastSearchQuery ?? this.lastSearchQuery,
+      isLoading: isLoading ?? this.isLoading,
     );
   }
 }
@@ -380,6 +295,16 @@ class _ChatSearchPageState extends ConsumerState<ChatSearchPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<ChatSearchState>(
+      chatSearchControllerProvider,
+      (previous, next) {
+        if (previous?.messages.length != next.messages.length ||
+            previous?.isLoading != next.isLoading) {
+          _scrollToBottom();
+        }
+      },
+    );
+
     final state = ref.watch(chatSearchControllerProvider);
     final query = state.lastSearchQuery.trim();
     final AsyncValue<List<Product>> results = query.isEmpty
@@ -413,6 +338,7 @@ class _ChatSearchPageState extends ConsumerState<ChatSearchPage> {
                   _buildQuickActions(),
                   const SizedBox(height: 14),
                   ...state.messages.map(_buildMessage),
+                  if (state.isLoading) _buildAssistantLoading(),
                   if (query.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 14),
                     _buildResultsTitle(query),
@@ -486,7 +412,7 @@ class _ChatSearchPageState extends ConsumerState<ChatSearchPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           const Text(
-            'Búsquedas rápidas',
+            'Búsquedas y preguntas rápidas',
             style: TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.w900,
@@ -494,19 +420,65 @@ class _ChatSearchPageState extends ConsumerState<ChatSearchPage> {
               fontFamily: 'Oswald',
             ),
           ),
+          const SizedBox(height: 6),
+          const Text(
+            'También puedes escribir tu pregunta abajo con tus propias palabras.',
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.3,
+              fontWeight: FontWeight.w600,
+              color: _muted,
+            ),
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 10,
             runSpacing: 10,
             children: <Widget>[
-              _QuickButton(label: 'Cámara IP', onTap: () => _quickSearch('camara ip')),
-              _QuickButton(label: 'Dahua', onTap: () => _quickSearch('dahua')),
-              _QuickButton(label: 'Hikvision', onTap: () => _quickSearch('hikvision')),
-              _QuickButton(label: 'NVR', onTap: () => _quickSearch('nvr')),
-              _QuickButton(label: 'Switch PoE', onTap: () => _quickSearch('switch poe')),
-              _QuickButton(label: 'Ajax', onTap: () => _quickSearch('ajax')),
-              _QuickButton(label: '¿Dónde está mi pedido?', onTap: () => _askQuick('Dónde está mi pedido')),
-              _QuickButton(label: 'Pago aplazado', onTap: () => _askQuick('Pago aplazado')),
+              _QuickButton(
+                label: 'Cámara IP',
+                onTap: () => _quickSearch('camara ip'),
+              ),
+              _QuickButton(
+                label: 'Dahua',
+                onTap: () => _quickSearch('dahua'),
+              ),
+              _QuickButton(
+                label: 'Hikvision',
+                onTap: () => _quickSearch('hikvision'),
+              ),
+              _QuickButton(
+                label: 'NVR',
+                onTap: () => _quickSearch('nvr'),
+              ),
+              _QuickButton(
+                label: 'Switch PoE',
+                onTap: () => _quickSearch('switch poe'),
+              ),
+              _QuickButton(
+                label: 'Ajax',
+                onTap: () => _quickSearch('ajax'),
+              ),
+              _QuickButton(
+                label: 'Mi último pedido',
+                onTap: () => _askQuick('Dónde está mi último pedido'),
+              ),
+              _QuickButton(
+                label: 'Mis presupuestos',
+                onTap: () => _askQuick('Consultar mis presupuestos'),
+              ),
+              _QuickButton(
+                label: 'Mi gestor',
+                onTap: () => _askQuick('Quién es mi gestor'),
+              ),
+              _QuickButton(
+                label: 'Pago y envío',
+                onTap: () => _askQuick('Formas de pago y envío'),
+              ),
+              _QuickButton(
+                label: 'Garantía / RMA',
+                onTap: () => _askQuick('Necesito ayuda con una garantía o RMA'),
+              ),
               _QuickButton(label: 'Limpiar chat', onTap: _clearChat),
             ],
           ),
@@ -552,6 +524,55 @@ class _ChatSearchPageState extends ConsumerState<ChatSearchPage> {
             fontWeight: FontWeight.w700,
             color: isBot ? _dark : Colors.white,
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAssistantLoading() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(top: 8, bottom: 8, right: 34),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(22),
+            topRight: Radius.circular(22),
+            bottomLeft: Radius.circular(6),
+            bottomRight: Radius.circular(22),
+          ),
+          border: Border.all(color: _border),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 9,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                color: _red,
+                strokeWidth: 2.4,
+              ),
+            ),
+            SizedBox(width: 10),
+            Text(
+              'Consultando tu cuenta...',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: _dark,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -745,7 +766,7 @@ class _ChatSearchPageState extends ConsumerState<ChatSearchPage> {
               textInputAction: TextInputAction.search,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               decoration: InputDecoration(
-                hintText: 'Buscar producto o escribir duda...',
+                hintText: 'Escribe tu pregunta o un producto...',
                 hintStyle: TextStyle(
                   fontSize: 16,
                   color: Colors.grey.shade500,
@@ -903,7 +924,7 @@ class _ProductSearchCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stockText = product.hasStock ? 'En stock' : 'Sin stock';
+    final stockText = product.hasStock ? 'Disponible 24/48h' : 'Sin Existencias';
     final stockColor = product.hasStock ? const Color(0xFF128C4A) : const Color(0xFFB91C1C);
     final priceText = product.hasValidPrice ? '${product.price} €' : 'Consultar precio';
 

@@ -10,8 +10,12 @@ import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
+import 'package:mundicam/shared/providers/badge_provider.dart';
 
 class _CheckoutPaymentMethod {
   final String id;
@@ -56,6 +60,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   final _postCodeController = TextEditingController();
   final _companyController = TextEditingController();
   final _nifController = TextEditingController();
+  final _fiscalAddressController = TextEditingController();
+  final _fiscalAddress2Controller = TextEditingController();
+  final _fiscalCityController = TextEditingController();
+  final _fiscalPostCodeController = TextEditingController();
+  final _fiscalStateController = TextEditingController();
+  final _fiscalCountryController = TextEditingController();
   final _stateController = TextEditingController();
   final _countryController = TextEditingController();
   final _notesController = TextEditingController();
@@ -111,13 +121,33 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     for (final controller in [
       _addressController,
       _cityController,
-      _postCodeController,
       _stateController,
       _countryController,
     ]) {
       controller.addListener(_onShippingAddressChanged);
     }
+    _postCodeController.addListener(_onShippingPostcodeChanged);
     _cargarDatosCliente();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      MundicamAnalyticsService.instance
+          .trackScreenViewForRoute(context, 'checkout');
+      final cartSource = ref.read(cartProvider.notifier);
+      unawaited(
+        MundicamAnalyticsService.instance.track(
+          eventName: 'checkout_started',
+          metadata: <String, dynamic>{
+            'source': cartSource.sourceQuoteId > 0
+                ? 'web_quote'
+                : (cartSource.sourceLocalQuoteUuid.trim().isNotEmpty
+                    ? 'local_quote'
+                    : 'cart'),
+          },
+          dedupeKey: 'checkout_started',
+          dedupeWindow: const Duration(seconds: 2),
+        ),
+      );
+    });
   }
 
   @override
@@ -126,12 +156,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     for (final controller in [
       _addressController,
       _cityController,
-      _postCodeController,
       _stateController,
       _countryController,
     ]) {
       controller.removeListener(_onShippingAddressChanged);
     }
+    _postCodeController.removeListener(_onShippingPostcodeChanged);
     _scrollController.dispose();
     for (var c in [
       _nameController,
@@ -143,6 +173,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       _postCodeController,
       _companyController,
       _nifController,
+      _fiscalAddressController,
+      _fiscalAddress2Controller,
+      _fiscalCityController,
+      _fiscalPostCodeController,
+      _fiscalStateController,
+      _fiscalCountryController,
       _stateController,
       _countryController,
       _notesController,
@@ -214,6 +250,72 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     if (text.isEmpty) return 'ES';
     if (text == 'ESPAÑA' || text == 'SPAIN') return 'ES';
     return text;
+  }
+
+  String _countryDisplayName(String countryCode) {
+    final code = _normalizeCountryCode(countryCode);
+    if (code == 'ES') return 'España';
+    return code;
+  }
+
+  String _spanishProvinceDisplayName(String stateCode) {
+    const names = <String, String>{
+      'C': 'A Coruña',
+      'VI': 'Álava',
+      'AB': 'Albacete',
+      'A': 'Alicante',
+      'AL': 'Almería',
+      'O': 'Asturias',
+      'AV': 'Ávila',
+      'BA': 'Badajoz',
+      'PM': 'Illes Balears',
+      'B': 'Barcelona',
+      'BU': 'Burgos',
+      'CC': 'Cáceres',
+      'CA': 'Cádiz',
+      'S': 'Cantabria',
+      'CS': 'Castellón',
+      'CE': 'Ceuta',
+      'CR': 'Ciudad Real',
+      'CO': 'Córdoba',
+      'CU': 'Cuenca',
+      'GI': 'Girona',
+      'GR': 'Granada',
+      'GU': 'Guadalajara',
+      'SS': 'Gipuzkoa',
+      'H': 'Huelva',
+      'HU': 'Huesca',
+      'J': 'Jaén',
+      'LO': 'La Rioja',
+      'GC': 'Las Palmas',
+      'LE': 'León',
+      'L': 'Lleida',
+      'LU': 'Lugo',
+      'M': 'Madrid',
+      'MA': 'Málaga',
+      'ML': 'Melilla',
+      'MU': 'Murcia',
+      'NA': 'Navarra',
+      'OR': 'Ourense',
+      'P': 'Palencia',
+      'PO': 'Pontevedra',
+      'SA': 'Salamanca',
+      'TF': 'Santa Cruz de Tenerife',
+      'SG': 'Segovia',
+      'SE': 'Sevilla',
+      'SO': 'Soria',
+      'T': 'Tarragona',
+      'TE': 'Teruel',
+      'TO': 'Toledo',
+      'V': 'Valencia',
+      'VA': 'Valladolid',
+      'BI': 'Bizkaia',
+      'ZA': 'Zamora',
+      'Z': 'Zaragoza',
+    };
+
+    final code = stateCode.trim().toUpperCase();
+    return names[code] ?? stateCode.trim();
   }
 
   String _normalizeSpanishProvinceCode({
@@ -366,19 +468,20 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   Map<String, dynamic> _billingAddressPayload() {
-    final country = _normalizeCountryCode(_countryController.text);
-    final postcode = _postCodeController.text.trim();
+    final country = _normalizeCountryCode(_fiscalCountryController.text);
+    final postcode = _fiscalPostCodeController.text.trim();
     final state = _normalizeSpanishProvinceCode(
       country: country,
-      state: _stateController.text,
+      state: _fiscalStateController.text,
       postcode: postcode,
     );
     return {
       'first_name': _nameController.text.trim(),
       'last_name': _lastNameController.text.trim(),
       'company': _companyController.text.trim(),
-      'address_1': _addressController.text.trim(),
-      'city': _cityController.text.trim(),
+      'address_1': _fiscalAddressController.text.trim(),
+      'address_2': _fiscalAddress2Controller.text.trim(),
+      'city': _fiscalCityController.text.trim(),
       'postcode': postcode,
       'state': state,
       'country': country,
@@ -395,6 +498,31 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     return _creditLimit > 0 && disponible > 0;
   }
 
+
+  void _onShippingPostcodeChanged() {
+    if (_loadingProfile) return;
+
+    final country = _normalizeCountryCode(_countryController.text);
+    if (country == 'ES') {
+      final stateCode = _normalizeSpanishProvinceCode(
+        country: country,
+        state: '',
+        postcode: _postCodeController.text,
+      );
+      if (stateCode.isNotEmpty) {
+        final provinceName = _spanishProvinceDisplayName(stateCode);
+        if (provinceName.isNotEmpty &&
+            _stateController.text.trim() != provinceName) {
+          _stateController.value = TextEditingValue(
+            text: provinceName,
+            selection: TextSelection.collapsed(offset: provinceName.length),
+          );
+        }
+      }
+    }
+
+    _onShippingAddressChanged();
+  }
 
   void _onShippingAddressChanged() {
     if (_loadingProfile) return;
@@ -551,11 +679,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
 
     return effectivePreview;
-  }
-
-  String _buildWooPaymentUrl(
-      {required int orderId, required String orderKey}) {
-    return '$_baseUrl/checkout/order-pay/$orderId/?pay_for_order=true&key=${Uri.encodeComponent(orderKey)}';
   }
 
   /// Vuelve al Home usando el callback si existe, si no, hace pop de la ruta.
@@ -729,6 +852,26 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           _companyController.text = billing['company']?.toString() ?? '';
           _phoneController.text = billing['phone']?.toString() ?? '';
           _nifController.text = _getNifCif(metaData, billing);
+
+          // Datos fiscales: siempre proceden de billing. No se mezclan con la
+          // dirección de entrega, que puede modificarse de forma independiente.
+          _fiscalAddressController.text = billing['address_1']?.toString() ?? '';
+          _fiscalAddress2Controller.text = billing['address_2']?.toString() ?? '';
+          _fiscalCityController.text = billing['city']?.toString() ?? '';
+          _fiscalPostCodeController.text = billing['postcode']?.toString() ?? '';
+          final fiscalCountry = _normalizeCountryCode(
+            billing['country']?.toString() ?? '',
+          );
+          final fiscalStateCode = _normalizeSpanishProvinceCode(
+            country: fiscalCountry,
+            state: billing['state']?.toString() ?? '',
+            postcode: _fiscalPostCodeController.text,
+          );
+          _fiscalStateController.text = fiscalCountry == 'ES'
+              ? _spanishProvinceDisplayName(fiscalStateCode)
+              : fiscalStateCode;
+          _fiscalCountryController.text = _countryDisplayName(fiscalCountry);
+
           _addressController.text = _firstAddressValue(shipping, billing, 'address_1');
           _cityController.text = _firstAddressValue(shipping, billing, 'city');
           _postCodeController.text = _firstAddressValue(shipping, billing, 'postcode');
@@ -891,6 +1034,21 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
   }
 
+  Future<bool> _eliminarPresupuestoLocalSeguro(String localUuid) async {
+    final cleanUuid = localUuid.trim();
+    if (cleanUuid.isEmpty) return true;
+
+    try {
+      await ref
+          .read(localQuotesProvider.notifier)
+          .eliminarPresupuesto(cleanUuid);
+      return true;
+    } catch (e) {
+      debugPrint('No se pudo eliminar la copia local $cleanUuid: $e');
+      return false;
+    }
+  }
+
   // ──────────────────────────────────────────────
   // Finalizar pedido
   // ──────────────────────────────────────────────
@@ -898,8 +1056,16 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   Future<void> _finalizarPedido() async {
     if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
+    final cartNotifier = ref.read(cartProvider.notifier);
+    final sourceQuoteId = cartNotifier.sourceQuoteId;
+    final sourceLocalQuoteUuid = cartNotifier.sourceLocalQuoteUuid;
+    final hasQuoteSource =
+        sourceQuoteId > 0 || sourceLocalQuoteUuid.trim().isNotEmpty;
+
     final idempotencyKey = _checkoutIdempotencyKey ??=
-        'app-${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
+        hasQuoteSource
+            ? 'quote-${sourceQuoteId > 0 ? 'web-$sourceQuoteId' : 'local-$sourceLocalQuoteUuid'}'
+            : 'app-${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
     setState(() => _isLoading = true);
     HapticFeedback.mediumImpact();
 
@@ -910,7 +1076,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     }
 
     final cartItems = ref.read(cartProvider);
-    final notifier = ref.read(cartProvider.notifier);
+    final notifier = cartNotifier;
     final preview = await _ensurePreviewBeforeSubmit();
     if (!mounted) return;
 
@@ -950,6 +1116,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             })
         .toList();
     final shippingAddress = _shippingAddressPayload();
+    final effectiveIdempotencyKey = hasQuoteSource
+        ? 'quote-${sourceQuoteId > 0 ? 'web-$sourceQuoteId' : 'local-$sourceLocalQuoteUuid'}-${preview.cartHash.isNotEmpty ? preview.cartHash : lineItems.toString().hashCode}'
+        : idempotencyKey;
 
     final orderData = {
       if (_customerId != null) 'customer_id': _customerId,
@@ -957,6 +1126,9 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'payment_method_title': _paymentMethodTitle,
       'set_paid': false,
       'status': isCardPayment ? 'pending' : 'on-hold',
+      if (sourceQuoteId > 0) 'source_quote_id': sourceQuoteId,
+      if (sourceLocalQuoteUuid.trim().isNotEmpty)
+        'source_local_quote_uuid': sourceLocalQuoteUuid.trim(),
       'billing': _billingAddressPayload(),
       'shipping': shippingAddress,
       'shipping_address': shippingAddress,
@@ -970,7 +1142,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'expected_tax_total': preview.taxTotal.toStringAsFixed(2),
       'expected_total': total.toStringAsFixed(2),
       'expected_currency': preview.currency.isEmpty ? 'EUR' : preview.currency,
-      'idempotency_key': idempotencyKey,
+      'idempotency_key': effectiveIdempotencyKey,
       'customer_note': _notesController.text.trim(),
       'meta_data': [
         {'key': '_billing_nif', 'value': _nifController.text.trim()},
@@ -1006,13 +1178,21 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           return;
         }
 
-        final securePaymentUrl = result.paymentUrl ??
+        final paymentUrl = result.paymentUrl ??
             await ApiService().getSecureCardPaymentUrl(
               orderId: result.orderId!,
               orderKey: orderKey,
             );
-        final paymentUrl = securePaymentUrl ??
-            _buildWooPaymentUrl(orderId: result.orderId!, orderKey: orderKey);
+
+        if (paymentUrl == null ||
+            paymentUrl.trim().isEmpty ||
+            !paymentUrl.contains('mundicam_app_payment_token=')) {
+          _mostrarError(
+            'El servidor no devolvió el enlace seguro de Redsys. '
+            'No se abrirá la web general de MundiCam.',
+          );
+          return;
+        }
 
         if (!mounted) return;
 
@@ -1028,6 +1208,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               orderNumber: result.orderNumber,
               amount: total,
               paymentMethodTitle: _paymentMethodTitle,
+              quotePayment: hasQuoteSource,
+              quoteNumber: sourceQuoteId > 0
+                  ? sourceQuoteId.toString()
+                  : sourceLocalQuoteUuid,
             ),
           ),
         );
@@ -1035,22 +1219,56 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
         if (paid == true) {
           _checkoutIdempotencyKey = null;
-          ref.read(cartProvider.notifier).clearCart();
+          final localCleanupOk = await _eliminarPresupuestoLocalSeguro(
+            sourceLocalQuoteUuid,
+          );
+          await ref.read(cartProvider.notifier).clearCart();
           ref.invalidate(ordersProvider);
           _irAlInicio(
-              mensaje: '✅ Pago realizado con éxito. ¡Gracias por tu pedido!');
+            mensaje: localCleanupOk
+                ? '✅ Pago confirmado. El pedido ya está en preparación.'
+                : '✅ Pago confirmado. El pedido está en preparación. '
+                    'No se pudo borrar la copia local; elimínala desde Presupuestos.',
+          );
         } else {
-          _mostrarError(
-              'Pedido creado pendiente de pago. Puedes finalizarlo desde la web.');
+          // En PaymentPage un checkout de presupuesto solo devuelve false después
+          // de que /quote/cancel-checkout haya confirmado la cancelación. Si la
+          // cancelación falla o Redsys ya confirmó, la pantalla permanece abierta.
+          if (hasQuoteSource) {
+            _checkoutIdempotencyKey = null;
+            final localCleanupOk = await _eliminarPresupuestoLocalSeguro(
+              sourceLocalQuoteUuid,
+            );
+            await ref.read(cartProvider.notifier).clearCart();
+            ref.invalidate(ordersProvider);
+            ref.invalidate(quotesProvider);
+            ref.invalidate(quoteBadgeProvider);
+            ref.invalidate(cartBadgeProvider);
+            _irAlInicio(
+              mensaje: localCleanupOk
+                  ? 'Pedido cancelado. Puedes consultarlo en Mis pedidos.'
+                  : 'Pedido cancelado. No se pudo borrar la copia local; '
+                      'elimínala desde Presupuestos.',
+            );
+          } else {
+            _mostrarError(
+              'El pedido sigue pendiente de pago. Puedes reintentar el pago desde esta misma operación.',
+            );
+          }
         }
         return;
       }
 
       // Transferencia / giro
       _checkoutIdempotencyKey = null;
-      ref.read(cartProvider.notifier).clearCart();
+      await ref.read(cartProvider.notifier).clearCart();
       ref.invalidate(ordersProvider);
-      _irAlInicio(mensaje: '✅ Pedido confirmado. Te llevamos al inicio.');
+      _irAlInicio(
+        mensaje: hasQuoteSource
+            ? 'Solicitud registrada. El presupuesto seguirá visible hasta que '
+                'el pago quede confirmado.'
+            : '✅ Pedido confirmado. Te llevamos al inicio.',
+      );
     } catch (e) {
       debugPrint('❌ Error creando pedido: $e');
       _mostrarError(
@@ -1103,11 +1321,55 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             const SizedBox(height: 16),
             _buildSectionCard(
               icon: Icons.business_outlined,
-              title: 'DATOS DE EMPRESA',
+              title: 'DATOS FISCALES DE LA EMPRESA',
+              subtitle:
+                  'Se usarán para facturación. La dirección de entrega puede cambiarse más abajo.',
               locked: true,
               children: [
-                _buildLockedField('Empresa', _companyController),
+                _buildLockedField('Razón social / Empresa', _companyController),
                 _buildLockedField('NIF/CIF', _nifController),
+                _buildLockedField('Dirección fiscal', _fiscalAddressController),
+                if (_fiscalAddress2Controller.text.trim().isNotEmpty)
+                  _buildLockedField(
+                    'Complemento de dirección',
+                    _fiscalAddress2Controller,
+                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: _buildLockedField(
+                        'Código postal',
+                        _fiscalPostCodeController,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 3,
+                      child: _buildLockedField(
+                        'Localidad',
+                        _fiscalCityController,
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildLockedField(
+                        'Provincia',
+                        _fiscalStateController,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildLockedField(
+                        'País',
+                        _fiscalCountryController,
+                      ),
+                    ),
+                  ],
+                ),
                 _buildManagerInfo(),
                 _buildCreditInfo(),
               ],
