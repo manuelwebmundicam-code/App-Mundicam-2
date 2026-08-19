@@ -466,6 +466,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
               index: 2,
               child: OrdersPage(
                 onGoHome: () => _switchToTab(0, popToRoot: true),
+                onGoRma: () => _switchToTab(5, popToRoot: true),
               ),
             ),
             _buildTabNavigator(
@@ -526,8 +527,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
                   onTap: () => _onItemTapped(1),
                 ),
                 _BottomTabItem(
-                  icon: Icons.assignment_return_outlined,
-                  activeIcon: Icons.assignment_return_rounded,
+                  icon: Icons.build_outlined,
+                  activeIcon: Icons.build,
                   label: 'RMA',
                   isSelected: _selectedIndex == 5,
                   onTap: () => _onItemTapped(5),

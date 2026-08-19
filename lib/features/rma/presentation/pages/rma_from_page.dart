@@ -16,6 +16,7 @@ class RmaFormPage extends ConsumerStatefulWidget {
   final int lineItemId;
   final int variationId;
   final int maxQuantity;
+  final VoidCallback? onGoRma;
 
   const RmaFormPage({
     super.key,
@@ -25,6 +26,7 @@ class RmaFormPage extends ConsumerStatefulWidget {
     this.lineItemId = 0,
     this.variationId = 0,
     this.maxQuantity = 1,
+    this.onGoRma,
   });
 
   @override
@@ -162,6 +164,20 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
       );
       if (!mounted) return;
       if (openHistory == true) {
+        if (widget.onGoRma != null) {
+          // Este formulario vive dentro del Navigator de la pestaña Pedidos.
+          // Cerramos su pila local para que, al volver más tarde a Pedidos,
+          // el usuario no regrese al formulario RMA ya enviado.
+          Navigator.of(context).popUntil((route) => route.isFirst);
+
+          // La pestaña RMA pertenece a MainScreen. El callback cambia el tab
+          // principal al índice de RMA en lugar de abrir RmaPage dentro de
+          // Pedidos (que era el comportamiento incorrecto).
+          widget.onGoRma!();
+          return;
+        }
+
+        // Fallback para usos aislados de RmaFormPage fuera de MainScreen.
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const RmaPage()),

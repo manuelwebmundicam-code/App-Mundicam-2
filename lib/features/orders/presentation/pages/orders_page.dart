@@ -25,10 +25,12 @@ const Color _softCard = Color(0xFFFBFCFE);
 
 class OrdersPage extends ConsumerStatefulWidget {
   final VoidCallback? onGoHome;
+  final VoidCallback? onGoRma;
 
   const OrdersPage({
     super.key,
     this.onGoHome,
+    this.onGoRma,
   });
 
   @override
@@ -54,7 +56,10 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => OrderDetailPage(order: order),
+        builder: (_) => OrderDetailPage(
+          order: order,
+          onGoRma: widget.onGoRma,
+        ),
       ),
     );
   }
@@ -376,10 +381,12 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
 
 class OrderDetailPage extends ConsumerStatefulWidget {
   final OrderMundicam order;
+  final VoidCallback? onGoRma;
 
   const OrderDetailPage({
     super.key,
     required this.order,
+    this.onGoRma,
   });
 
   @override
@@ -1638,6 +1645,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                               lineItemId: item.lineItemId,
                               variationId: item.variationId,
                               maxQuantity: item.quantity > 0 ? item.quantity : 1,
+                              onGoRma: widget.onGoRma,
                             ),
                           ),
                         );

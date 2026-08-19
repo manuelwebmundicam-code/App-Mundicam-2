@@ -404,71 +404,127 @@ class _BrandLogo extends StatelessWidget {
 /// no se deforman y permanecen centrados.
 double _brandLogoFactor(String brandName) {
   final key = _brandKey(brandName);
+  final canonicalKey = _canonicalBrandKey(brandName);
+
+  bool isAny(String value, List<String> aliases) {
+    return aliases.contains(value);
+  }
+
+  // ---------------------------------------------------------
+  // MUY GRANDE
+  // ---------------------------------------------------------
+  // Seagate necesita un tratamiento independiente. Tiene que ir
+  // antes que cualquier grupo general para que ningún return previo
+  // anule su escala específica.
+  if (isAny(key, const [
+        'seagate',
+      ]) ||
+      isAny(canonicalKey, const [
+        'seagate',
+      ])) {
+    return 1.05;
+  }
+
+  // ---------------------------------------------------------
+  // GRANDES ESPECIALES
+  // ---------------------------------------------------------
+  if (isAny(key, const [
+        'jadebird',
+        'century',
+        'dmtech',
+      ]) ||
+      isAny(canonicalKey, const [
+        'jadebird',
+        'century',
+        'dmtech',
+      ])) {
+    return 0.80;
+  }
 
   // ---------------------------------------------------------
   // MÁS PEQUEÑOS
   // ---------------------------------------------------------
-  if (key == 'tvt' ||
-      key == 'dji' ||
-      key == 'zte') {
-    return 0.55;
+  // Incluimos los nombres reales y las variantes que pueden llegar
+  // desde WooCommerce o desde los nombres de los assets.
+  if (isAny(key, const [
+        'tvt',
+        'dji',
+        'zte',
+        'imou',
+        'evolve',
+        'evolveextended',
+        'evolveextender',
+        'evolvextender',
+        'hectronica',
+      ]) ||
+      isAny(canonicalKey, const [
+        'tvt',
+        'dji',
+        'zte',
+        'imou',
+        'evolveextended',
+        'evolveextender',
+        'evolvextender',
+        'hectronica',
+      ])) {
+    return 0.65;
   }
 
   // ---------------------------------------------------------
   // MÁS GRANDES
   // ---------------------------------------------------------
-  if (
-  // AISCAN / posible nombre ALICSAN.
-  key == 'aiscan' ||
-      key == 'alicsan' ||
-
-      // Paradox.
-      key == 'paradox' ||
-
-      // Seaga.
-      key == 'seaga' ||
-
-      // Jade Bird / JADE-BIRD.
-      key == 'jadebird' ||
-
-      // Visiona Protect / visiona-protect.
-      key == 'visionaprotect' ||
-
-      // UNV.
-      key == 'unv' ||
-
-      // Western Digital / western-digital.
-      key == 'westerndigital' ||
-
-      // Visonic.
-      key == 'visonic' ||
-
-      // Vaelis / Vaelsys.
-      key == 'vaelis' ||
-      key == 'vaelsys' ||
-
-      // Videofied.
-      key == 'videofied' ||
-
-      // URFOG.
-      key == 'urfog' ||
-      key == 'urdog' ||
-
-      // Ubiquiti.
-      key == 'ubiquiti' ||
-
-      key == 'amc' ||
-      key == 'hysoon' ||
-      key == 'bewave' ||
-      // Uniarc / Uniarch.
-      key == 'uniarc' ||
-      key == 'uniarch') {
+  // Se corrigen también alias/errores habituales para que no dependa
+  // de que el nombre de WooCommerce coincida letra por letra.
+  if (isAny(key, const [
+        'aiscan',
+        'alicsan',
+        'paradox',
+        'seaga',
+        'visionaprotect',
+        'unv',
+        'uniview',
+        'westerndigital',
+        'visonic',
+        'vaelis',
+        'vaelsys',
+        'videofied',
+        'urfog',
+        'urdog',
+        'ubiquiti',
+        'amc',
+        'trikdis',
+        'trikids',
+        'hysoon',
+        'bewave',
+        'uniarc',
+        'uniarch',
+      ]) ||
+      isAny(canonicalKey, const [
+        'aiscan',
+        'alicsan',
+        'paradox',
+        'seaga',
+        'visionaprotect',
+        'unv',
+        'uniview',
+        'westerndigital',
+        'visonic',
+        'vaelis',
+        'vaelsys',
+        'videofied',
+        'urfog',
+        'urdog',
+        'ubiquiti',
+        'amc',
+        'trikdis',
+        'trikids',
+        'hysoon',
+        'bewave',
+        'uniarc',
+        'uniarch',
+      ])) {
     return 0.75;
   }
-  if(key == 'seagate') {
-    return 1.05;
-  }
-
 
   // ---------------------------------------------------------
   // RESTO DE MARCAS
