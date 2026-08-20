@@ -192,7 +192,7 @@ class _CategoriasPorMarcaPageState
     final expanded = _expandedIds.contains(category.id);
 
     return Padding(
-      padding: EdgeInsets.only(left: depth == 0 ? 0 : 16),
+      padding: EdgeInsets.only(left: depth == 0 ? 0 : 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -220,22 +220,64 @@ class _CategoriasPorMarcaPageState
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             child: expanded && hasChildren
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Column(
-                      children: [
-                        for (var i = 0; i < children.length; i++) ...[
-                          _buildNode(
-                            children[i],
-                            byParent,
-                            depth: depth + 1,
+                ? depth == 0
+                    ? Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 5),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: const Color(0xFFE7E7E7),
                           ),
-                          if (i < children.length - 1)
-                            const SizedBox(height: 7),
-                        ],
-                      ],
-                    ),
-                  )
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.025),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            for (var i = 0; i < children.length; i++) ...[
+                              _buildNode(
+                                children[i],
+                                byParent,
+                                depth: depth + 1,
+                              ),
+                              if (i < children.length - 1)
+                                const SizedBox(height: 7),
+                            ],
+                          ],
+                        ),
+                      )
+                    : Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(top: 7, left: 9),
+                        padding: const EdgeInsets.fromLTRB(7, 8, 7, 1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFFE6EAF0),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            for (var i = 0; i < children.length; i++) ...[
+                              _buildNode(
+                                children[i],
+                                byParent,
+                                depth: depth + 1,
+                              ),
+                              if (i < children.length - 1)
+                                const SizedBox(height: 7),
+                            ],
+                          ],
+                        ),
+                      )
                 : const SizedBox.shrink(),
           ),
         ],
@@ -261,7 +303,10 @@ class _BrandCategoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = depth == 0 ? 20.0 : 15.0;
+    final isRoot = depth == 0;
+    final radius = isRoot ? 20.0 : 16.0;
+    final iconAssetPath =
+        isRoot ? _getIconAssetForCategory(category.name) : null;
 
     return Material(
       color: Colors.transparent,
@@ -269,20 +314,19 @@ class _BrandCategoryRow extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(radius),
         child: Ink(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: depth == 0 ? 94 : 0,
-            ),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-            color: depth == 0 ? Colors.white : const Color(0xFFFAFAFB),
+          decoration: BoxDecoration(
+            color: isRoot || depth >= 2
+                ? Colors.white
+                : const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(radius),
             border: Border.all(
-              color: depth == 0
+              color: isRoot
                   ? const Color(0xFFE5E7EB)
-                  : const Color(0xFFE9EAED),
+                  : depth >= 2
+                      ? const Color(0xFFE4E9F0)
+                      : const Color(0xFFE6EAF0),
             ),
-            boxShadow: depth == 0
+            boxShadow: isRoot
                 ? [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.025),
@@ -293,71 +337,69 @@ class _BrandCategoryRow extends StatelessWidget {
                 : const [],
           ),
           child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              depth == 0 ? 16 : 10,
-              depth == 0 ? 15 : 9,
-              10,
-              depth == 0 ? 12 : 9,
+            padding: EdgeInsets.symmetric(
+              horizontal: isRoot ? 16 : 12,
+              vertical: isRoot ? 15 : 12,
             ),
             child: Row(
               children: [
-                Container(
-                  width: depth == 0 ? 58 : 36,
-                  height: depth == 0 ? 58 : 36,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF8EAEA),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    _getIconForCategory(category.name),
-                    size: depth == 0 ? 30 : 19,
-                    color: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        category.name.toUpperCase(),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontFamily: 'Oswald',
-                          fontSize: depth == 0 ? 16.5 : 13,
-                          height: 1.05,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.35,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      if (category.count > 0) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          '${category.count} refs.',
-                          style: TextStyle(
-                            fontSize: depth == 0 ? 11.5 : 10.5,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF7B8492),
+                if (isRoot) ...[
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF8EAEA),
+                      shape: BoxShape.circle,
+                    ),
+                    child: iconAssetPath != null
+                        ? Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Image.asset(
+                              iconAssetPath,
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Icon(
+                                  _getIconForCategory(category.name),
+                                  size: 30,
+                                  color: AppColors.primary,
+                                );
+                              },
+                            ),
+                          )
+                        : Icon(
+                            _getIconForCategory(category.name),
+                            size: 30,
+                            color: AppColors.primary,
                           ),
-                        ),
-                      ],
-                    ],
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: Text(
+                    isRoot ? category.name.toUpperCase() : category.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Oswald',
+                      fontSize: isRoot ? 16.5 : 13.2,
+                      height: 1.05,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: isRoot ? 0.35 : 0,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 AnimatedRotation(
-                  turns: hasChildren && expanded ? 0.5 : 0,
+                  turns: hasChildren && expanded ? 0.25 : 0,
                   duration: const Duration(milliseconds: 160),
                   child: Icon(
-                    hasChildren
-                        ? Icons.keyboard_arrow_down_rounded
-                        : Icons.chevron_right_rounded,
-                    size: depth == 0 ? 32 : 28,
+                    Icons.chevron_right_rounded,
+                    size: isRoot ? 30 : 22,
                     color: hasChildren
                         ? AppColors.primary
-                        : const Color(0xFF8A94A3),
+                        : const Color(0xFF9CA3AF),
                   ),
                 ),
               ],
@@ -365,10 +407,72 @@ class _BrandCategoryRow extends StatelessWidget {
           ),
         ),
       ),
-    ),
-  ),
-);
+    );
   }
+}
+
+String? _getIconAssetForCategory(String name) {
+  final n = _normalizeCategoryName(name);
+
+  if (n.contains('video cctv') ||
+      n.contains('cctv hd') ||
+      n == 'cctv') {
+    return 'assets/images/category_video_cctv.png';
+  }
+
+  if (n.contains('video ip') ||
+      n.contains('ip hd') ||
+      n.contains('cctv ip')) {
+    return 'assets/images/category_video_ip.png';
+  }
+
+  if (n.contains('complementos') || n.contains('complemento')) {
+    return 'assets/images/category_complementos.png';
+  }
+
+  if (n.contains('intrusion') ||
+      n.contains('alarma') ||
+      n.contains('alarmas')) {
+    return 'assets/images/category_intrusion.png';
+  }
+
+  if (n.contains('acceso') ||
+      n.contains('accesos') ||
+      n.contains('control acceso')) {
+    return 'assets/images/category_accesos.png';
+  }
+
+  if (n.contains('incendio') || n.contains('fuego')) {
+    return 'assets/images/category_incendio.png';
+  }
+
+  if (n.contains('networking') ||
+      n.contains('network') ||
+      n.contains('redes')) {
+    return 'assets/images/category_networking.png';
+  }
+
+  if (n.contains('drone') ||
+      n.contains('drones') ||
+      n.contains('dron')) {
+    return 'assets/images/category_drones.png';
+  }
+
+  if (n.contains('energia') || n.contains('solar')) {
+    return 'assets/images/category_energia.png';
+  }
+
+  if (n.contains('antihurto') ||
+      n.contains('anti hurto') ||
+      n.contains('hurto')) {
+    return 'assets/images/category_antihurto.png';
+  }
+
+  if (n.contains('outlet')) {
+    return 'assets/images/category_outlet.png';
+  }
+
+  return null;
 }
 
 String _normalizeCategoryName(String name) {
