@@ -126,7 +126,7 @@ class _BannerMixState extends ConsumerState<BannerMix> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
+            color: Colors.black.withOpacity(0.15),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -146,7 +146,7 @@ class _BannerMixState extends ConsumerState<BannerMix> {
                   end: Alignment.bottomCenter,
                   colors: [
                     Colors.transparent,
-                    Colors.black.withValues(alpha: 0.85),
+                    Colors.black.withOpacity(0.85),
                   ],
                 ),
               ),
@@ -234,7 +234,7 @@ class _BannerMixState extends ConsumerState<BannerMix> {
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [accentColor.withValues(alpha: 0.7), accentColor],
+          colors: [accentColor.withOpacity(0.7), accentColor],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),

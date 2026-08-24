@@ -224,7 +224,6 @@ class FilterNotifier extends StateNotifier<MundiFilters> {
   }
 }
 
-final productFilterProvider =
-StateNotifierProvider<FilterNotifier, MundiFilters>((ref) {
+final productFilterProvider = StateNotifierProvider<FilterNotifier, MundiFilters>((ref) {
   return FilterNotifier();
 });

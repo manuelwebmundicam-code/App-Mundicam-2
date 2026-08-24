@@ -13,24 +13,49 @@ class MenuBarWidget extends ConsumerWidget {
     Navigator.push(context, MaterialPageRoute(builder: (context) => page));
   }
 
-  int? _findOutletId(WidgetRef ref) {
-    final categoriasAsync = ref.read(categoriesProvider);
+  Future<int?> _findOutletId(WidgetRef ref) async {
+    try {
+      // v1.9.65: consultar todo product_cat y preferir el slug real de la web.
+      // El provider de Inicio solo contiene categorías raíz y podía resolver un
+      // término parcial/antiguo, dejando el Outlet reducido a una sola rama.
+      final categorias = await ref.read(apiServiceProvider).getCategorias(
+        hideEmpty: false,
+        parentOnly: false,
+      );
 
-    return categoriasAsync.when(
-      data: (categorias) {
-        final outlet = categorias.where(
-              (c) => c.name.toLowerCase().contains('outlet'),
-        );
-
-        return outlet.isNotEmpty ? outlet.first.id : null;
-      },
-      loading: () => null,
-      error: (error, stackTrace) => null,
-    );
+      for (final category in categorias) {
+        if (category.slug.trim().toLowerCase() == 'zona-outlet') {
+          return category.id;
+        }
+      }
+      for (final category in categorias) {
+        if (category.name.trim().toLowerCase() == 'outlet') {
+          return category.id;
+        }
+      }
+      for (final category in categorias) {
+        if (category.name.toLowerCase().contains('outlet')) {
+          return category.id;
+        }
+      }
+    } catch (_) {
+      // Fallback al provider ya cargado para no romper el botón sin red extra.
+      final categoriasAsync = ref.read(categoriesProvider);
+      return categoriasAsync.when(
+        data: (categorias) {
+          final outlet = categorias.where((c) => c.name.toLowerCase().contains('outlet'));
+          return outlet.isNotEmpty ? outlet.first.id : null;
+        },
+        loading: () => null,
+        error: (error, stackTrace) => null,
+      );
+    }
+    return null;
   }
 
-  void _openOutlet(BuildContext context, WidgetRef ref) {
-    final outletId = _findOutletId(ref);
+  Future<void> _openOutlet(BuildContext context, WidgetRef ref) async {
+    final outletId = await _findOutletId(ref);
+    if (!context.mounted) return;
 
     if (outletId != null) {
       Navigator.push(
@@ -38,7 +63,7 @@ class MenuBarWidget extends ConsumerWidget {
         MaterialPageRoute(
           builder: (context) => ProductosPorCategoriaScreen(
             categoryId: outletId,
-            categoryName: "OFERTAS",
+            categoryName: "OUTLET",
           ),
         ),
       );
@@ -81,7 +106,7 @@ class MenuBarWidget extends ConsumerWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _MenuPillButton(
-              title: 'Ofertas',
+              title: 'Outlet',
               icon: Icons.local_offer_outlined,
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
@@ -128,7 +153,7 @@ class _MenuPillButton extends StatelessWidget {
               border: Border.all(color: borderColor, width: 1),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.035),
+                  color: Colors.black.withOpacity(0.035),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),

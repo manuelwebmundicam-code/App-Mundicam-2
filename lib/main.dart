@@ -1,68 +1,221 @@
+import 'dart:async';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mundicam/firebase_options.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/cache/category_cache_service.dart';
 import 'package:mundicam/core/cache/storage_cache_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:mundicam/core/config/force_update_service.dart';
+import 'package:mundicam/features/system/presentation/pages/force_update_page.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
-import 'package:mundicam/features/training/presentation/providers/academy_provider.dart';
 
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
 });
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
+Future<void> ensureFirebaseReady() async {
   try {
+    if (Firebase.apps.isNotEmpty) {
+      Firebase.app();
+      debugPrint('✅ Firebase ya estaba inicializado');
+      return;
+    }
+
     await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: 'AIzaSyAiagG6V0Cg4tgfuIDTe2Rz24G17N8ZHzQ',
-        appId: '1:754565814741:android:74c8d2a07bdf2bd5f9855c',
-        messagingSenderId: '754565814741',
-        projectId: 'mundicam-app',
-        storageBucket: 'mundicam-app.firebasestorage.app',
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+
+    debugPrint('✅ Firebase inicializado correctamente');
+  } on FirebaseException catch (e) {
+    if (e.code == 'duplicate-app') {
+      Firebase.app();
+      debugPrint('✅ Firebase ya estaba inicializado');
+      return;
+    }
+    rethrow;
+  }
+}
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  try {
+    await ensureFirebaseReady();
+  } catch (e) {
+    debugPrint('⚠️ Firebase background init ignorado: $e');
+  }
+
+  debugPrint('📩 FCM background title: ${message.notification?.title}');
+  debugPrint('📩 FCM background body: ${message.notification?.body}');
+  debugPrint('📩 FCM background data: ${message.data}');
+
+  try {
+    await NotificationService.handleBackgroundRemoteMessage(message);
+  } catch (e) {
+    debugPrint('⚠️ No se pudo procesar FCM background: $e');
+  }
+}
+
+final _mundicamAnalyticsLifecycleObserver =
+    _MundicamAnalyticsLifecycleObserver();
+
+class _MundicamAnalyticsLifecycleObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    MundicamAnalyticsService.instance.handleLifecycleState(state);
+  }
+}
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding.instance.addObserver(_mundicamAnalyticsLifecycleObserver);
+  unawaited(MundicamAnalyticsService.instance.bootstrap());
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('❌ Error Flutter no controlado: ${details.exceptionAsString()}');
+  };
+
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    debugPrint('❌ Error nativo/release no controlado: $error');
+    debugPrintStack(stackTrace: stack);
+    return true;
+  };
+
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: Colors.white,
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: AppColors.primary,
+                  size: 44,
+                ),
+                SizedBox(height: 14),
+                Text(
+                  'No se pudo cargar esta pantalla.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Oswald',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Cierra la app y vuelve a intentarlo. Si continúa, contacta con MundiCam.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
-    debugPrint('✅ Firebase inicializado correctamente');
+  };
+
+  // El handler debe registrarse al arrancar, pero Firebase/Remote Config no
+  // deben retrasar el primer frame de iOS. La interfaz se muestra primero.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  runApp(const ProviderScope(child: MyApp()));
+  unawaited(_postRunAppBootstrap());
+}
+
+Future<void> _postRunAppBootstrap() async {
+  var firebaseReady = false;
+
+  try {
+    await ensureFirebaseReady().timeout(const Duration(seconds: 12));
+    firebaseReady = true;
+    debugPrint('✅ Handler FCM background registrado para Android/iOS');
   } catch (e) {
-    debugPrint('❌ Error al conectar Firebase: $e');
+    debugPrint('⚠️ Firebase no disponible al arrancar; la app continúa: $e');
+  }
+
+  if (firebaseReady) {
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      await remoteConfig.setConfigSettings(
+        RemoteConfigSettings(
+          fetchTimeout: const Duration(seconds: 10),
+          minimumFetchInterval: const Duration(hours: 12),
+        ),
+      );
+      await remoteConfig.setDefaults({
+        'api_base_url': 'https://www.mundicam.com',
+
+        // Mecanismo de actualización mínima preparado pero DESACTIVADO.
+        // Solo bloqueará cuando force_update_enabled=true y todos los
+        // parámetros obligatorios estén correctamente configurados.
+        ForceUpdateService.enabledKey: false,
+        ForceUpdateService.minAndroidVersionKey: '',
+        ForceUpdateService.minIosVersionKey: '',
+        ForceUpdateService.androidStoreUrlKey: '',
+        ForceUpdateService.iosStoreUrlKey: '',
+        ForceUpdateService.titleKey: '',
+        ForceUpdateService.messageKey: '',
+        ForceUpdateService.buttonLabelKey: '',
+      });
+
+      // Evalúa primero los últimos valores activados que Firebase pudiera
+      // tener guardados localmente y luego vuelve a evaluar tras el fetch.
+      await ForceUpdateService.instance.evaluate(remoteConfig);
+
+      await remoteConfig.fetchAndActivate().timeout(
+        const Duration(seconds: 12),
+      );
+
+      await ForceUpdateService.instance.evaluate(remoteConfig);
+      debugPrint('✅ Remote Config inicializado correctamente');
+    } catch (e) {
+      debugPrint('⚠️ Remote Config no crítico: $e');
+    }
+
+    try {
+      await NotificationService()
+          .initialize()
+          .timeout(const Duration(seconds: 15), onTimeout: () {
+        debugPrint(
+          '⚠️ Inicialización FCM tardó demasiado. Se reintentará después.',
+        );
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error inicializando notificaciones: $e');
+    }
   }
 
   try {
-    final remoteConfig = FirebaseRemoteConfig.instance;
-
-    await remoteConfig.setConfigSettings(
-      RemoteConfigSettings(
-        fetchTimeout: const Duration(seconds: 10),
-        minimumFetchInterval: const Duration(hours: 12),
-      ),
-    );
-
-    await remoteConfig.setDefaults({
-      'wc_consumer_key': '',
-      'wc_consumer_secret': '',
-      'api_base_url': 'https://www.mundicam.com',
-    });
-
-    await remoteConfig.fetchAndActivate();
-    debugPrint('✅ Remote Config inicializado correctamente');
+    final api = ApiService();
+    if (await api.hasStoredWordPressSession()) {
+      await _precargarDatos();
+    } else {
+      debugPrint('ℹ️ Sin sesión MundiCam App API. Se omite precarga protegida.');
+    }
   } catch (e) {
-    debugPrint('⚠️ Error al inicializar Remote Config: $e');
+    debugPrint('⚠️ Bootstrap posterior al arranque no crítico: $e');
   }
-
-  await NotificationService().initialize();
-
-  _precargarDatos();
-
-  runApp(const ProviderScope(child: MyApp()));
 }
 
 Future<void> _precargarDatos() async {
@@ -78,7 +231,7 @@ Future<void> _precargarDatos() async {
     }
 
     if (cache.getCachedCategories() == null) {
-      debugPrint('📦 Precargando categorías...');
+      debugPrint('📦 Precargando categorías App API...');
 
       final categorias = await apiService.getCategorias();
 
@@ -115,7 +268,32 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Mundicam',
       theme: AppTheme.lightTheme,
-      home: const AuthWrapper(),
+      home: const ForceUpdateGate(
+        child: AuthWrapper(),
+      ),
+    );
+  }
+}
+
+class ForceUpdateGate extends StatelessWidget {
+  final Widget child;
+
+  const ForceUpdateGate({
+    super.key,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<ForceUpdateState>(
+      valueListenable: ForceUpdateService.instance.state,
+      builder: (context, updateState, _) {
+        if (updateState.required) {
+          return ForceUpdatePage(state: updateState);
+        }
+
+        return child;
+      },
     );
   }
 }
@@ -128,31 +306,74 @@ class AuthWrapper extends ConsumerStatefulWidget {
 }
 
 class _AuthWrapperState extends ConsumerState<AuthWrapper> {
+  Future<bool>? _sessionFuture;
+
   @override
   void initState() {
     super.initState();
-    ref.read(categoriesProvider.future);
-    ref.read(academyProvider.future);
+    _sessionFuture = _validateSession();
+  }
+
+  Future<bool> _validateSession() async {
+    final api = ApiService();
+    final hasStoredToken = await api.hasStoredAppSession();
+    final hasAppSession = hasStoredToken
+        ? await api
+            .validateStoredAppSession()
+            .timeout(const Duration(seconds: 15), onTimeout: () {
+            debugPrint(
+              '⚠️ /me tardó demasiado en arranque. Se entra con el token local y las pantallas reintentarán.',
+            );
+            return true;
+          })
+        : false;
+
+    if (!hasAppSession) {
+      try {
+        await NotificationService().clearDeviceRegistration();
+      } catch (e) {
+        debugPrint('⚠️ No se pudo limpiar el dispositivo FCM: $e');
+      }
+
+      if (Firebase.apps.isNotEmpty) {
+        try {
+          await FirebaseAuth.instance.signOut();
+        } catch (e) {
+          debugPrint('⚠️ No se pudo cerrar sesión Firebase: $e');
+        }
+      }
+      await api.clearWordPressSession();
+      return false;
+    }
+
+    try {
+      // Inicio necesita categorías de inmediato. Formación se carga solo
+      // cuando el usuario entra en esa sección para no competir en el arranque.
+      ref.read(categoriesProvider.future);
+    } catch (_) {}
+
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authStateProvider);
+    return FutureBuilder<bool>(
+      future: _sessionFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          );
+        }
 
-    return authState.when(
-      data: (user) {
-        if (user != null) {
+        if (snapshot.data == true) {
           return const MainScreen();
         }
 
         return const LoginPage();
       },
-      loading: () => const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-      ),
-      error: (e, stack) => Scaffold(body: Center(child: Text('Error: $e'))),
     );
   }
 }

@@ -3,18 +3,23 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/checkout/presentation/pages/checkout_page.dart';
+import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 
 class CartPage extends ConsumerWidget {
   final VoidCallback? onGoHome;
   final VoidCallback? onGoBack;
+  final VoidCallback? onGoQuotes;
 
   const CartPage({
     super.key,
     this.onGoHome,
     this.onGoBack,
+    this.onGoQuotes,
   });
 
   void _handleBack(BuildContext context) {
@@ -43,8 +48,119 @@ class CartPage extends ConsumerWidget {
     }
   }
 
+  Future<void> _cancelarPedidoYVolverAPresupuesto(
+    BuildContext context,
+    WidgetRef ref,
+    List<CartItem> cartItems,
+  ) async {
+    if (cartItems.isEmpty) return;
+
+    final cartNotifier = ref.read(cartProvider.notifier);
+    final hasOriginalQuote = cartNotifier.hasQuoteSource;
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text(
+          'Cancelar tramitación',
+          style: TextStyle(
+            fontFamily: 'Oswald',
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Text(
+          hasOriginalQuote
+              ? 'Se vaciará la cesta. El presupuesto original seguirá guardado '
+                  'en Presupuestos y podrás retomarlo más tarde.'
+              : 'Se sacarán estos productos de la cesta y se guardarán como un '
+                  'presupuesto local para retomarlo más tarde.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('NO'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('SÍ, VOLVER A PRESUPUESTOS'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    String message = '';
+    try {
+      if (hasOriginalQuote) {
+        await cartNotifier.clearCart();
+        message = 'El presupuesto original sigue guardado.';
+      } else {
+        final orderId = DateTime.now().millisecondsSinceEpoch.toString();
+        final nombre = 'Presupuesto #$orderId';
+        final quoteNotifier = ref.read(localQuotesProvider.notifier);
+
+        await quoteNotifier.crearPresupuesto(
+          orderId: orderId,
+          nombre: nombre,
+        );
+
+        for (final item in cartItems) {
+          final price = double.tryParse(
+                item.product.price.replaceAll(',', '.'),
+              ) ??
+              0;
+          await quoteNotifier.anadirItem(
+            orderId: orderId,
+            item: LocalQuoteItem(
+              productId: item.product.id,
+              productName: item.product.name,
+              quantity: item.quantity,
+              price: price,
+            ),
+          );
+        }
+
+        await cartNotifier.clearCart();
+        message = 'Presupuesto guardado: $nombre';
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo guardar el presupuesto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFF1565C0),
+      ),
+    );
+
+    if (onGoQuotes != null) {
+      onGoQuotes!();
+    } else {
+      _handleBack(context);
+    }
+  }
+
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'cart');
     final cartItems = ref.watch(cartProvider);
     final totalUnits = cartItems.fold<int>(
       0,
@@ -76,7 +192,7 @@ class CartPage extends ConsumerWidget {
                 border: Border.all(color: const Color(0xFFE8E8E8)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
+                    color: Colors.black.withOpacity(0.03),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -165,7 +281,7 @@ class CartPage extends ConsumerWidget {
         border: Border.all(color: const Color(0xFFE8E8E8)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: Colors.black.withOpacity(0.03),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -362,9 +478,7 @@ class CartPage extends ConsumerWidget {
   Widget _buildCheckoutSection(WidgetRef ref, BuildContext context) {
     final cartItems = ref.watch(cartProvider);
 
-    // En la app mostramos el importe tal cual viene del producto.
-    // No añadimos ningún impuesto ni desglose adicional aquí.
-    final totalCarrito = cartItems.fold<double>(
+    final subtotal = cartItems.fold<double>(
       0,
           (sum, item) {
         final price = double.tryParse(
@@ -374,6 +488,9 @@ class CartPage extends ConsumerWidget {
         return sum + (price * item.quantity);
       },
     );
+
+    final iva = subtotal * 0.21;
+    final total = subtotal + iva;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
@@ -394,8 +511,13 @@ class CartPage extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _summaryRow(
-              'Importe productos',
-              '${totalCarrito.toStringAsFixed(2)} €',
+              'Base imponible',
+              '${subtotal.toStringAsFixed(2)} €',
+            ),
+            const SizedBox(height: 10),
+            _summaryRow(
+              'IVA (21%) incluido',
+              '${iva.toStringAsFixed(2)} €',
             ),
             Container(
               margin: const EdgeInsets.symmetric(vertical: 16),
@@ -416,7 +538,7 @@ class CartPage extends ConsumerWidget {
                   ),
                 ),
                 Text(
-                  '${totalCarrito.toStringAsFixed(2)} €',
+                  '${total.toStringAsFixed(2)} €',
                   style: const TextStyle(
                     fontFamily: 'Oswald',
                     fontSize: 22,
@@ -456,6 +578,37 @@ class CartPage extends ConsumerWidget {
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: cartItems.isEmpty
+                    ? null
+                    : () => _cancelarPedidoYVolverAPresupuesto(
+                          context,
+                          ref,
+                          cartItems,
+                        ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary, width: 1.2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                icon: const Icon(Icons.undo_rounded, size: 20),
+                label: const Text(
+                  'CANCELAR Y VOLVER A PRESUPUESTOS',
+                  style: TextStyle(
+                    fontFamily: 'Oswald',
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
                   ),
                 ),
               ),

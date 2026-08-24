@@ -32,14 +32,23 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
   @override
   void initState() {
     super.initState();
+    _productosFuture = _loadProductosMarca();
+  }
 
-    // Utilizamos el buscador existente pasando el nombre de la marca.
-    _productosFuture = _apiService.buscarProductos(widget.brandName);
+  Future<List<Product>> _loadProductosMarca() async {
+    final brandId = await _apiService.getMarcaIdPorNombre(widget.brandName);
+    final result = await _apiService.getProductosCatalogoFiltrado(
+      brandId: brandId,
+      brandName: widget.brandName,
+      page: 1,
+      perPage: 50,
+    );
+    return result.products;
   }
 
   Future<void> _refreshProductos() async {
     setState(() {
-      _productosFuture = _apiService.buscarProductos(widget.brandName);
+      _productosFuture = _loadProductosMarca();
     });
   }
 

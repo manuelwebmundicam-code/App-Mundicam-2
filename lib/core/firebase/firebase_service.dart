@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/notifications/notification_service.dart';
 
 class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -334,6 +335,7 @@ class FirebaseService {
 
   /// Cerrar sesión
   Future<void> signOut() async {
+    await NotificationService().clearDeviceRegistration();
     await ApiService().clearWordPressSession();
     await _auth.signOut();
   }

@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
-import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
-import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
+import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
 import 'package:mundicam/features/support/presentation/pages/support_tickets_page.dart';
 
@@ -27,9 +28,47 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Map<String, dynamic>? _wooCustomer;
   bool _loadingData = true;
   bool _isAdmin = false;
+  String _roleLabel = 'Cliente';
+  IconData _roleIcon = Icons.person_outline_rounded;
   String? _errorMessage;
+  bool _requestingDataChange = false;
+  bool _deletingAccount = false;
 
-  Color get _brandColor => _isAdmin ? Colors.deepPurple : AppColors.primary;
+  Color get _roleColor {
+    final label = _roleLabel.toLowerCase();
+    if (_isAdmin || label.contains('admin')) return Colors.deepPurple;
+    if (label.contains('comercial')) return const Color(0xFF128C4A);
+    return AppColors.primary;
+  }
+
+  Color get _brandColor => _roleColor;
+
+  void _setVisibleRole(List<String> roles) {
+    final normalizedRoles = roles.map((role) => role.toLowerCase().trim()).toList();
+
+    if (normalizedRoles.any((role) =>
+        role == 'administrator' ||
+        role == 'administrador' ||
+        role == 'shop_manager' ||
+        role == 'gestor_de_la_tienda' ||
+        role.contains('admin'))) {
+      _isAdmin = true;
+      _roleLabel = 'Administrador';
+      _roleIcon = Icons.admin_panel_settings_outlined;
+      return;
+    }
+
+    if (normalizedRoles.any((role) => role.contains('comercial'))) {
+      _isAdmin = false;
+      _roleLabel = 'Comercial';
+      _roleIcon = Icons.support_agent_outlined;
+      return;
+    }
+
+    _isAdmin = false;
+    _roleLabel = 'Cliente';
+    _roleIcon = Icons.business_center_outlined;
+  }
 
   @override
   void initState() {
@@ -38,75 +77,91 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Future<void> _cargarDatosUsuario() async {
+    final apiService = ApiService();
     final user = FirebaseAuth.instance.currentUser;
 
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'No has iniciado sesión';
-          _loadingData = false;
-        });
-      }
-      return;
-    }
-
-    debugPrint('🔍 Cargando perfil - UID: ${user.uid}');
-    debugPrint(' Email Firebase Auth: ${user.email}');
+    debugPrint('🔍 Cargando perfil - Firebase UID: ${user?.uid ?? '-'}');
+    debugPrint(' Email Firebase Auth: ${user?.email ?? '-'}');
 
     try {
-      final apiService = ApiService();
-
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
       Map<String, dynamic>? firestoreData;
-      if (userDoc.exists) {
-        firestoreData = userDoc.data();
 
-        if (firestoreData?['isBlocked'] == true) {
-          if (mounted) {
-            setState(() {
-              _errorMessage = 'Cuenta bloqueada';
-              _loadingData = false;
-            });
+      if (user != null) {
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+
+          if (userDoc.exists) {
+            firestoreData = userDoc.data();
+            if (firestoreData?['isBlocked'] == true) {
+              if (mounted) {
+                setState(() {
+                  _errorMessage = 'Cuenta bloqueada';
+                  _loadingData = false;
+                });
+              }
+              return;
+            }
+
+            final firestoreRole = firestoreData?['role']?.toString().trim().toLowerCase();
+            _isAdmin = firestoreRole == 'admin' ||
+                firestoreRole == 'administrator' ||
+                firestoreRole == 'administrador';
+            if (_isAdmin) {
+              _roleLabel = 'Administrador';
+              _roleIcon = Icons.admin_panel_settings_outlined;
+            } else if ((firestoreRole ?? '').contains('comercial')) {
+              _roleLabel = 'Comercial';
+              _roleIcon = Icons.support_agent_outlined;
+            }
+
+            debugPrint(' Firestore role: ${firestoreData?['role']}');
+            debugPrint(' Firestore email: ${firestoreData?['email']}');
           }
-          return;
+        } catch (e) {
+          debugPrint('⚠️ Firestore no disponible para perfil: $e');
         }
-
-        debugPrint(' Firestore role: ${firestoreData?['role']}');
-        debugPrint(' Firestore email: ${firestoreData?['email']}');
       }
 
-      int? wordpressId = _extractWordPressId(
-        firestoreData: firestoreData,
-        firebaseUid: user.uid,
-      );
+      String? email = await apiService.currentSessionEmail();
 
-      String? email = _firstNonEmptyString([
-        user.email,
-        _stringFromUserData(
+      if (email == null || email.isEmpty) {
+        email = user?.email?.trim().toLowerCase();
+      }
+
+      if (email == null || email.isEmpty) {
+        email = _stringFromUserData(
           firestoreData,
           const [
             'email',
             'billing_email',
             'user_email',
             'customer_email',
-            'wordpress_email',
           ],
-        ),
-        user.providerData.isNotEmpty ? user.providerData.first.email : null,
-      ])?.toLowerCase();
+        );
+      }
 
-      debugPrint(' Email inicial: ${email ?? '-'}');
-      debugPrint(' WordPress ID inicial: ${wordpressId ?? '-'}');
+      if ((email == null || email.isEmpty) && user != null && user.providerData.isNotEmpty) {
+        email = user.providerData.first.email?.trim().toLowerCase();
+      }
+
+      int? wordpressId = await apiService.currentSessionWordPressId();
+      wordpressId ??= _extractWordPressId(
+        firestoreData: firestoreData,
+        firebaseUid: user?.uid ?? '',
+      );
+
+      final roles = await apiService.currentSessionRoles();
+      _setVisibleRole(roles);
+
+      debugPrint(' Email final perfil: ${email ?? '-'}');
+      debugPrint(' WordPress ID final perfil: ${wordpressId ?? '-'}');
+      debugPrint(' Roles App API perfil: $roles');
 
       Map<String, dynamic>? wooCustomer;
 
-      // Perfil alineado con ApiService: esta pantalla ya no llama a métodos
-      // de sesión antiguos. Primero intenta resolver el cliente por email y,
-      // si no es posible, por WordPress/WooCommerce ID.
       if (email != null && email.isNotEmpty) {
         wooCustomer = await apiService.getCustomerByEmail(email);
       }
@@ -115,70 +170,27 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         wooCustomer = await apiService.getCustomerById(wordpressId);
       }
 
-      wordpressId ??= _parsePositiveInt(
-        wooCustomer?['id'] ??
-            wooCustomer?['wordpress_id'] ??
-            wooCustomer?['woocommerce_id'],
-      );
-
-      email = _firstNonEmptyString([
-        wooCustomer?['email'],
-        email,
-        _stringFromUserData(
-          firestoreData,
-          const [
-            'email',
-            'billing_email',
-            'user_email',
-            'customer_email',
-            'wordpress_email',
-          ],
-        ),
-      ])?.toLowerCase();
-
-      final roleCandidates = <dynamic>[
-        wooCustomer?['roles'],
-        wooCustomer?['role'],
-        firestoreData?['role'],
-        firestoreData?['roles'],
-        firestoreData?['wordpress_roles'],
-      ];
-
-      _isAdmin = roleCandidates.any(_roleCanUseAdminTheme);
-
-      debugPrint(' Email final: ${email ?? '-'}');
-      debugPrint(' WordPress ID final: ${wordpressId ?? '-'}');
-
-      final fallbackCustomer = _buildFallbackCustomer(
-        remoteUser: wooCustomer,
-        firestoreData: firestoreData,
-        firebaseUser: user,
-        email: email,
-        wordpressId: wordpressId,
-      );
-
-      final finalCustomer = _mergeCustomerData(
-        fallbackCustomer,
-        wooCustomer,
-      );
-
-      if (mounted) {
-        setState(() {
-          _wooCustomer = finalCustomer;
-          _errorMessage = null;
-          _loadingData = false;
-        });
+      if (wooCustomer != null) {
+        debugPrint(
+          '✅ Cliente encontrado: ${wooCustomer['first_name']} ${wooCustomer['last_name']}',
+        );
+        if (mounted) {
+          setState(() {
+            _wooCustomer = wooCustomer;
+            _loadingData = false;
+          });
+        }
+      } else {
+        debugPrint('⚠️ Cliente no encontrado en WooCommerce');
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Cliente no encontrado.\nContacta con tu gestor comercial.';
+            _loadingData = false;
+          });
+        }
       }
-
-      debugPrint(
-        '✅ Perfil cargado: '
-            'id=${finalCustomer['id'] ?? '-'} '
-            'email=${finalCustomer['email'] ?? '-'} '
-            'nombre=${finalCustomer['first_name'] ?? ''} ${finalCustomer['last_name'] ?? ''}',
-      );
     } catch (e) {
-      debugPrint('❌ Error cargando perfil: $e');
-
+      debugPrint('❌ Error: $e');
       if (mounted) {
         setState(() {
           _errorMessage = 'Error de conexión';
@@ -186,139 +198,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         });
       }
     }
-  }
-
-  Map<String, dynamic> _buildFallbackCustomer({
-    required Map<String, dynamic>? remoteUser,
-    required Map<String, dynamic>? firestoreData,
-    required User firebaseUser,
-    required String? email,
-    required int? wordpressId,
-  }) {
-    final firstName = _firstNonEmptyString([
-      remoteUser?['first_name'],
-      firestoreData?['first_name'],
-      firestoreData?['firstName'],
-    ]);
-
-    final lastName = _firstNonEmptyString([
-      remoteUser?['last_name'],
-      firestoreData?['last_name'],
-      firestoreData?['lastName'],
-    ]);
-
-    final displayName = _firstNonEmptyString([
-      remoteUser?['name'],
-      firestoreData?['name'],
-      firebaseUser.displayName,
-      [firstName, lastName]
-          .where((item) => item != null && item.trim().isNotEmpty)
-          .join(' '),
-    ]);
-
-    final billing = remoteUser?['billing'] is Map
-        ? Map<String, dynamic>.from(remoteUser!['billing'] as Map)
-        : <String, dynamic>{};
-
-    final shipping = remoteUser?['shipping'] is Map
-        ? Map<String, dynamic>.from(remoteUser!['shipping'] as Map)
-        : <String, dynamic>{};
-
-    if (email != null && email.isNotEmpty) {
-      billing['email'] ??= email;
-    }
-    if (firstName != null && firstName.isNotEmpty) {
-      billing['first_name'] ??= firstName;
-    }
-    if (lastName != null && lastName.isNotEmpty) {
-      billing['last_name'] ??= lastName;
-    }
-
-    final roles = _rolesFromDynamic(
-      remoteUser?['roles'] ??
-          remoteUser?['role'] ??
-          firestoreData?['wordpress_roles'] ??
-          firestoreData?['roles'] ??
-          firestoreData?['role'],
-    );
-
-    return <String, dynamic>{
-      if (wordpressId != null && wordpressId > 0) 'id': wordpressId,
-      if (email != null && email.isNotEmpty) 'email': email,
-      if (displayName != null && displayName.isNotEmpty) 'name': displayName,
-      if (firstName != null && firstName.isNotEmpty) 'first_name': firstName,
-      if (lastName != null && lastName.isNotEmpty) 'last_name': lastName,
-      'roles': roles,
-      'billing': billing,
-      'shipping': shipping,
-      'meta_data': remoteUser?['meta_data'] is List
-          ? List<dynamic>.from(remoteUser!['meta_data'] as List)
-          : <dynamic>[],
-    };
-  }
-
-  Map<String, dynamic> _mergeCustomerData(
-      Map<String, dynamic> fallback,
-      Map<String, dynamic>? remote,
-      ) {
-    if (remote == null || remote.isEmpty) return fallback;
-
-    final merged = Map<String, dynamic>.from(fallback);
-
-    for (final entry in remote.entries) {
-      final value = entry.value;
-
-      if (value == null) continue;
-
-      if (entry.key == 'billing' && value is Map) {
-        final current = merged['billing'] is Map
-            ? Map<String, dynamic>.from(merged['billing'] as Map)
-            : <String, dynamic>{};
-
-        current.addAll(Map<String, dynamic>.from(value));
-        merged['billing'] = current;
-        continue;
-      }
-
-      if (entry.key == 'shipping' && value is Map) {
-        final current = merged['shipping'] is Map
-            ? Map<String, dynamic>.from(merged['shipping'] as Map)
-            : <String, dynamic>{};
-
-        current.addAll(Map<String, dynamic>.from(value));
-        merged['shipping'] = current;
-        continue;
-      }
-
-      if (entry.key == 'meta_data' && value is List && value.isNotEmpty) {
-        merged['meta_data'] = List<dynamic>.from(value);
-        continue;
-      }
-
-      final text = value.toString().trim();
-      if (text.isNotEmpty && text.toLowerCase() != 'null') {
-        merged[entry.key] = value;
-      }
-    }
-
-    return merged;
-  }
-
-  String? _firstNonEmptyString(List<dynamic> values) {
-    for (final value in values) {
-      if (value == null) continue;
-
-      final text = value.toString().trim();
-
-      if (text.isNotEmpty &&
-          text != '—' &&
-          text.toLowerCase() != 'null' &&
-          text.toLowerCase() != 'false') {
-        return text;
-      }
-    }
-
-    return null;
   }
 
   String? _stringFromUserData(
@@ -338,76 +217,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
 
     return null;
-  }
-
-  List<String> _rolesFromDynamic(dynamic value) {
-    final roles = <String>[];
-
-    void addRole(dynamic item) {
-      if (item == null) return;
-
-      if (item is Iterable) {
-        for (final child in item) {
-          addRole(child);
-        }
-        return;
-      }
-
-      if (item is Map) {
-        for (final entry in item.entries) {
-          if (entry.value == true || entry.value == 1 || entry.value?.toString() == '1') {
-            addRole(entry.key);
-          } else {
-            addRole(entry.value);
-          }
-        }
-        return;
-      }
-
-      final raw = item.toString().trim();
-      if (raw.isEmpty || raw.toLowerCase() == 'null') return;
-
-      for (final part in raw.split(',')) {
-        final role = part.trim();
-        if (role.isNotEmpty && !roles.contains(role)) {
-          roles.add(role);
-        }
-      }
-    }
-
-    addRole(value);
-    return roles;
-  }
-
-  String _normalizeRole(String value) {
-    return value
-        .toLowerCase()
-        .trim()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ñ', 'n')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
-  }
-
-  bool _roleCanUseAdminTheme(dynamic value) {
-    final roles = _rolesFromDynamic(value);
-
-    for (final role in roles) {
-      final normalized = _normalizeRole(role);
-      if (normalized == 'admin' ||
-          normalized == 'administrator' ||
-          normalized == 'administrador' ||
-          normalized == 'shopmanager' ||
-          normalized == 'gestordelatienda' ||
-          normalized.startsWith('comercial')) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   int? _extractWordPressId({
@@ -485,56 +294,37 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   String _getInicial() {
-    final firstName = _wooCustomer?['first_name']?.toString() ?? '';
-    if (firstName.isNotEmpty) return firstName[0].toUpperCase();
-
-    final company = _getCompany();
-    if (company.isNotEmpty) return company[0].toUpperCase();
-
-    final email = _wooCustomer?['email']?.toString() ?? '';
-    return email.isNotEmpty ? email[0].toUpperCase() : 'M';
+    if (_wooCustomer != null) {
+      final n = _wooCustomer!['first_name']?.toString() ?? '';
+      if (n.isNotEmpty) return n[0].toUpperCase();
+      final c = _wooCustomer!['billing']?['company']?.toString() ?? '';
+      if (c.isNotEmpty) return c[0].toUpperCase();
+    }
+    final e = _wooCustomer?['email'] ?? FirebaseAuth.instance.currentUser?.email ?? '';
+    return e.isNotEmpty ? e[0].toUpperCase() : 'M';
   }
 
   String _getDisplayName() {
-    final firstName = _wooCustomer?['first_name']?.toString() ?? '';
-    final lastName = _wooCustomer?['last_name']?.toString() ?? '';
-    final fullName = '$firstName $lastName'.trim();
-
-    if (fullName.isNotEmpty) return fullName;
-
-    final name = _wooCustomer?['name']?.toString().trim() ?? '';
-    if (name.isNotEmpty && name.toLowerCase() != 'null') return name;
-
-    final email = _wooCustomer?['email']?.toString().trim() ?? '';
-    if (email.isNotEmpty) return email;
-
+    if (_wooCustomer != null) {
+      final f = _wooCustomer!['first_name']?.toString() ?? '';
+      final l = _wooCustomer!['last_name']?.toString() ?? '';
+      if (f.isNotEmpty || l.isNotEmpty) return '$f $l'.trim();
+    }
     return 'Usuario';
   }
 
-  String _getCompany() {
-    final billing = _wooCustomer?['billing'];
-    if (billing is Map) {
-      return billing['company']?.toString().trim() ?? '';
-    }
-    return '';
-  }
 
   String _getMeta(String key) {
-    if (_wooCustomer == null) return '—';
-
+    if (_wooCustomer == null) return "—";
     final meta = _wooCustomer!['meta_data'] as List? ?? [];
-
     try {
-      for (final item in meta) {
-        if (item is Map &&
-            item['key']?.toString().toLowerCase().trim() ==
-                key.toLowerCase().trim()) {
-          return item['value']?.toString() ?? '—';
+      for (final m in meta) {
+        if (m is Map && m['key']?.toString().toLowerCase().trim() == key.toLowerCase().trim()) {
+          return m['value']?.toString() ?? "—";
         }
       }
     } catch (_) {}
-
-    return '—';
+    return "—";
   }
 
   String _safeValue(dynamic value) {
@@ -545,11 +335,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   String _maskSensitivePaymentData(String value) {
     var text = value.trim();
-
     if (text.isEmpty || text == '—' || text.toLowerCase() == 'null') {
       return '—';
     }
-
     text = text.replaceAllMapped(
       RegExp(r'\b([A-Z]{2}\d{2}[A-Z0-9\s]{10,34})\b', caseSensitive: false),
           (match) {
@@ -559,7 +347,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         return '$prefix** **** **** **** **** $last4';
       },
     );
-
     text = text.replaceAllMapped(
       RegExp(r'\b(?:\d[ -]?){12,19}\b'),
           (match) {
@@ -569,7 +356,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         return '****$last4';
       },
     );
-
     return text;
   }
 
@@ -584,89 +370,246 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       'default_payment_method',
       'b2b_payment_method',
     ];
-
     for (final key in keys) {
       final value = _getMeta(key).trim();
-      if (value.isNotEmpty &&
-          value != '—' &&
-          value.toLowerCase() != 'null') {
+      if (value.isNotEmpty && value != '—' && value.toLowerCase() != 'null') {
         return value;
       }
     }
-
     return '';
   }
 
   String _paymentMethodLabel() {
     final raw = _getPaymentMethodRaw().trim();
-
     if (raw.isEmpty || raw == '—' || raw.toLowerCase() == 'null') {
       return '—';
     }
-
     final value = raw.toLowerCase();
     final masked = _maskSensitivePaymentData(raw);
 
-    if (value.contains('bacs') ||
-        value.contains('transferencia') ||
-        value.contains('bank') ||
-        value.contains('iban')) {
-      return masked == raw
-          ? 'Transferencia bancaria'
-          : 'Transferencia bancaria · $masked';
+    if (value.contains('bacs') || value.contains('transferencia') || value.contains('bank') || value.contains('iban')) {
+      return masked == raw ? 'Transferencia bancaria' : 'Transferencia bancaria · $masked';
     }
-
-    if (value.contains('redsys') ||
-        value.contains('tarjeta') ||
-        value.contains('card') ||
-        value.contains('tpv') ||
-        value.contains('stripe')) {
+    if (value.contains('redsys') || value.contains('tarjeta') || value.contains('card') || value.contains('tpv') || value.contains('stripe')) {
       final last4Match = RegExp(r'\*{2,}\d{4}').firstMatch(masked);
       if (last4Match != null) {
         return 'Tarjeta terminada en ${last4Match.group(0)}';
       }
       return 'Tarjeta bancaria';
     }
-
-    if (value.contains('paypal')) return 'PayPal';
-
-    if (value.contains('cheque') ||
-        value.contains('giro') ||
-        value.contains('pagare') ||
-        value.contains('pagaré') ||
-        value.contains('aplazado') ||
-        value.contains('credito') ||
-        value.contains('crédito')) {
+    if (value.contains('paypal')) {
+      return 'PayPal';
+    }
+    if (value.contains('cheque') || value.contains('giro') || value.contains('pagare') || value.contains('pagaré') || value.contains('aplazado') || value.contains('credito') || value.contains('crédito')) {
       return 'Giro / pago aplazado';
     }
-
     return masked;
   }
 
   String _creditLimitLabel() {
     final credit = _getMeta('credit_limit').trim();
-
-    if (credit.isEmpty ||
-        credit == '—' ||
-        credit == '0' ||
-        credit == '0.0' ||
-        credit == '0.00' ||
-        credit.toLowerCase() == 'null') {
+    if (credit.isEmpty || credit == '—' || credit == '0' || credit == '0.0' || credit == '0.00' || credit.toLowerCase() == 'null') {
       return 'No aplica';
     }
-
     if (credit.contains('€')) return credit;
     return '$credit€';
   }
 
-  String _getAssignedManager() {
-    final manager = _getMeta('assigned_manager').trim();
 
-    if (manager.isEmpty || manager == '—' || manager.toLowerCase() == 'null') {
-      return 'Mundicam';
+  // ================= MÉTODOS MEJORADOS =================
+  String _cleanManagerValue(dynamic value) {
+    final manager = value?.toString().trim() ?? '';
+    if (manager.isEmpty || manager == '—') return '';
+    final lower = manager.toLowerCase();
+    if (lower == 'null' ||
+        lower == 'false' ||
+        lower == 'sin asignar' ||
+        lower == 'no asignado' ||
+        lower == '__mc_add_new_gestor__') {
+      return '';
     }
 
+    // El gestor de MundiCam viene del selector web wpuef_cid_c30 y debe
+    // mostrarse como nombre/texto, no como email. Si el backend sigue
+    // devolviendo solo un email, no lo usamos como nombre de gestor.
+    if (manager.contains('@')) return '';
+
     return manager;
+  }
+
+  static const Map<String, Map<String, String>> _localManagerContacts = {
+    'damian mateo': {
+      'email': 'dmateo@mundicam.com',
+      'phone': '633806898',
+    },
+    'juan garcia': {
+      'email': 'jgarcia@mundicam.com',
+      'phone': '622943654',
+    },
+    'manuel': {
+      'email': 'mreynaldo@mundicam.com',
+      'phone': '619078632',
+    },
+    'proshop murcia': {
+      'email': 'proshop.murcia@mundicam.com',
+      'phone': '616545669',
+    },
+    'ricardo': {
+      'email': 'rcano@mundicam.com',
+      'phone': '606111983',
+    },
+  };
+
+  String _normalizeManagerLookupKey(String value) {
+    var normalized = value.trim().toLowerCase();
+    const replacements = <String, String>{
+      'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a',
+      'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+      'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
+      'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o',
+      'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
+      'ñ': 'n',
+    };
+    replacements.forEach((from, to) {
+      normalized = normalized.replaceAll(from, to);
+    });
+    normalized = normalized.replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+    return normalized.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _getAssignedManagerNameCandidate() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
+
+    final directCandidates = <dynamic>[
+      nestedManager['name'],
+      _wooCustomer?['manager_name'],
+      _wooCustomer?['gestor_asignado'],
+      _wooCustomer?['assigned_manager'],
+      _wooCustomer?['wpuef_cid_c30'],
+      _wooCustomer?['commercial_manager'],
+      _wooCustomer?['sales_manager'],
+    ];
+
+    for (final value in directCandidates) {
+      final manager = _cleanManagerValue(value);
+      if (manager.isNotEmpty) return manager;
+    }
+
+    final keys = [
+      'wpuef_cid_c30',
+      'manager_name',
+      'gestor_asignado',
+      'assigned_manager',
+      'commercial_manager',
+      'sales_manager',
+    ];
+
+    for (final key in keys) {
+      final manager = _cleanManagerValue(_getMeta(key));
+      if (manager.isNotEmpty) return manager;
+    }
+
+    return '';
+  }
+
+  Map<String, String>? _getLocalManagerContact() {
+    final name = _getAssignedManagerNameCandidate();
+    if (name.isEmpty) return null;
+    return _localManagerContacts[_normalizeManagerLookupKey(name)];
+  }
+
+  String _getAssignedManager() {
+    final manager = _getAssignedManagerNameCandidate();
+    if (manager.isNotEmpty) return manager;
+
+    return _getManagerEmail().contains('@')
+        ? 'Gestor / técnico asignado'
+        : 'No asignado';
+  }
+
+  String _getManagerEmail() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
+    final candidates = <dynamic>[
+      nestedManager['email'],
+      _wooCustomer?['manager_email'],
+      _getMeta('manager_email'),
+    ];
+
+    for (final value in candidates) {
+      final email = value?.toString().trim() ?? '';
+      if (email.isNotEmpty &&
+          email != '—' &&
+          email.toLowerCase() != 'null' &&
+          email.contains('@')) {
+        return email;
+      }
+    }
+
+    final localEmail = _getLocalManagerContact()?['email']?.trim() ?? '';
+    if (localEmail.contains('@')) return localEmail;
+
+    return '—';
+  }
+
+  String _getManagerPhone() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
+    final candidates = <dynamic>[
+      nestedManager['phone'],
+      _wooCustomer?['manager_phone'],
+      _getMeta('manager_phone'),
+    ];
+
+    for (final value in candidates) {
+      final phone = value?.toString().trim() ?? '';
+      if (phone.isNotEmpty &&
+          phone != '—' &&
+          phone.toLowerCase() != 'null') {
+        return phone;
+      }
+    }
+    final localPhone = _getLocalManagerContact()?['phone']?.trim() ?? '';
+    if (localPhone.isNotEmpty) return localPhone;
+
+    return '—';
+  }
+
+  Future<void> _callManager() async {
+    final phone = _getManagerPhone();
+    if (phone == '—') return;
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir la aplicación de teléfono.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _emailManager() async {
+    final email = _getManagerEmail();
+    if (!email.contains('@')) return;
+
+    final uri = Uri(
+      scheme: 'mailto',
+      path: email,
+      queryParameters: const <String, String>{
+        'subject': 'Consulta desde la app MundiCam',
+      },
+    );
+
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir la aplicación de correo.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   String _getCifNif() {
@@ -724,11 +667,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     return '—';
   }
+  // =================================================
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'profile');
     return Scaffold(
       backgroundColor: _pageBg,
       appBar: _ProfilePageAppBar(
@@ -738,9 +682,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         onRefresh: _refreshProfile,
         onLogout: () => _confirmSignOut(context),
       ),
-      body: user == null
-          ? const Center(child: Text('No has iniciado sesión'))
-          : _loadingData
+      body: _loadingData
           ? Center(
         child: CircularProgressIndicator(color: _brandColor),
       )
@@ -755,44 +697,57 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 children: [
                   _buildMainCard(),
                   const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      _quickButton(
-                        context,
-                        Icons.request_quote_outlined,
-                        'Presupuestos',
-                        const QuotesPage(),
-                      ),
-                      const SizedBox(width: 12),
-                      _quickButton(
-                        context,
-                        Icons.local_shipping_outlined,
-                        'Mis Pedidos',
-                        const OrdersPage(),
+                  _buildManagerCard(),
+                  const SizedBox(height: 22),
+                  _buildMenuCard(
+                    context,
+                    title: "DATOS DE LA CUENTA",
+                    items: [
+                      _buildActionMenuItem(
+                        icon: Icons.manage_accounts_outlined,
+                        title: "Solicitar cambio de datos",
+                        subtitle: _requestingDataChange
+                            ? "Enviando solicitud..."
+                            : "Indica qué datos necesitas actualizar",
+                        onTap: _requestingDataChange
+                            ? null
+                            : _requestDataChange,
+                        trailing: _requestingDataChange
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: _brandColor,
+                                ),
+                              )
+                            : null,
                       ),
                     ],
                   ),
                   const SizedBox(height: 22),
                   _buildMenuCard(
                     context,
-                    title: 'SOPORTE Y REPARACIONES',
+                    title: "SOPORTE Y REPARACIONES",
                     items: [
                       _buildMenuItem(
                         context,
                         Icons.handyman_outlined,
-                        'Gestión de RMA',
-                        'Material en reparación',
+                        "Gestión de RMA",
+                        "Material en reparación",
                         const RmaPage(),
                       ),
                       _buildMenuItem(
                         context,
                         Icons.chat_bubble_outline_rounded,
-                        'Tickets Técnicos',
-                        'Habla con soporte',
+                        "Tickets Técnicos",
+                        "Habla con soporte",
                         const SupportTicketsPage(),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 22),
+                  _buildDeleteAccountCard(),
                 ],
               ),
             ),
@@ -803,9 +758,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Widget _buildHeader() {
-    final company = _getCompany();
-    final email = _wooCustomer?['email']?.toString() ?? '';
-
     return Container(
       width: double.infinity,
       color: _pageBg,
@@ -817,7 +769,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
+              color: Colors.black.withOpacity(0.06),
               blurRadius: 18,
               offset: const Offset(0, 8),
             ),
@@ -832,10 +784,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   width: 66,
                   height: 66,
                   decoration: BoxDecoration(
-                    color: _brandColor.withValues(alpha: 0.10),
+                    color: _brandColor.withOpacity(0.10),
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(
-                      color: _brandColor.withValues(alpha: 0.18),
+                      color: _brandColor.withOpacity(0.18),
                       width: 1.5,
                     ),
                   ),
@@ -892,51 +844,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         height: 1.1,
                       ),
                     ),
-                    if (company.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        company,
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _muted,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 5),
-                    Text(
-                      email,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _muted,
-                        fontSize: 12.2,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 9),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 7,
-                      runSpacing: 6,
-                      children: [
-                        _profilePill(
-                          icon: Icons.business_center_outlined,
-                          text: 'Cliente profesional',
-                          color: _brandColor,
-                        ),
-                        if (_isAdmin)
-                          _profilePill(
-                            icon: Icons.admin_panel_settings_outlined,
-                            text: 'Administrador',
-                            color: Colors.deepPurple,
-                          ),
-                      ],
-                    ),
                   ],
                 ),
               ),
@@ -955,9 +862,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.14)),
+        border: Border.all(color: color.withOpacity(0.14)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -989,7 +896,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               width: 62,
               height: 62,
               decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.10),
+                color: Colors.orange.withOpacity(0.10),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -1014,7 +921,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               onPressed: _refreshProfile,
               icon: const Icon(Icons.refresh),
               label: const Text(
-                'REINTENTAR',
+                "REINTENTAR",
                 style: TextStyle(
                   fontFamily: 'Oswald',
                   fontWeight: FontWeight.w900,
@@ -1055,10 +962,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _mainCardHeader(
-            _isAdmin ? 'PERFIL ADMINISTRADOR' : 'DATOS DEL CLIENTE',
-            _isAdmin
-                ? Icons.admin_panel_settings_outlined
-                : Icons.business_center_outlined,
+            _isAdmin ? "PERFIL ADMINISTRADOR" : "PERFIL ${_roleLabel.toUpperCase()}",
+            _isAdmin ? Icons.admin_panel_settings_outlined : _roleIcon,
           ),
           const SizedBox(height: 16),
           _dataGroup(
@@ -1066,28 +971,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.person_outline,
-                'Nombre',
-                '${_wooCustomer!['first_name'] ?? ''} ${_wooCustomer!['last_name'] ?? ''}'
+                "Nombre",
+                "${_wooCustomer!['first_name'] ?? ''} ${_wooCustomer!['last_name'] ?? ''}"
                     .trim(),
               ),
               _infoRow(
-                Icons.confirmation_number_outlined,
-                'ID cliente',
-                _safeValue(_wooCustomer!['id']),
-              ),
-              _infoRow(
                 Icons.business_outlined,
-                'Empresa',
+                "Empresa",
                 _safeValue(billing['company']),
               ),
               _infoRow(
                 Icons.badge_outlined,
-                'CIF / NIF',
+                "CIF / NIF",
                 _getCifNif(),
               ),
               _infoRow(
                 Icons.support_agent_outlined,
-                'Gestor asignado',
+                "Gestor asignado",
                 _getAssignedManager(),
               ),
             ],
@@ -1098,12 +998,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.phone_outlined,
-                'Teléfono',
+                "Teléfono",
                 _safeValue(billing['phone']),
               ),
               _infoRow(
                 Icons.email_outlined,
-                'Email',
+                "Email",
                 _safeValue(_wooCustomer!['email']),
               ),
             ],
@@ -1114,27 +1014,27 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.location_on_outlined,
-                'Dirección',
+                "Dirección",
                 _safeValue(billing['address_1']),
               ),
               _infoRow(
                 Icons.markunread_mailbox_outlined,
-                'Código Postal',
+                "Código Postal",
                 _safeValue(billing['postcode']),
               ),
               _infoRow(
                 Icons.location_city_outlined,
-                'Ciudad',
+                "Ciudad",
                 _safeValue(billing['city']),
               ),
               _infoRow(
                 Icons.map_outlined,
-                'Provincia',
+                "Provincia",
                 _safeValue(billing['state']),
               ),
               _infoRow(
                 Icons.flag_outlined,
-                'País',
+                "País",
                 _safeValue(billing['country']),
               ),
             ],
@@ -1145,12 +1045,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               _infoRow(
                 Icons.payments_outlined,
-                'Forma de pago',
+                "Forma de pago",
                 _paymentMethodLabel(),
               ),
               _infoRow(
                 Icons.account_balance_wallet_outlined,
-                'Límite de crédito B2B',
+                "Límite de crédito B2B",
                 _creditLimitLabel(),
               ),
             ],
@@ -1176,7 +1076,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           width: 34,
           height: 34,
           decoration: BoxDecoration(
-            color: _brandColor.withValues(alpha: 0.08),
+            color: _brandColor.withOpacity(0.08),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, size: 19, color: _brandColor),
@@ -1242,7 +1142,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     border: Border.all(color: _border),
     boxShadow: [
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.035),
+        color: Colors.black.withOpacity(0.035),
         blurRadius: 14,
         offset: const Offset(0, 6),
       ),
@@ -1250,9 +1150,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   );
 
   Widget _infoRow(IconData icon, String label, String value) {
-    final displayValue = value.trim().isEmpty ? '—' : value.trim();
-    final isEmpty = displayValue == '—';
-
+    final displayValue = value.trim().isEmpty ? "—" : value.trim();
+    final isEmpty = displayValue == "—";
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1260,7 +1159,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           width: 38,
           height: 38,
           decoration: BoxDecoration(
-            color: _brandColor.withValues(alpha: 0.07),
+            color: _brandColor.withOpacity(0.07),
             borderRadius: BorderRadius.circular(13),
           ),
           child: Icon(
@@ -1310,10 +1209,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       ) {
     return Expanded(
       child: GestureDetector(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => page),
-        ),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
         child: Container(
           height: 112,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
@@ -1323,7 +1219,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             border: Border.all(color: _border),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.035),
+                color: Colors.black.withOpacity(0.035),
                 blurRadius: 14,
                 offset: const Offset(0, 6),
               ),
@@ -1337,7 +1233,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: _brandColor.withValues(alpha: 0.08),
+                  color: _brandColor.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(15),
                 ),
                 child: Icon(
@@ -1369,6 +1265,177 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
+  Widget _buildManagerCard() {
+    final managerName = _getAssignedManager();
+    final managerEmail = _getManagerEmail();
+    final managerPhone = _getManagerPhone();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _mainCardHeader('GESTOR ASIGNADO', Icons.support_agent_outlined),
+          const SizedBox(height: 14),
+          _dataGroup(
+            title: 'Contacto comercial',
+            children: [
+              _infoRow(
+                Icons.person_pin_circle_outlined,
+                'Gestor / comercial',
+                managerName,
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: managerEmail.contains('@') ? _emailManager : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: _infoRow(
+                    Icons.email_outlined,
+                    'Email del gestor',
+                    managerEmail,
+                  ),
+                ),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: managerPhone != '—' ? _callManager : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: _infoRow(
+                    Icons.phone_outlined,
+                    'Teléfono del gestor',
+                    managerPhone,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeleteAccountCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.red.withOpacity(0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.lock_outline_rounded,
+                  color: Colors.red,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'INHABILITAR CUENTA EN LA APP',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Oswald',
+                        letterSpacing: 0.5,
+                        color: _dark,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Se inhabilitará el acceso a la app y se cerrarán las sesiones abiertas en todos tus dispositivos.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.3,
+                        color: _muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton(
+              onPressed: _deletingAccount ? null : _confirmDisableAccount,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade700,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.red.shade300,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              child: _deletingAccount
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          'INHABILITANDO...',
+                          style: TextStyle(
+                            fontFamily: 'Oswald',
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      'INHABILITAR CUENTA',
+                      style: TextStyle(
+                        fontFamily: 'Oswald',
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMenuCard(
       BuildContext context, {
         required String title,
@@ -1386,7 +1453,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             border: Border.all(color: _border),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.035),
+                color: Colors.black.withOpacity(0.035),
                 blurRadius: 14,
                 offset: const Offset(0, 6),
               ),
@@ -1434,15 +1501,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       ) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => page),
-      ),
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
       leading: Container(
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: _brandColor.withValues(alpha: 0.08),
+          color: _brandColor.withOpacity(0.08),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Icon(
@@ -1475,31 +1539,327 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
+  Widget _buildActionMenuItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback? onTap,
+    Widget? trailing,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      onTap: onTap,
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: _brandColor.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(icon, color: _brandColor, size: 21),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: 14.5,
+          fontFamily: 'Oswald',
+          color: _dark,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(
+          fontSize: 12,
+          color: _muted,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      trailing: trailing ??
+          const Icon(
+            Icons.chevron_right_rounded,
+            color: Color(0xFF9CA3AF),
+          ),
+    );
+  }
+
+  Future<void> _requestDataChange() async {
+    if (_requestingDataChange) return;
+
+    String requestedChangesDraft = '';
+    String? errorText;
+
+    final requestedChanges = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Text('Solicitar cambio de datos'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Por seguridad, los datos del perfil no se pueden editar directamente. Indica qué información necesitas actualizar y enviaremos la solicitud al equipo de soporte de MundiCam.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  autofocus: true,
+                  minLines: 4,
+                  maxLines: 6,
+                  maxLength: 1200,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (value) {
+                    requestedChangesDraft = value;
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Datos que deseas cambiar',
+                    hintText: 'Ejemplo: cambiar teléfono, dirección de envío o razón social...',
+                    errorText: errorText,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('CANCELAR'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final clean = requestedChangesDraft.trim();
+                if (clean.length < 5) {
+                  setDialogState(() {
+                    errorText = 'Indica qué datos necesitas modificar.';
+                  });
+                  return;
+                }
+                Navigator.pop(dialogContext, clean);
+              },
+              child: const Text('ENVIAR SOLICITUD'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (requestedChanges == null ||
+        requestedChanges.trim().isEmpty ||
+        !mounted) {
+      return;
+    }
+
+    setState(() => _requestingDataChange = true);
+
+    try {
+      final result = await ApiService()
+          .solicitarCambioDatos(requestedChanges)
+          .timeout(const Duration(seconds: 30));
+
+      if (!mounted) return;
+      final reference = result['request_id']?.toString().trim() ?? '';
+      final message = reference.isEmpty
+          ? 'Solicitud enviada al equipo de soporte de MundiCam.'
+          : 'Solicitud enviada. Referencia: $reference';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: _brandColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final clean = e.toString().replaceFirst('Exception: ', '').trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            clean.isEmpty
+                ? 'No se pudo enviar la solicitud. Inténtalo de nuevo.'
+                : clean,
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _requestingDataChange = false);
+      }
+    }
+  }
+
+  Future<void> _confirmDisableAccount() async {
+    if (_deletingAccount) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text('¿Inhabilitar el acceso a la app?'),
+        content: const Text(
+          'Tu usuario dejará de poder acceder a la aplicación MundiCam. Enviaremos la solicitud al equipo de soporte para que gestione la inhabilitación.\n\n'
+          'La cuenta de la web, los pedidos y los datos de WooCommerce permanecerán activos y no se eliminarán.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCELAR'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'SÍ, INHABILITAR',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await _requestAccountDisable();
+  }
+
+  Future<void> _requestAccountDisable() async {
+    if (_deletingAccount) return;
+    setState(() => _deletingAccount = true);
+
+    final apiService = ApiService();
+
+    try {
+      // El servidor es la autoridad. No se bloquea localmente ni se cierra la
+      // sesión hasta que el PHP confirme la inhabilitación global de la app.
+      final result = await apiService
+          .solicitarInhabilitacionCuenta()
+          .timeout(const Duration(seconds: 30));
+
+      if (!result.success ||
+          !(result.accessBlocked || result.alreadyRequested)) {
+        throw Exception(
+          result.message.isNotEmpty
+              ? result.message
+              : 'El servidor no confirmó la inhabilitación de la cuenta.',
+        );
+      }
+
+      // El PHP ya ha revocado todos los tokens y FCM de la cuenta. Limpiamos
+      // también este dispositivo para cerrar completamente la sesión local.
+      try {
+        await NotificationService()
+            .clearDeviceRegistration()
+            .timeout(const Duration(seconds: 6));
+      } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (_) {}
+      await apiService.clearWordPressSession();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+
+      if (!mounted) return;
+
+      final reference = result.requestId.trim();
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          icon: Icon(
+            Icons.lock_outline_rounded,
+            color: Colors.red.shade700,
+            size: 48,
+          ),
+          title: const Text('Cuenta inhabilitada en la app'),
+          content: Text(
+            reference.isEmpty
+                ? 'Las sesiones de la app se han cerrado en todos tus dispositivos. Tu cuenta web permanece activa y el equipo de soporte gestionará la solicitud.'
+                : 'Las sesiones de la app se han cerrado en todos tus dispositivos. Tu cuenta web permanece activa. Referencia de soporte: $reference.',
+            textAlign: TextAlign.center,
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('ENTENDIDO'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final clean = e.toString().replaceFirst('Exception: ', '').trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            clean.isEmpty
+                ? 'No se pudo inhabilitar la cuenta. Tu sesión continúa activa.'
+                : clean,
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _deletingAccount = false);
+    }
+  }
+
   void _confirmSignOut(BuildContext context) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('¿Cerrar sesión?'),
-        content: const Text('Se cerrará la sesión.'),
+        title: const Text("¿Cerrar sesión?"),
+        content: const Text("Se cerrará la sesión."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('CANCELAR'),
+            child: const Text("CANCELAR"),
           ),
           TextButton(
             onPressed: () async {
+              await NotificationService().clearDeviceRegistration();
               await FirebaseAuth.instance.signOut();
               await ApiService().clearWordPressSession();
-
               final prefs = await SharedPreferences.getInstance();
               await prefs.clear();
 
-              if (ctx.mounted) Navigator.pop(ctx);
-              SystemNavigator.pop();
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+              }
+
+              if (!context.mounted) return;
+
+              Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const LoginPage()),
+                    (_) => false,
+              );
             },
             child: const Text(
-              'CERRAR SESIÓN',
+              "CERRAR SESIÓN",
               style: TextStyle(
                 color: Colors.red,
                 fontWeight: FontWeight.bold,
@@ -1511,6 +1871,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// APP BAR PERSONALIZADO PARA PERFIL (CON FLECHA VISIBLE Y TÍTULO CENTRADO)
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -1555,6 +1919,7 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
           child: Stack(
             alignment: Alignment.center,
             children: [
+              // Flecha izquierda
               Positioned(
                 left: 8,
                 child: IconButton(
@@ -1568,6 +1933,7 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
                   splashRadius: 22,
                 ),
               ),
+              // Título centrado
               Center(
                 child: Text(
                   title.toUpperCase(),
@@ -1584,6 +1950,7 @@ class _ProfilePageAppBar extends StatelessWidget implements PreferredSizeWidget 
                   ),
                 ),
               ),
+              // Botones derecha
               Positioned(
                 right: 8,
                 child: Row(

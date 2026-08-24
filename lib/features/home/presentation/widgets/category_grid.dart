@@ -49,9 +49,15 @@ class CategoryGrid extends ConsumerWidget {
           return true;
         }).toList();
 
+        // v1.9.69: SOLO EN INICIO aplicamos un orden visual estable.
+        // La pantalla de Categorías/Subcategorías sigue respetando exactamente
+        // el menu_order que entrega WooCommerce. Aquí únicamente agrupamos las
+        // tarjetas principales para que INTRUSIÓN y ACCESOS queden juntas y
+        // COMPLEMENTOS no rompa visualmente ese bloque. El resto conserva el
+        // orden original del servidor.
         indexedCategories.sort((a, b) {
-          final priorityA = _categoryPriority(a.value.name);
-          final priorityB = _categoryPriority(b.value.name);
+          final priorityA = _homeVisualPriority(a.value.name);
+          final priorityB = _homeVisualPriority(b.value.name);
 
           if (priorityA != priorityB) {
             return priorityA.compareTo(priorityB);
@@ -144,12 +150,12 @@ class CategoryGrid extends ConsumerWidget {
         .replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  static int _categoryPriority(String name) {
+  static int _homeVisualPriority(String name) {
     final n = _normalizeCategoryName(name);
 
     if (n.contains('video cctv') ||
         n.contains('cctv hd') ||
-        n.contains('cctv')) {
+        (n.contains('cctv') && !n.contains('ip'))) {
       return 0;
     }
 
@@ -171,7 +177,15 @@ class CategoryGrid extends ConsumerWidget {
       return 3;
     }
 
-    return 99;
+    if (n.contains('complemento') ||
+        n.contains('complementos') ||
+        n.contains('accesorio') ||
+        n.contains('accesorios')) {
+      return 4;
+    }
+
+    // Las demás categorías mantienen entre sí el orden que llega de WooCommerce.
+    return 100;
   }
 }
 
@@ -359,7 +373,7 @@ class CategoryCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(15),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
+              color: Colors.black.withOpacity(0.08),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -382,8 +396,8 @@ class CategoryCard extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       stops: const [0.45, 1.0],
                       colors: [
-                        Colors.black.withValues(alpha: 0.04),
-                        Colors.black.withValues(alpha: 0.85),
+                        Colors.black.withOpacity(0.04),
+                        Colors.black.withOpacity(0.85),
                       ],
                     ),
                   ),
@@ -496,7 +510,7 @@ class _CategoryAssetImageState extends State<_CategoryAssetImage> {
         child: Icon(
           Icons.category_outlined,
           size: 42,
-          color: Colors.white.withValues(alpha: 0.65),
+          color: Colors.white.withOpacity(0.65),
         ),
       ),
     );

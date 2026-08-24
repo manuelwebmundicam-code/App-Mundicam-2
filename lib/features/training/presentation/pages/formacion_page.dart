@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/features/training/data/models/cursos_model.dart';
 import 'package:mundicam/features/training/presentation/providers/academy_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 const Color _pageBg = Color(0xFFF4F7FB);
@@ -31,6 +32,8 @@ class FormacionPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'academy');
     final academyAsync = ref.watch(academyProvider);
 
     return Scaffold(
@@ -38,7 +41,6 @@ class FormacionPage extends ConsumerWidget {
       appBar: ProfessionalPageAppBar(
         title: 'MUNDICAM ACADEMY',
         onBack: () => Navigator.of(context).maybePop(),
-        onRefresh: () => ref.invalidate(academyProvider),
       ),
       body: academyAsync.when(
         loading: () => const Center(
@@ -128,7 +130,7 @@ class FormacionPage extends ConsumerWidget {
           borderRadius: BorderRadius.circular(26),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.14),
+              color: Colors.black.withOpacity(0.14),
               blurRadius: 18,
               offset: const Offset(0, 8),
             ),
@@ -172,7 +174,7 @@ class FormacionPage extends ConsumerWidget {
             Text(
               'Webinars, jornadas presenciales y sesiones técnicas para instaladores, integradores, ingenierías y empresas de seguridad.',
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.80),
+                color: Colors.white.withOpacity(0.80),
                 fontSize: 13.2,
                 height: 1.45,
                 fontWeight: FontWeight.w500,
@@ -270,7 +272,7 @@ class FormacionPage extends ConsumerWidget {
               width: 74,
               height: 74,
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.08),
+                color: AppColors.primary.withOpacity(0.08),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -371,7 +373,7 @@ class _CourseCard extends StatelessWidget {
             border: Border.all(color: const Color(0xFFE5E7EB)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.045),
+                color: Colors.black.withOpacity(0.045),
                 blurRadius: 14,
                 offset: const Offset(0, 6),
               ),
@@ -550,7 +552,7 @@ class _ValueCard extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.08),
+              color: AppColors.primary.withOpacity(0.08),
               borderRadius: BorderRadius.circular(15),
             ),
             child: Icon(
@@ -796,7 +798,7 @@ class _FooterButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(22),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.17),
+                color: AppColors.primary.withOpacity(0.17),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               ),

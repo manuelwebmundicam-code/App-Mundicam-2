@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:mundicam/features/support/presentation/providers/tickets_providers.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class SupportTicketsPage extends ConsumerWidget {
@@ -17,6 +18,8 @@ class SupportTicketsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'support');
     final ticketsAsync = ref.watch(ticketsProvider);
 
     return Scaffold(
@@ -182,7 +185,7 @@ class SupportTicketsPage extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
+                color: color.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: color, size: 22),
@@ -227,7 +230,7 @@ class SupportTicketsPage extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.08),
+              color: AppColors.primary.withOpacity(0.08),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(

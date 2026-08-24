@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
@@ -55,16 +56,9 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
             return _buildEmptyState();
           }
 
-          final categoriasOrdenadas = [...categorias]
-            ..sort((a, b) {
-              final pa = _categoryPriority(a.name.toString());
-              final pb = _categoryPriority(b.name.toString());
-              if (pa != pb) return pa.compareTo(pb);
-              return a.name
-                  .toString()
-                  .toLowerCase()
-                  .compareTo(b.name.toString().toLowerCase());
-            });
+          // v1.9.65: la API ya devuelve las categorías en el orden real de
+          // WooCommerce. No imponemos un fallback local que pueda cambiar la web.
+          final categoriasOrdenadas = [...categorias];
 
           return RefreshIndicator(
             color: AppColors.primary,
@@ -88,7 +82,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
                 return _CategoryTile(
                   cat: cat,
                   icon: _getIconForCategory(cat.name),
-                  assetPath: _getAssetForCategory(cat.name),
+                  iconAssetPath: _getIconAssetForCategory(cat.name),
                   subtitle: _getSubtitleForCategory(cat.name),
                   onGoCart: widget.onGoCart,
                   onGoQuotes: widget.onGoQuotes,
@@ -127,10 +121,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
         .replaceAll('û', 'u')
         .replaceAll('ñ', 'n');
 
-    // Orden solicitado, igual al bloque visual de categorías:
-    // VIDEO CCTV HD, VIDEO IP HD, INTRUSIÓN, ACCESOS,
-    // ANTIHURTO, COMPLEMENTOS, DRONES PRO, ENERGÍA,
-    // INCENDIO, NETWORKING, OUTLET.
+    // Fallback de orden principal igual al menú web MundiCam.
 
     if (n.contains('video cctv') ||
         n.contains('cctv hd') ||
@@ -144,49 +135,30 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
       return 1;
     }
 
+    // Orden exacto del menú web MundiCam:
+    // Video CCTV, Video IP, Complementos, Intrusión, Accesos, Incendio,
+    // Networking, Drones, Energía, Antihurto, Outlet.
+    if (n.contains('complementos') ||
+        n.contains('complemento')) {
+      return 2;
+    }
+
     if (n.contains('intrusion') ||
         n.contains('alarma') ||
         n.contains('alarmas')) {
-      return 2;
+      return 3;
     }
 
     if (n.contains('acceso') ||
         n.contains('accesos') ||
         n.contains('control acceso')) {
-      return 3;
-    }
-
-    if (n.contains('antihurto') ||
-        n.contains('anti hurto') ||
-        n.contains('hurto')) {
       return 4;
-    }
-
-    if (n.contains('complementos') ||
-        n.contains('complemento') ||
-        n.contains('accesorio') ||
-        n.contains('accesorios')) {
-      return 5;
-    }
-
-    if (n.contains('drone') ||
-        n.contains('drones') ||
-        n.contains('dron')) {
-      return 6;
-    }
-
-    if (n.contains('energia') ||
-        n.contains('solar') ||
-        n.contains('alimentacion') ||
-        n.contains('bateria') ||
-        n.contains('fuente')) {
-      return 7;
     }
 
     if (n.contains('incendio') ||
         n.contains('fuego') ||
         n.contains('deteccion')) {
-      return 8;
+      return 5;
     }
 
     if (n.contains('networking') ||
@@ -195,6 +167,26 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
         n.contains('wifi') ||
         n.contains('switch') ||
         n.contains('router')) {
+      return 6;
+    }
+
+    if (n.contains('drone') ||
+        n.contains('drones') ||
+        n.contains('dron')) {
+      return 7;
+    }
+
+    if (n.contains('energia') ||
+        n.contains('solar') ||
+        n.contains('alimentacion') ||
+        n.contains('bateria') ||
+        n.contains('fuente')) {
+      return 8;
+    }
+
+    if (n.contains('antihurto') ||
+        n.contains('anti hurto') ||
+        n.contains('hurto')) {
       return 9;
     }
 
@@ -357,7 +349,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
     );
   }
 
-  String? _getAssetForCategory(String name) {
+  String? _getIconAssetForCategory(String name) {
     final n = name
         .toLowerCase()
         .trim()
@@ -383,36 +375,65 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
         .replaceAll('û', 'u')
         .replaceAll('ñ', 'n');
 
-    // Solo assets locales. No usamos imágenes de WordPress/API.
-    if (n.contains('video') || n.contains('cctv') || n.contains('camara')) {
-      return 'assets/categorias/CCTV.png';
+    if (n.contains('video cctv') ||
+        n.contains('cctv hd') ||
+        n == 'cctv') {
+      return 'assets/images/category_video_cctv.png';
+    }
+
+    if (n.contains('video ip') ||
+        n.contains('ip hd') ||
+        n.contains('cctv ip')) {
+      return 'assets/images/category_video_ip.png';
+    }
+
+    if (n.contains('complementos') ||
+        n.contains('complemento')) {
+      return 'assets/images/category_complementos.png';
     }
 
     if (n.contains('intrusion') ||
         n.contains('alarma') ||
         n.contains('alarmas')) {
-      return 'assets/categorias/INTRUSION.png';
+      return 'assets/images/category_intrusion.png';
     }
 
     if (n.contains('acceso') ||
         n.contains('accesos') ||
         n.contains('control acceso')) {
-      return 'assets/categorias/ACCESOS.png';
+      return 'assets/images/category_accesos.png';
     }
 
     if (n.contains('incendio') ||
-        n.contains('fuego') ||
-        n.contains('deteccion')) {
-      return 'assets/categorias/CONTRA INCENDIOS.png';
+        n.contains('fuego')) {
+      return 'assets/images/category_incendio.png';
     }
 
     if (n.contains('networking') ||
-        n.contains('net') ||
-        n.contains('red') ||
-        n.contains('wifi') ||
-        n.contains('switch') ||
-        n.contains('router')) {
-      return 'assets/categorias/NETWORKING.png';
+        n.contains('network') ||
+        n.contains('redes')) {
+      return 'assets/images/category_networking.png';
+    }
+
+    if (n.contains('drone') ||
+        n.contains('drones') ||
+        n.contains('dron')) {
+      return 'assets/images/category_drones.png';
+    }
+
+    if (n.contains('energia') ||
+        n.contains('solar')) {
+      return 'assets/images/category_energia.png';
+    }
+
+    if (n.contains('antihurto') ||
+        n.contains('anti hurto') ||
+        n.contains('hurto')) {
+      return 'assets/images/category_antihurto.png';
+    }
+
+    if (n.contains('outlet')) {
+      return 'assets/images/category_outlet.png';
     }
 
     return null;
@@ -447,19 +468,19 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
     if (n.contains('video ip') ||
         n.contains('ip hd') ||
         n.contains('cctv ip')) {
-      return Icons.photo_camera_rounded;
+      return Icons.videocam_rounded;
     }
 
     if (n.contains('video cctv') ||
         n.contains('cctv hd') ||
         n.contains('cctv')) {
-      return Icons.videocam_rounded;
+      return Symbols.speed_camera_rounded;
     }
 
     if (n.contains('intrusion') ||
         n.contains('alarma') ||
         n.contains('alarmas')) {
-      return Icons.sensors_rounded;
+      return Icons.sensor_occupied_rounded;
     }
 
     if (n.contains('incendio') ||
@@ -471,7 +492,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
     if (n.contains('acceso') ||
         n.contains('accesos') ||
         n.contains('control acceso')) {
-      return Icons.vpn_key_rounded;
+      return Icons.key_rounded;
     }
 
     if (n.contains('networking') ||
@@ -480,20 +501,20 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
         n.contains('wifi') ||
         n.contains('switch') ||
         n.contains('router')) {
-      return Icons.hub_rounded;
+      return Icons.router_rounded;
     }
 
     if (n.contains('antihurto') ||
         n.contains('anti hurto') ||
         n.contains('hurto')) {
-      return Icons.lock_rounded;
+      return Icons.security_rounded;
     }
 
     if (n.contains('complementos') ||
         n.contains('complemento') ||
         n.contains('accesorio') ||
         n.contains('accesorios')) {
-      return Icons.extension_rounded;
+      return Icons.handyman_rounded;
     }
 
     if (n.contains('energia') ||
@@ -501,17 +522,17 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
         n.contains('alimentacion') ||
         n.contains('bateria') ||
         n.contains('fuente')) {
-      return Icons.bolt_rounded;
+      return Icons.battery_charging_full_rounded;
     }
 
     if (n.contains('drone') ||
         n.contains('drones') ||
         n.contains('dron')) {
-      return Icons.flight_takeoff_rounded;
+      return Symbols.drone_2_rounded;
     }
 
     if (n.contains('outlet')) {
-      return Icons.local_offer_rounded;
+      return Icons.sell_rounded;
     }
 
     return Icons.category_rounded;
@@ -521,7 +542,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
 class _CategoryTile extends StatelessWidget {
   final dynamic cat;
   final IconData icon;
-  final String? assetPath;
+  final String? iconAssetPath;
   final String subtitle;
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
@@ -529,7 +550,7 @@ class _CategoryTile extends StatelessWidget {
   const _CategoryTile({
     required this.cat,
     required this.icon,
-    this.assetPath,
+    this.iconAssetPath,
     required this.subtitle,
     this.onGoCart,
     this.onGoQuotes,
@@ -565,7 +586,7 @@ class _CategoryTile extends StatelessWidget {
             border: Border.all(color: const Color(0xFFE7E7E7)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.032),
+                color: Colors.black.withOpacity(0.032),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -577,30 +598,26 @@ class _CategoryTile extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: 58,
+                  height: 58,
                   decoration: const BoxDecoration(
                     color: Color(0xFFF8EAEA),
                     shape: BoxShape.circle,
                   ),
-                  child: assetPath == null
-                      ? Icon(
-                    icon,
-                    size: 25,
-                    color: AppColors.primary,
-                  )
-                      : Padding(
-                    padding: const EdgeInsets.all(7),
-                    child: Image.asset(
-                      assetPath!,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        icon,
-                        size: 25,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  ),
+                  child: iconAssetPath != null
+                      ? Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Image.asset(
+                            iconAssetPath!,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.high,
+                          ),
+                        )
+                      : Icon(
+                          icon,
+                          size: 30,
+                          color: AppColors.primary,
+                        ),
                 ),
                 const SizedBox(height: 10),
                 Text(

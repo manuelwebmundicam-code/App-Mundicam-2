@@ -176,8 +176,8 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
                                         colors: [
-                                          Colors.black.withValues(alpha: 0.03),
-                                          Colors.black.withValues(alpha: 0.84),
+                                          Colors.black.withOpacity(0.03),
+                                          Colors.black.withOpacity(0.84),
                                         ],
                                       ),
                                     ),

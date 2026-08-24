@@ -43,7 +43,7 @@ class BadgeIcon extends StatelessWidget {
                 border: Border.all(color: Colors.white, width: 2),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.red.withValues(alpha: 0.3),
+                    color: Colors.red.withOpacity(0.3),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),

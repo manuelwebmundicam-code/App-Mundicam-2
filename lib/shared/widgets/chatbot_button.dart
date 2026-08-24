@@ -20,12 +20,12 @@ class ChatbotButton extends StatelessWidget {
             color: const Color(0xFF111827),
             borderRadius: BorderRadius.circular(17),
             border: Border.all(
-              color: Colors.white.withValues(alpha: 0.12),
+              color: Colors.white.withOpacity(0.12),
               width: 1.1,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.16),
+                color: Colors.black.withOpacity(0.16),
                 blurRadius: 12,
                 offset: const Offset(0, 5),
               ),
@@ -37,7 +37,7 @@ class ChatbotButton extends StatelessWidget {
                 width: 27,
                 height: 27,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
+                  color: Colors.white.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(11),
                 ),
                 child: Image.asset(
@@ -75,7 +75,7 @@ class ChatbotButton extends StatelessWidget {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF34D399).withValues(alpha: 0.55),
+                      color: const Color(0xFF34D399).withOpacity(0.55),
                       blurRadius: 6,
                       spreadRadius: 1,
                     ),

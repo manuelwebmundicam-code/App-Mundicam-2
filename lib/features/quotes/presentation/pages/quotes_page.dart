@@ -1,18 +1,23 @@
 // pages/quotes_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/network/api_service.dart';
+import '../../../../core/analytics/mundicam_analytics_service.dart';
 import '../../../../shared/theme/app_theme.dart';
 import '../../../../shared/widgets/professional_page_app_bar.dart';
-import '../../../../shared/providers/badge_provider.dart';
+import '../../../cart/presentation/pages/cart_page.dart';
 import '../../../cart/presentation/providers/cart_provider.dart';
+import '../../../../shared/providers/badge_provider.dart';
+import '../../../catalog/data/models/producto.dart';
+import '../../../catalog/presentation/pages/producto_detalles_page.dart';
 import '../../data/models/quote_model.dart';
 import '../../data/models/local_quote_model.dart';
 import '../providers/quote_provider.dart';
 import '../providers/local_quote_provider.dart';
+import '../providers/quotes_sync_provider.dart';
 
 class QuotesPage extends ConsumerStatefulWidget {
   final VoidCallback? onGoHome;
@@ -38,6 +43,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   bool _isLoadingAction = false;
   String? _processingQuoteId;
   String? _deletingItemKey;
+  String? _updatingItemKey;
 
   final Set<String> _hiddenQuoteIds = <String>{};
   final Set<String> _expandedQuoteIds = <String>{};
@@ -48,6 +54,13 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   final Map<String, Future<List<_QuoteLineItem>>> _webItemsFutures =
   <String, Future<List<_QuoteLineItem>>>{};
+
+  final Map<String, Map<String, dynamic>> _webDetailsCache =
+  <String, Map<String, dynamic>>{};
+
+  final Map<int, Product?> _productPreviewCache = <int, Product?>{};
+
+  final Map<int, Future<Product?>> _productPreviewFutures = <int, Future<Product?>>{};
 
   @override
   void initState() {
@@ -78,6 +91,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     setState(() {
       _webItemsCache.clear();
       _webItemsFutures.clear();
+      _webDetailsCache.clear();
       _expandedQuoteIds.clear();
       _expandedLocalQuoteIds.clear();
     });
@@ -85,6 +99,217 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     ref.invalidate(quotesProvider);
     ref.invalidate(quoteBadgeProvider);
     ref.invalidate(cartBadgeProvider);
+  }
+
+  Future<void> _openProductDetail(
+    int productId,
+    String productName, {
+    String sku = '',
+  }) async {
+    if ((productId <= 0 && sku.trim().isEmpty && productName.trim().isEmpty) ||
+        _isLoadingAction) {
+      return;
+    }
+
+    final navigator = Navigator.of(context);
+
+    try {
+      final product = await _loadProductPreview(
+        productId,
+        sku: sku,
+        productName: productName,
+        forceRetry: true,
+      );
+
+      if (!mounted) return;
+
+      if (product == null) {
+        _showSnackBar('No se pudo abrir el producto "$productName".', Colors.red);
+        return;
+      }
+
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => ProductDetailScreen(
+            product: product,
+            onGoCart: widget.onGoCart,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Error abriendo producto: $e', Colors.red);
+    }
+  }
+
+
+  Future<Product?> _loadProductPreview(
+    int productId, {
+    String sku = '',
+    String productName = '',
+    bool forceRetry = false,
+  }) {
+    final cleanSku = sku.trim().toLowerCase();
+    final cleanName = productName.trim().toLowerCase();
+    final cacheKey = productId > 0
+        ? productId
+        : (cleanSku.isNotEmpty ? cleanSku.hashCode : cleanName.hashCode);
+    if (cacheKey == 0) return Future.value(null);
+    if (!forceRetry && _productPreviewCache.containsKey(cacheKey)) {
+      return Future.value(_productPreviewCache[cacheKey]);
+    }
+    if (!forceRetry && _productPreviewFutures.containsKey(cacheKey)) {
+      return _productPreviewFutures[cacheKey]!;
+    }
+
+    final future = _fetchProductPreview(
+      productId,
+      sku: sku,
+      productName: productName,
+      cacheKey: cacheKey,
+    );
+    _productPreviewFutures[cacheKey] = future;
+    return future;
+  }
+
+  Future<Product?> _fetchProductPreview(
+    int productId, {
+    required int cacheKey,
+    String sku = '',
+    String productName = '',
+  }) async {
+    final api = ApiService();
+
+    Product? product;
+
+    if (productId > 0) {
+      for (var attempt = 0; attempt < 2; attempt++) {
+        product = await api.getProductoById(productId);
+        if (product != null) break;
+        await Future.delayed(Duration(milliseconds: 180 + (attempt * 220)));
+      }
+    }
+
+    product ??= await _findProductFallback(
+      api,
+      sku: sku,
+      productName: productName,
+      productId: productId,
+    );
+
+    _productPreviewCache[cacheKey] = product;
+    _productPreviewFutures.remove(cacheKey);
+    return product;
+  }
+
+  Future<Product?> _findProductFallback(
+    ApiService api, {
+    required String sku,
+    required String productName,
+    required int productId,
+  }) async {
+    final cleanSku = sku.trim();
+    final cleanName = productName.trim();
+
+    final queries = <String>[
+      if (cleanSku.isNotEmpty) cleanSku,
+      if (cleanName.isNotEmpty) cleanName,
+    ];
+
+    for (final query in queries) {
+      try {
+        final result = await api.getProductosCatalogoFiltrado(
+          search: query,
+          page: 1,
+          perPage: 8,
+        );
+        if (result.products.isEmpty) continue;
+
+        if (productId > 0) {
+          final byId = result.products.where((p) => p.id == productId).toList();
+          if (byId.isNotEmpty) return byId.first;
+        }
+
+        if (cleanSku.isNotEmpty) {
+          final normalizedSku = cleanSku.toLowerCase();
+          final bySku = result.products.where(
+            (p) => p.sku.trim().toLowerCase() == normalizedSku,
+          ).toList();
+          if (bySku.isNotEmpty) return bySku.first;
+        }
+
+        return result.products.first;
+      } catch (_) {
+        // La imagen de presupuestos no debe romper la pantalla. Si una búsqueda
+        // auxiliar falla, probamos la siguiente fuente y dejamos el placeholder.
+      }
+    }
+
+    return null;
+  }
+
+  Widget _buildIncrementProductButton({
+    required bool isUpdating,
+    required VoidCallback onPressed,
+  }) {
+    return Material(
+      color: const Color(0xFFEAF8EF),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: isUpdating ? null : onPressed,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: isUpdating
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF008F49),
+                  ),
+                )
+              : const Icon(
+                  Icons.add_rounded,
+                  color: Color(0xFF008F49),
+                  size: 25,
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeleteProductButton({
+    required bool isDeleting,
+    required VoidCallback onPressed,
+  }) {
+    if (isDeleting) {
+      return const SizedBox(
+        width: 44,
+        height: 44,
+        child: Padding(
+          padding: EdgeInsets.all(10),
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red),
+        ),
+      );
+    }
+
+    return Tooltip(
+      message: 'Eliminar producto',
+      child: Material(
+        color: Colors.red.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onPressed,
+          child: const SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(Icons.close_rounded, size: 24, color: Colors.red),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _saveHiddenIds() async {
@@ -100,6 +325,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     setState(() {
       _webItemsCache[quoteId] = <_QuoteLineItem>[];
       _webItemsFutures.remove(quoteId);
+      _webDetailsCache.remove(quoteId);
       _expandedQuoteIds.remove(quoteId);
     });
     ref.invalidate(quotesProvider);
@@ -126,8 +352,13 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       final api = ApiService();
       final orderId = _extractOrderId(quote);
       final orden = await api.getOrdenCompleta(orderId);
-      if (orden == null || orden['line_items'] == null) return <_QuoteLineItem>[];
-      final rawItems = orden['line_items'];
+      if (orden == null) return <_QuoteLineItem>[];
+      _webDetailsCache[quote.id] = Map<String, dynamic>.from(orden);
+
+      // PHP 1.9.26 devuelve el detalle completo en `items`; versiones anteriores
+      // podían devolver `line_items`. Aceptamos ambas formas para no volver a
+      // mostrar "Sin productos" cuando el presupuesto sí está correcto en la web.
+      final rawItems = orden['items'] ?? orden['line_items'] ?? orden['products'];
       final lineItems = rawItems is List ? rawItems : <dynamic>[];
       final items = lineItems
           .map((item) => _QuoteLineItem.fromWooLineItem(item))
@@ -140,6 +371,86 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     }
   }
 
+  Future<void> _incrementarProductoWeb(
+    QuoteMundicam quote,
+    _QuoteLineItem item,
+  ) async {
+    if (_isLoadingAction || _updatingItemKey != null || _deletingItemKey != null) {
+      return;
+    }
+
+    final itemKey = '${quote.id}_${item.lineItemId}_${item.productId}_${item.variationId}';
+    setState(() => _updatingItemKey = itemKey);
+
+    try {
+      final actualizado = await ApiService().actualizarPresupuesto(
+        orderId: _extractOrderId(quote),
+        lineItemId: item.lineItemId,
+        productId: item.productId,
+        variationId: item.variationId,
+        quantity: item.quantity + 1,
+      );
+      if (!actualizado) {
+        throw Exception('No se pudo actualizar la cantidad.');
+      }
+
+      _webItemsCache.remove(quote.id);
+      _webItemsFutures.remove(quote.id);
+      _webDetailsCache.remove(quote.id);
+      ref.invalidate(quotesProvider);
+      ref.invalidate(quoteBadgeProvider);
+
+      if (mounted) {
+        setState(() {});
+        _showSnackBar(
+          'Cantidad actualizada: ${item.quantity + 1} ud.',
+          Colors.green.shade700,
+        );
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar('No se pudo aumentar la cantidad: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _updatingItemKey = null);
+    }
+  }
+
+  Future<void> _incrementarProductoLocal(
+    LocalQuote quote,
+    LocalQuoteItem item,
+  ) async {
+    if (_isLoadingAction || _updatingItemKey != null || _deletingItemKey != null) {
+      return;
+    }
+
+    final itemKey = '${quote.orderId}_${item.productId}_${item.variationId}';
+    setState(() => _updatingItemKey = itemKey);
+
+    try {
+      await ref.read(localQuotesProvider.notifier).anadirItem(
+            orderId: quote.orderId,
+            item: LocalQuoteItem(
+              productId: item.productId,
+              variationId: item.variationId,
+              productName: item.productName,
+              quantity: 1,
+              price: item.price,
+            ),
+          );
+      ref.invalidate(quoteBadgeProvider);
+      ref.invalidate(cartBadgeProvider);
+      if (mounted) {
+        _showSnackBar(
+          'Cantidad actualizada: ${item.quantity + 1} ud.',
+          Colors.green.shade700,
+        );
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar('No se pudo aumentar la cantidad: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _updatingItemKey = null);
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // ELIMINAR PRODUCTO INDIVIDUAL - WEB
   // ═══════════════════════════════════════════════════════════════
@@ -147,7 +458,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Future<void> _eliminarProductoWeb(QuoteMundicam quote, _QuoteLineItem item) async {
     if (_isLoadingAction || _deletingItemKey != null) return;
 
-    final itemKey = '${quote.id}_${item.productId}';
+    final itemKey = '${quote.id}_${item.lineItemId}_${item.productId}_${item.variationId}';
     setState(() { _deletingItemKey = itemKey; });
 
     try {
@@ -182,16 +493,25 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   // ELIMINAR PRODUCTO INDIVIDUAL - LOCAL
   // ═══════════════════════════════════════════════════════════════
 
-  Future<void> _eliminarProductoLocal(LocalQuote quote, int productId, String productName) async {
+  Future<void> _eliminarProductoLocal(
+    LocalQuote quote,
+    int productId,
+    String productName, {
+    int variationId = 0,
+  }) async {
     if (_isLoadingAction || _deletingItemKey != null) return;
 
-    final itemKey = '${quote.orderId}_$productId';
+    final itemKey = '${quote.orderId}_${productId}_$variationId';
     setState(() { _deletingItemKey = itemKey; });
 
     try {
       final notifier = ref.read(localQuotesProvider.notifier);
 
-      await notifier.eliminarItem(orderId: quote.orderId, productId: productId);
+      await notifier.eliminarItem(
+        orderId: quote.orderId,
+        productId: productId,
+        variationId: variationId,
+      );
 
       // Verificar si el presupuesto quedó vacío
       final updated = notifier.getPresupuesto(quote.orderId);
@@ -214,43 +534,139 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   // ACCIONES
   // ═══════════════════════════════════════════════════════════════
 
+  Future<String?> _askLocalQuoteName(String initialName) async {
+    final controller = TextEditingController(text: initialName.trim());
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Nombre del presupuesto'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 80,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              labelText: 'Nombre',
+              hintText: 'Ej. Instalación oficina Madrid',
+            ),
+            onSubmitted: (value) {
+              final clean = value.trim();
+              if (clean.isNotEmpty) Navigator.of(context).pop(clean);
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final clean = controller.text.trim();
+                if (clean.isNotEmpty) Navigator.of(context).pop(clean);
+              },
+              child: const Text('Guardar nombre'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _renameLocalQuote(LocalQuote quote) async {
+    final name = await _askLocalQuoteName(quote.nombre);
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      await ref.read(localQuotesProvider.notifier).renombrarPresupuesto(
+            orderId: quote.orderId,
+            nombre: name.trim(),
+          );
+      if (mounted) {
+        _showSnackBar('Nombre actualizado.', Colors.green.shade700);
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar('No se pudo cambiar el nombre: $e', Colors.red);
+    }
+  }
+
   Future<void> _aceptarPresupuesto(QuoteMundicam quote) async {
     if (_isLoadingAction) return;
     final confirmar = await _showConfirmDialog(
       title: 'Aceptar presupuesto',
-      icon: Icons.check_circle_rounded,
+      icon: Icons.shopping_cart_checkout_rounded,
       iconColor: Colors.green,
-      content: 'Se moverán todos los productos al carrito para proceder al pago.\n\n'
-          'Presupuesto: #${quote.id}\nTotal: ${_formatMoney(quote.total)}',
-      confirmText: 'ACEPTAR Y PAGAR',
+      content: 'Los productos del presupuesto se cargarán en la cesta. '
+          'Podrás añadir, eliminar o cambiar cantidades antes de tramitar el pedido.\n\n'
+          'El presupuesto seguirá guardado hasta que el pago quede confirmado.\n\n'
+          'Presupuesto: #${quote.id}\nTotal actual: ${_formatMoney(quote.total)}',
+      confirmText: 'IR A LA CESTA',
       confirmColor: const Color(0xFF2E7D32),
     );
     if (confirmar != true || !mounted) return;
-    setState(() { _isLoadingAction = true; _processingQuoteId = 'accept_${quote.id}'; });
+
+    setState(() {
+      _isLoadingAction = true;
+      _processingQuoteId = 'accept_${quote.id}';
+    });
+
     try {
-      final api = ApiService();
-      final orderId = _extractOrderId(quote);
-      final items = await _loadWebQuoteItems(quote, forceRefresh: true);
-      int productosAnadidos = 0;
-      for (final item in items) {
-        if (item.productId <= 0) continue;
-        final producto = await api.getProductoById(item.productId);
-        if (producto == null) continue;
-        ref.read(cartProvider.notifier).addProduct(producto, item.quantity);
-        productosAnadidos++;
-        await api.eliminarProductoPresupuesto(orderId: orderId, productId: item.productId);
+      final quoteId = int.parse(_extractOrderId(quote));
+      final response =
+          await ApiService().prepararPresupuestoEnCarrito(quoteId: quoteId);
+      final rawCart = response['cart'] is Map
+          ? Map<String, dynamic>.from(response['cart'] as Map)
+          : <String, dynamic>{};
+      final rawItems = rawCart['cart_items'] ?? rawCart['items'];
+      final cartItems = <CartItem>[];
+
+      if (rawItems is List) {
+        for (final raw in rawItems.whereType<Map>()) {
+          final json = Map<String, dynamic>.from(raw);
+          final quantity = int.tryParse(json['quantity']?.toString() ?? '') ?? 1;
+          final product = Product.fromJson(json);
+          if (product.id > 0 && quantity > 0 && product.canAddToCart) {
+            cartItems.add(CartItem(product: product, quantity: quantity));
+          }
+        }
       }
-      await _hideWebQuote(quote.id);
+
+      if (cartItems.isEmpty) {
+        throw Exception('El presupuesto no contiene productos disponibles.');
+      }
+
+      await ref.read(cartProvider.notifier).replaceCartFromQuote(
+        items: cartItems,
+        sourceQuoteId: quoteId,
+      );
+
+      ref.invalidate(cartBadgeProvider);
       if (!mounted) return;
-      _showSnackBar('✅ $productosAnadidos producto${productosAnadidos != 1 ? 's' : ''} añadido${productosAnadidos != 1 ? 's' : ''} al carrito.', Colors.green.shade700);
-      await Future.delayed(const Duration(milliseconds: 350));
-      if (mounted && widget.onGoCart != null) widget.onGoCart!();
+      if (widget.onGoCart != null) {
+        widget.onGoCart!();
+      } else {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const CartPage()),
+        );
+      }
     } catch (e) {
-      _showSnackBar('Error: $e', Colors.red);
+      if (mounted) {
+        _showSnackBar(
+          'No se pudo cargar el presupuesto en la cesta: $e',
+          Colors.red,
+        );
+      }
     } finally {
-      if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
+      if (mounted) {
+        setState(() {
+          _isLoadingAction = false;
+          _processingQuoteId = null;
+        });
+      }
     }
   }
+
 
   Future<void> _guardarPresupuesto(QuoteMundicam quote) async {
     if (_isLoadingAction) return;
@@ -258,31 +674,14 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       title: 'Guardar presupuesto',
       icon: Icons.save_alt_rounded,
       iconColor: Colors.blue,
-      content: 'Se preparará un email para pedidos@mundicam.com.\n\n'
+      content: 'Este presupuesto ya está guardado en tu cuenta.\n\n'
           'Presupuesto: #${quote.id}\nTotal: ${_formatMoney(quote.total)}\n\n'
-          'Después de guardarlo se quitará de pendientes.',
-      confirmText: 'GUARDAR Y ENVIAR',
+          'Seguirá visible en la sección Presupuestos de la app y en la web.',
+      confirmText: 'ENTENDIDO',
       confirmColor: const Color(0xFF1565C0),
     );
     if (confirmar != true || !mounted) return;
-    setState(() { _isLoadingAction = true; _processingQuoteId = 'save_${quote.id}'; });
-    try {
-      final items = await _loadWebQuoteItems(quote, forceRefresh: true);
-      if (items.isEmpty) throw Exception('Este presupuesto no tiene productos.');
-      final cuerpo = _buildEmailBody(quote.id, items, quote.total);
-      final mailtoUri = Uri(scheme: 'mailto', path: 'pedidos@mundicam.com', queryParameters: {
-        'subject': 'Presupuesto #${quote.id} - ${_formatMoney(quote.total)}',
-        'body': cuerpo,
-      });
-      if (!await canLaunchUrl(mailtoUri)) throw Exception('No se pudo abrir el cliente de correo.');
-      await launchUrl(mailtoUri, mode: LaunchMode.externalApplication);
-      await _hideWebQuote(quote.id);
-      _showSnackBar('📧 Presupuesto #${quote.id} enviado por email.', const Color(0xFF1565C0));
-    } catch (e) {
-      _showSnackBar('Error: $e', Colors.red);
-    } finally {
-      if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
-    }
+    _showSnackBar('✅ Presupuesto #${quote.id} · ${quote.statusLabel}.', const Color(0xFF1565C0));
   }
 
   Future<void> _eliminarPresupuesto(QuoteMundicam quote) async {
@@ -319,33 +718,77 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     if (_isLoadingAction) return;
     final confirmar = await _showConfirmDialog(
       title: 'Aceptar presupuesto',
-      icon: Icons.check_circle_rounded,
+      icon: Icons.shopping_cart_checkout_rounded,
       iconColor: Colors.green,
-      content: 'Se moverán todos los productos al carrito.\n\n"${localQuote.nombre}"\n${localQuote.items.length} productos\nTotal: ${_formatMoney(localQuote.total)}',
-      confirmText: 'ACEPTAR Y PAGAR',
+      content: 'Los productos se cargarán en la cesta para que puedas modificarla '
+          'antes de pagar.\n\n'
+          'Este presupuesto seguirá guardado únicamente en el móvil hasta que el '
+          'pago quede confirmado. No se creará un presupuesto en la web.\n\n'
+          '"${localQuote.nombre}"\n${localQuote.items.length} productos\n'
+          'Total actual: ${_formatMoney(localQuote.total)}',
+      confirmText: 'IR A LA CESTA',
       confirmColor: const Color(0xFF2E7D32),
     );
     if (confirmar != true || !mounted) return;
-    setState(() { _isLoadingAction = true; _processingQuoteId = 'local_accept_${localQuote.orderId}'; });
+
+    setState(() {
+      _isLoadingAction = true;
+      _processingQuoteId = 'local_accept_${localQuote.orderId}';
+    });
+
     try {
-      final api = ApiService();
+      final cartItems = <CartItem>[];
       for (final item in localQuote.items) {
-        final producto = await api.getProductoById(item.productId);
-        if (producto != null) ref.read(cartProvider.notifier).addProduct(producto, item.quantity);
+        final lookupId = item.variationId > 0 ? item.variationId : item.productId;
+        final product = await ApiService().getProductoById(lookupId);
+        if (product == null || !product.canAddToCart) {
+          throw Exception(
+            'El producto "${item.productName}" ya no está disponible para compra.',
+          );
+        }
+        cartItems.add(
+          CartItem(
+            product: product,
+            quantity: item.quantity > 0 ? item.quantity : 1,
+          ),
+        );
       }
-      await ref.read(localQuotesProvider.notifier).eliminarPresupuesto(localQuote.orderId);
+
+      if (cartItems.isEmpty) {
+        throw Exception('El presupuesto no contiene productos disponibles.');
+      }
+
+      await ref.read(cartProvider.notifier).replaceCartFromQuote(
+            items: cartItems,
+            sourceLocalQuoteUuid: localQuote.orderId,
+          );
+
       ref.invalidate(cartBadgeProvider);
-      ref.invalidate(quoteBadgeProvider);
       if (!mounted) return;
-      _showSnackBar('✅ "${localQuote.nombre}" añadido al carrito.', Colors.green.shade700);
-      await Future.delayed(const Duration(milliseconds: 350));
-      if (mounted && widget.onGoCart != null) widget.onGoCart!();
+      if (widget.onGoCart != null) {
+        widget.onGoCart!();
+      } else {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const CartPage()),
+        );
+      }
     } catch (e) {
-      _showSnackBar('Error: $e', Colors.red);
+      if (mounted) {
+        _showSnackBar(
+          'No se pudo cargar el presupuesto local en la cesta: $e',
+          Colors.red,
+        );
+      }
     } finally {
-      if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
+      if (mounted) {
+        setState(() {
+          _isLoadingAction = false;
+          _processingQuoteId = null;
+        });
+      }
     }
   }
+
 
   Future<void> _guardarLocalPresupuesto(LocalQuote localQuote) async {
     if (_isLoadingAction) return;
@@ -353,24 +796,28 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       title: 'Guardar presupuesto',
       icon: Icons.save_alt_rounded,
       iconColor: Colors.blue,
-      content: 'Se preparará un email para pedidos@mundicam.com.\n\n"${localQuote.nombre}"\n${localQuote.items.length} productos\nTotal: ${_formatMoney(localQuote.total)}',
-      confirmText: 'GUARDAR Y ENVIAR',
+      content: 'Se guardará este presupuesto en tu cuenta para que aparezca en la app y en la web.\n\n'
+          '"${localQuote.nombre}"\n${localQuote.items.length} productos\nTotal: ${_formatMoney(localQuote.total)}',
+      confirmText: 'GUARDAR PRESUPUESTO',
       confirmColor: const Color(0xFF1565C0),
     );
     if (confirmar != true || !mounted) return;
     setState(() { _isLoadingAction = true; _processingQuoteId = 'local_save_${localQuote.orderId}'; });
     try {
-      final cuerpo = _buildLocalEmailBody(localQuote);
-      final mailtoUri = Uri(scheme: 'mailto', path: 'pedidos@mundicam.com', queryParameters: {
-        'subject': '${localQuote.nombre} - ${_formatMoney(localQuote.total)}',
-        'body': cuerpo,
-      });
-      if (!await canLaunchUrl(mailtoUri)) throw Exception('No se pudo abrir el cliente de correo.');
-      await launchUrl(mailtoUri, mode: LaunchMode.externalApplication);
-      await ref.read(localQuotesProvider.notifier).eliminarPresupuesto(localQuote.orderId);
+      final email = await ref.read(currentQuoteEmailProvider.future);
+      if (email == null || email.trim().isEmpty) {
+        throw Exception('No se pudo identificar el email del cliente.');
+      }
+
+      await ref.read(quoteSyncProvider).syncAndRemoveLocalQuote(
+        orderId: localQuote.orderId,
+        email: email.trim(),
+      );
+
+      ref.invalidate(quotesProvider);
       ref.invalidate(quoteBadgeProvider);
       ref.invalidate(cartBadgeProvider);
-      _showSnackBar('📧 "${localQuote.nombre}" enviado por email.', const Color(0xFF1565C0));
+      _showSnackBar('✅ "${localQuote.nombre}" guardado en la nube.', const Color(0xFF1565C0));
     } catch (e) {
       _showSnackBar('Error: $e', Colors.red);
     } finally {
@@ -396,18 +843,28 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       ref.invalidate(quoteBadgeProvider);
       ref.invalidate(cartBadgeProvider);
       _showSnackBar('"$nombre" eliminado.', Colors.grey.shade700);
+    } catch (e) {
+      _showSnackBar('No se pudo eliminar el presupuesto: $e', Colors.red);
     } finally {
       if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
     }
   }
 
   void _handleBack() {
+    // Abierto desde Perfil mediante Navigator.push: la flecha vuelve siempre
+    // a Perfil, sin sustituir la pila por la pantalla de inicio.
+    if (widget.onGoHome == null) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+
+    // Como pestaña principal conservamos el comportamiento existente.
     if (_isLoadingAction) return;
     if (_expandedQuoteIds.isNotEmpty || _expandedLocalQuoteIds.isNotEmpty) {
       setState(() { _expandedQuoteIds.clear(); _expandedLocalQuoteIds.clear(); });
       return;
     }
-    if (widget.onGoHome != null) widget.onGoHome!();
+    widget.onGoHome!();
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -416,6 +873,8 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 
   @override
   Widget build(BuildContext context) {
+    MundicamAnalyticsService.instance
+        .trackScreenViewForRoute(context, 'quotes');
     final quotesAsync = ref.watch(quotesProvider);
     final localQuotes = ref.watch(localQuotesProvider);
     final localQuotesActivos = localQuotes.where((q) => !q.isExpired).toList();
@@ -472,7 +931,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: Row(
         children: [
@@ -481,7 +940,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             decoration: BoxDecoration(
               gradient: const LinearGradient(colors: [AppColors.primary, Color(0xFFE53935)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               borderRadius: BorderRadius.circular(14),
-              boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3))],
+              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))],
             ),
             child: const Icon(Icons.request_quote_rounded, color: Colors.white, size: 22),
           ),
@@ -509,7 +968,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
         border: Border.all(color: const Color(0xFFF0F0F0)),
       ),
       child: ClipRRect(
@@ -525,13 +984,19 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           }),
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.folder_rounded, color: Colors.orange, size: 24),
           ),
           title: Row(
             children: [
               Expanded(child: Text(quote.nombre, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Color(0xFF1A1A1A)))),
-              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Cambiar nombre',
+                visualDensity: VisualDensity.compact,
+                onPressed: isProcessing ? null : () => _renameLocalQuote(quote),
+                icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.orange),
+              ),
+              const SizedBox(width: 4),
               _buildBadge('LOCAL', Colors.orange),
             ],
           ),
@@ -576,7 +1041,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
         border: Border.all(color: const Color(0xFFF0F0F0)),
       ),
       child: ClipRRect(
@@ -593,7 +1058,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           },
           leading: Container(
             width: 46, height: 46,
-            decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
             child: const Icon(Icons.cloud_rounded, color: Colors.blue, size: 24),
           ),
           title: Row(
@@ -610,6 +1075,16 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
                 Icon(Icons.euro_rounded, size: 13, color: Colors.grey[400]),
                 const SizedBox(width: 2),
                 Text(_formatMoney(quote.total), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                const SizedBox(width: 12),
+                Icon(Icons.info_outline_rounded, size: 13, color: Colors.grey[400]),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    quote.statusLabel,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w600),
+                  ),
+                ),
               ],
             ),
           ),
@@ -620,10 +1095,10 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
             _buildWebExpandedContent(quote),
             if (!isProcessing) ...[
               const SizedBox(height: 14),
-              _buildCardButtons(
-                onDelete: () => _eliminarPresupuesto(quote),
-                onSave: () => _guardarPresupuesto(quote),
-                onAccept: () => _aceptarPresupuesto(quote),
+              _buildGradientButton(
+                'ACEPTAR Y PAGAR',
+                Icons.shopping_cart_rounded,
+                () => _aceptarPresupuesto(quote),
               ),
             ],
           ],
@@ -642,89 +1117,577 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
         if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(14), child: Text('Error al cargar.', style: TextStyle(color: Colors.red)));
         final items = snapshot.data ?? [];
         if (items.isEmpty) return const Padding(padding: EdgeInsets.all(14), child: Text('Sin productos.', style: TextStyle(color: Colors.grey)));
-        return Column(children: items.map((item) => _buildWebItemTile(quote, item)).toList());
+        final detail = _webDetailsCache[quote.id] ?? <String, dynamic>{};
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ...items.map((item) => _buildWebItemTile(quote, item)),
+            const SizedBox(height: 8),
+            _buildQuoteTotalsBreakdown(
+              detail: detail,
+              items: items,
+              fallbackTotal: quote.total,
+            ),
+          ],
+        );
       },
     );
   }
 
-  // ──── ITEMS ────
-  Widget _buildLocalItemTile(LocalQuote quote, LocalQuoteItem item) {
-    final itemKey = '${quote.orderId}_${item.productId}';
-    final isDeleting = _deletingItemKey == itemKey;
+
+  Widget _buildQuoteTotalsBreakdown({
+    required Map<String, dynamic> detail,
+    required List<_QuoteLineItem> items,
+    required double fallbackTotal,
+  }) {
+    final itemsSubtotal = items.fold<double>(0, (sum, item) => sum + item.total);
+    final subtotal = _firstMoney([
+      detail['subtotal'],
+      detail['subtotal_ex_tax'],
+      detail['items_subtotal'],
+      detail['line_subtotal'],
+    ], fallback: itemsSubtotal);
+    final total = _firstMoney([
+      detail['total'],
+      detail['grand_total'],
+      detail['amount'],
+    ], fallback: fallbackTotal > 0 ? fallbackTotal : subtotal);
+    final tax = _firstMoney([
+      detail['tax_total'],
+      detail['total_tax'],
+      detail['iva'],
+    ], fallback: total > subtotal ? total - subtotal : 0);
+    final shipping = _firstMoney([
+      detail['shipping_total'],
+      detail['shipping'],
+    ]);
+    final discount = _firstMoney([
+      detail['discount_total'],
+      detail['discount'],
+    ]);
+    final fees = _firstMoney([
+      detail['fees_total'],
+      detail['fee_total'],
+    ]);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.only(top: 2, bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAFAFA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFECEFF3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Total del presupuesto',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF008F49),
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildTotalRow('Subtotal', subtotal),
+          if (tax > 0.004) _buildTotalRow('IVA 21%', tax),
+          if (shipping > 0.004) _buildTotalRow('Envío', shipping),
+          if (fees.abs() > 0.004) _buildTotalRow('Cargos', fees),
+          if (discount > 0.004) _buildTotalRow('Descuento', -discount),
+          const Divider(height: 18),
+          _buildTotalRow('Total', total, strong: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuoteCustomerDetails(Map<String, dynamic> detail) {
+    final billing = _asStringMap(detail['billing']);
+    if (billing.isEmpty) return const SizedBox.shrink();
+
+    final firstName = _cleanText(billing['first_name']);
+    final lastName = _cleanText(billing['last_name']);
+    final fullName = _firstText([
+      '$firstName $lastName'.trim(),
+      billing['name'],
+      billing['display_name'],
+    ]);
+    final company = _cleanText(billing['company']);
+    final address1 = _cleanText(billing['address_1']);
+    final address2 = _cleanText(billing['address_2']);
+    final address = address2.isNotEmpty && address2 != address1
+        ? '$address1\n$address2'.trim()
+        : address1;
+    final city = _cleanText(billing['city']);
+    final postcode = _cleanText(billing['postcode']);
+    final state = _cleanText(billing['state']);
+    final country = _formatCountry(_cleanText(billing['country']));
+    final phone = _cleanText(billing['phone']);
+    final email = _cleanText(billing['email']);
+
+    final rows = <Widget>[
+      if (fullName.isNotEmpty) _buildCustomerRow('Nombre', fullName),
+      if (company.isNotEmpty) _buildCustomerRow('Empresa', company),
+      if (address.isNotEmpty) _buildCustomerRow('Dirección', address),
+      if (city.isNotEmpty) _buildCustomerRow('Ciudad', city),
+      if (postcode.isNotEmpty) _buildCustomerRow('Código postal', postcode),
+      if (state.isNotEmpty) _buildCustomerRow('Estado/Provincia', state),
+      if (country.isNotEmpty) _buildCustomerRow('País', country),
+      if (phone.isNotEmpty) _buildCustomerRow('Teléfono', phone),
+      if (email.isNotEmpty) _buildCustomerRow('Email', email),
+    ];
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFECEFF3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Detalles de cliente',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF008F49),
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...rows,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTotalRow(String label, double value, {bool strong = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: Colors.orange.shade300, shape: BoxShape.circle)),
-          const SizedBox(width: 10),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(item.productName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF1A1A1A)), maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 3),
-              Text('${item.quantity} ud × ${_formatMoney(item.price)} = ${_formatMoney(item.subtotal)}', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-            ]),
-          ),
-          if (isDeleting)
-            const SizedBox(width: 28, height: 28, child: Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red)))
-          else
-            IconButton(
-              onPressed: () => _eliminarProductoLocal(quote, item.productId, item.productName),
-              icon: const Icon(Icons.close_rounded, size: 16, color: Colors.red),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: strong ? 14 : 12,
+                fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                color: const Color(0xFF1A1A1A),
+              ),
             ),
+          ),
+          Text(
+            _formatMoney(value),
+            style: TextStyle(
+              fontSize: strong ? 16 : 12,
+              fontWeight: FontWeight.w900,
+              color: strong ? AppColors.primary : const Color(0xFF1A1A1A),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCustomerRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+              color: Colors.grey[500],
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.25,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF1A1A1A),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Map<String, dynamic> _asStringMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return <String, dynamic>{};
+  }
+
+  double _firstMoney(List<dynamic> values, {double fallback = 0}) {
+    for (final value in values) {
+      final parsed = _parseMoney(value);
+      if (parsed != null) return parsed;
+    }
+    return fallback;
+  }
+
+  double? _parseMoney(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    final raw = value.toString().trim();
+    if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
+    final clean = raw
+        .replaceAll('€', '')
+        .replaceAll(RegExp(r'[^0-9,.-]'), '')
+        .trim();
+    if (clean.isEmpty) return null;
+    if (clean.contains(',') && clean.contains('.')) {
+      return double.tryParse(clean.replaceAll('.', '').replaceAll(',', '.'));
+    }
+    return double.tryParse(clean.replaceAll(',', '.'));
+  }
+
+  String _firstText(List<dynamic> values) {
+    for (final value in values) {
+      final clean = _cleanText(value);
+      if (clean.isNotEmpty) return clean;
+    }
+    return '';
+  }
+
+  String _cleanText(dynamic value) {
+    if (value == null) return '';
+    final clean = value.toString().replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    if (clean.isEmpty || clean.toLowerCase() == 'null') return '';
+    return clean;
+  }
+
+  String _formatCountry(String value) {
+    final clean = value.trim();
+    if (clean.toUpperCase() == 'ES') return 'España';
+    return clean;
+  }
+
+  // ──── ITEMS ────
+  Widget _buildLocalItemTile(LocalQuote quote, LocalQuoteItem item) {
+    final itemKey = '${quote.orderId}_${item.productId}_${item.variationId}';
+    final isDeleting = _deletingItemKey == itemKey;
+    final isUpdating = _updatingItemKey == itemKey;
+
+    return _buildQuoteProductTile(
+      accentColor: Colors.orange.shade300,
+      productId: item.productId,
+      productName: item.productName,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      total: item.subtotal,
+      imageUrl: '',
+      sku: '',
+      isDeleting: isDeleting,
+      isUpdating: isUpdating,
+      onIncrement: () => _incrementarProductoLocal(quote, item),
+      onDelete: () => _eliminarProductoLocal(
+        quote,
+        item.productId,
+        item.productName,
+        variationId: item.variationId,
       ),
     );
   }
 
   Widget _buildWebItemTile(QuoteMundicam quote, _QuoteLineItem item) {
-    final itemKey = '${quote.id}_${item.productId}';
+    final itemKey = '${quote.id}_${item.lineItemId}_${item.productId}_${item.variationId}';
     final isDeleting = _deletingItemKey == itemKey;
+    final isUpdating = _updatingItemKey == itemKey;
+
+    return _buildQuoteProductTile(
+      accentColor: Colors.blue.shade300,
+      productId: item.productId,
+      productName: item.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      total: item.total,
+      taxTotal: item.taxTotal,
+      imageUrl: item.imageUrl,
+      sku: item.sku,
+      isDeleting: isDeleting,
+      isUpdating: isUpdating,
+      onIncrement: () => _incrementarProductoWeb(quote, item),
+      onDelete: () => _eliminarProductoWeb(quote, item),
+    );
+  }
+
+  Widget _buildQuoteProductTile({
+    required Color accentColor,
+    required int productId,
+    required String productName,
+    required int quantity,
+    required double unitPrice,
+    required double total,
+    double taxTotal = 0,
+    required String imageUrl,
+    required String sku,
+    required bool isDeleting,
+    required bool isUpdating,
+    required VoidCallback onIncrement,
+    required VoidCallback onDelete,
+  }) {
+    final baseImageUrl = imageUrl.trim();
+    final baseSku = sku.trim();
+    final baseName = productName.trim();
+
+    // Si el presupuesto ya trae imagen/SKU/nombre desde /quotes, no hacemos una
+    // llamada extra por producto. Así la pantalla abre más rápido y solo se
+    // consulta la ficha cuando falta información real.
+    final canLookupProduct = productId > 0 || baseSku.isNotEmpty || baseName.isNotEmpty;
+    final needsProductPreview = canLookupProduct &&
+        (baseImageUrl.isEmpty || baseSku.isEmpty || baseName.isEmpty || baseName == 'Producto');
+
+    if (!needsProductPreview) {
+      return _buildQuoteProductTileContent(
+        accentColor: accentColor,
+        productId: productId,
+        productName: baseName.isNotEmpty ? baseName : 'Producto',
+        quantity: quantity,
+        unitPrice: unitPrice,
+        total: total,
+        taxTotal: taxTotal,
+        imageUrl: baseImageUrl,
+        sku: baseSku,
+        isDeleting: isDeleting,
+        isUpdating: isUpdating,
+        onIncrement: onIncrement,
+        onDelete: onDelete,
+      );
+    }
+
+    return FutureBuilder<Product?>(
+      future: _loadProductPreview(
+        productId,
+        sku: baseSku,
+        productName: baseName,
+      ),
+      builder: (context, snapshot) {
+        final product = snapshot.data;
+        return _buildQuoteProductTileContent(
+          accentColor: accentColor,
+          productId: productId,
+          productName: baseName.isNotEmpty ? baseName : (product?.name.trim() ?? 'Producto'),
+          quantity: quantity,
+          unitPrice: unitPrice,
+          total: total,
+          taxTotal: taxTotal,
+          imageUrl: baseImageUrl.isNotEmpty ? baseImageUrl : (product?.imageUrl.trim() ?? ''),
+          sku: baseSku.isNotEmpty ? baseSku : (product?.sku.trim() ?? ''),
+          isDeleting: isDeleting,
+          isUpdating: isUpdating,
+          onIncrement: onIncrement,
+          onDelete: onDelete,
+        );
+      },
+    );
+  }
+
+  Widget _buildQuoteProductTileContent({
+    required Color accentColor,
+    required int productId,
+    required String productName,
+    required int quantity,
+    required double unitPrice,
+    required double total,
+    double taxTotal = 0,
+    required String imageUrl,
+    required String sku,
+    required bool isDeleting,
+    required bool isUpdating,
+    required VoidCallback onIncrement,
+    required VoidCallback onDelete,
+  }) {
+    final effectiveName = productName.trim().isNotEmpty ? productName.trim() : 'Producto';
+    final effectiveSku = sku.trim();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: Colors.blue.shade300, shape: BoxShape.circle)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF1A1A1A)), maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 3),
-              Text('${item.quantity} ud × ${_formatMoney(item.unitPrice)} = ${_formatMoney(item.total)}', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-            ]),
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFECEFF3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-          if (isDeleting)
-            const SizedBox(width: 28, height: 28, child: Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red)))
-          else
-            IconButton(
-              onPressed: () => _eliminarProductoWeb(quote, item),
-              icon: const Icon(Icons.close_rounded, size: 16, color: Colors.red),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            ),
         ],
       ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _openProductDetail(
+            productId,
+            effectiveName,
+            sku: effectiveSku,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildQuoteProductImage(
+                  imageUrl: imageUrl.trim(),
+                  accentColor: accentColor,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        effectiveName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13.5,
+                          height: 1.18,
+                          color: Color(0xFF171717),
+                        ),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      if (effectiveSku.isNotEmpty) ...[
+                        Text(
+                          'SKU: $effectiveSku',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 5),
+                      ],
+                      Row(
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(color: accentColor, shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '$quantity ud × ${_formatMoney(unitPrice)}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _formatMoney(total),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      if (taxTotal > 0.004) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          'IVA: ${_formatMoney(taxTotal)}',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildIncrementProductButton(
+                      isUpdating: isUpdating,
+                      onPressed: onIncrement,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildDeleteProductButton(
+                      isDeleting: isDeleting,
+                      onPressed: onDelete,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  Widget _buildQuoteProductImage({
+    required String imageUrl,
+    required Color accentColor,
+  }) {
+    return Container(
+      width: 74,
+      height: 74,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFECEFF3)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: imageUrl.isEmpty
+          ? Icon(Icons.image_outlined, color: accentColor, size: 30)
+          : CachedNetworkImage(
+              imageUrl: imageUrl,
+              fit: BoxFit.contain,
+              fadeInDuration: const Duration(milliseconds: 120),
+              placeholder: (_, __) => Icon(Icons.image_outlined, color: accentColor.withOpacity(0.45), size: 28),
+              errorWidget: (_, __, ___) => Icon(Icons.image_not_supported_outlined, color: accentColor, size: 28),
+            ),
     );
   }
 
   // ──── BOTONES DE ACCIÓN ────
-  Widget _buildCardButtons({required VoidCallback onDelete, required VoidCallback onSave, required VoidCallback onAccept}) {
+  Widget _buildCardButtons({
+    required VoidCallback onDelete,
+    required VoidCallback onSave,
+    required VoidCallback onAccept,
+    String saveText = 'Guardar',
+    IconData saveIcon = Icons.save_outlined,
+    Color saveColor = const Color(0xFF1565C0),
+    bool showDelete = true,
+  }) {
     return Column(
       children: [
         Row(
           children: [
-            Expanded(child: _buildOutlinedButton('Eliminar', Icons.delete_outline_rounded, Colors.red.shade600, onDelete)),
-            const SizedBox(width: 10),
-            Expanded(child: _buildOutlinedButton('Guardar', Icons.save_outlined, const Color(0xFF1565C0), onSave)),
+            if (showDelete) ...[
+              Expanded(child: _buildOutlinedButton('Eliminar', Icons.delete_outline_rounded, Colors.red.shade600, onDelete)),
+              const SizedBox(width: 10),
+            ],
+            Expanded(child: _buildOutlinedButton(saveText, saveIcon, saveColor, onSave)),
           ],
         ),
         const SizedBox(height: 10),
@@ -739,10 +1702,10 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       icon: Icon(icon, size: 15, color: color),
       label: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: color.withValues(alpha: 0.4)),
+        side: BorderSide(color: color.withOpacity(0.4)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         padding: const EdgeInsets.symmetric(vertical: 11),
-        backgroundColor: color.withValues(alpha: 0.03),
+        backgroundColor: color.withOpacity(0.03),
       ),
     );
   }
@@ -754,7 +1717,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       decoration: BoxDecoration(
         gradient: const LinearGradient(colors: [Color(0xFFA60909), Color(0xFFD60808)], begin: Alignment.centerLeft, end: Alignment.centerRight),
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: const Color(0xFFA60909).withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: const Color(0xFFA60909).withOpacity(0.35), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: ElevatedButton.icon(
         onPressed: onPressed,
@@ -769,7 +1732,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
   Widget _buildBadge(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
       child: Text(text, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5)),
     );
   }
@@ -807,7 +1770,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
           children: [
             Container(
               width: 56, height: 56,
-              decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.1), shape: BoxShape.circle),
+              decoration: BoxDecoration(color: iconColor.withOpacity(0.1), shape: BoxShape.circle),
               child: Icon(icon, color: iconColor, size: 28),
             ),
             const SizedBox(height: 16),
@@ -930,11 +1893,21 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
 // ═══════════════════════════════════════════════════════════════
 
 class _QuoteLineItem {
-  final int lineItemId, productId, quantity;
-  final String name;
-  final double total;
+  final int lineItemId, productId, variationId, quantity;
+  final String name, sku, imageUrl;
+  final double total, taxTotal;
 
-  const _QuoteLineItem({required this.lineItemId, required this.productId, required this.name, required this.quantity, required this.total});
+  const _QuoteLineItem({
+    required this.lineItemId,
+    required this.productId,
+    this.variationId = 0,
+    required this.name,
+    required this.quantity,
+    required this.total,
+    this.taxTotal = 0,
+    this.sku = '',
+    this.imageUrl = '',
+  });
 
   double get unitPrice => quantity <= 0 ? total : total / quantity;
 
@@ -942,16 +1915,60 @@ class _QuoteLineItem {
     final map = raw is Map ? raw : const <dynamic, dynamic>{};
     final subtotal = _parseDouble(map['subtotal']);
     final total = _parseDouble(map['total']);
+    final tax = _parseDouble(map['tax_total'] ?? map['tax'] ?? map['line_tax'] ?? map['total_tax']);
     return _QuoteLineItem(
-      lineItemId: _parseInt(map['id']),
-      productId: _parseInt(map['product_id']),
-      name: (map['name']?.toString() ?? 'Producto').replaceAll(RegExp(r'<[^>]*>'), '').trim(),
-      quantity: _parseInt(map['quantity'], fallback: 1),
+      lineItemId: _parseInt(map['id'] ?? map['line_item_id'] ?? map['item_id']),
+      productId: _parseInt(map['product_id'] ?? map['productId'] ?? map['id_product']),
+      variationId: _parseInt(map['variation_id'] ?? map['variationId'] ?? map['id_variation']),
+      name: (map['name']?.toString() ?? map['product_name']?.toString() ?? 'Producto').replaceAll(RegExp(r'<[^>]*>'), '').trim(),
+      quantity: _parseInt(map['quantity'] ?? map['qty'], fallback: 1),
       total: total > 0 ? total : subtotal,
+      taxTotal: tax,
+      sku: _parseString(map['sku'] ?? map['product_sku'] ?? map['ref'] ?? map['reference']),
+      imageUrl: _extractImageUrl(map),
     );
   }
 
   static int _parseInt(dynamic v, {int fallback = 0}) => v is int ? v : v is num ? v.toInt() : int.tryParse(v?.toString() ?? '') ?? fallback;
+
+  static String _parseString(dynamic v) {
+    if (v == null) return '';
+    final raw = v.toString().trim();
+    if (raw.isEmpty || raw.toLowerCase() == 'null') return '';
+    return raw;
+  }
+
+  static String _extractImageUrl(Map<dynamic, dynamic> map) {
+    final direct = _parseString(
+      map['image_url'] ??
+          map['imageUrl'] ??
+          map['product_image'] ??
+          map['productImage'] ??
+          map['image_src'] ??
+          map['imageSrc'] ??
+          map['thumbnail'] ??
+          map['thumbnail_url'] ??
+          map['thumbnailUrl'] ??
+          map['src'] ??
+          map['url'],
+    );
+    if (direct.isNotEmpty) return direct;
+
+    final image = map['image'];
+    if (image is Map) {
+      return _parseString(image['src'] ?? image['url'] ?? image['thumbnail']);
+    }
+
+    final images = map['images'];
+    if (images is List && images.isNotEmpty) {
+      final first = images.first;
+      if (first is Map) return _parseString(first['src'] ?? first['url'] ?? first['thumbnail']);
+      return _parseString(first);
+    }
+
+    return '';
+  }
+
   static double _parseDouble(dynamic v) {
     if (v == null) return 0;
     if (v is double) return v;

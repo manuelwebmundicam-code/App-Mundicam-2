@@ -20,10 +20,15 @@ final hiddenQuoteIdsProvider = StateProvider<Set<String>>((ref) => <String>{});
 /// 2. FirebaseAuth.currentUser.email
 /// 3. providerData.first.email
 Future<String?> _resolveCurrentUserEmail() async {
+  final apiEmail = await ApiService().currentSessionEmail();
+  if (apiEmail != null && apiEmail.isNotEmpty) {
+    return apiEmail;
+  }
+
   final user = FirebaseAuth.instance.currentUser;
 
   if (user == null) {
-    debugPrint('❌ No hay usuario autenticado');
+    debugPrint('❌ No hay usuario Firebase y la sesión App API no tiene email');
     return null;
   }
 
@@ -89,16 +94,22 @@ final quotesProvider = FutureProvider<List<QuoteMundicam>>((ref) async {
     final presupuestos = await apiService.getPresupuestosPorEmail(email);
 
     /// Nos quedamos con presupuestos útiles para la app.
-    /// Si en el futuro WooCommerce devuelve otros estados, evitamos mostrar pedidos reales como presupuestos.
+    /// PHP 1.9.25 crea los presupuestos reales como YITH `ywraq-pending`,
+    /// que WordPress muestra en web como `status-ywraq-pending` /
+    /// "Presupuesto pendiente".
+    /// Mantenemos `pending` solo como compatibilidad con presupuestos antiguos
+    /// creados antes de 1.9.25.
     final filtered = presupuestos.where((quote) {
-      final status = quote.status.toLowerCase().trim();
+      final status = quote.normalizedStatus;
 
       if (status.isEmpty) return true;
 
       return status == 'checkout-draft' ||
           status == 'pending' ||
           status == 'on-hold' ||
-          status == 'presupuesto';
+          status == 'presupuesto' ||
+          status.startsWith('ywraq-') ||
+          status.contains('quote');
     }).toList();
 
     debugPrint('📊 Presupuestos encontrados: ${filtered.length}');
