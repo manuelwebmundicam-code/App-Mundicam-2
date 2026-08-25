@@ -924,7 +924,7 @@ class _ProductSearchCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stockText = product.hasStock ? 'En stock' : 'Sin stock';
+    final stockText = product.hasStock ? 'Disponible 24/48h' : 'Sin Existencias';
     final stockColor = product.hasStock ? const Color(0xFF128C4A) : const Color(0xFFB91C1C);
     final priceText = product.hasValidPrice ? '${product.price} €' : 'Consultar precio';
 

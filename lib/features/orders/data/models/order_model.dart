@@ -354,6 +354,7 @@ class OrderActions {
 }
 
 class OrderItem {
+  final int lineItemId;
   final int productId;
   final int variationId;
   final String name;
@@ -369,6 +370,7 @@ class OrderItem {
   OrderItem({
     required this.productId,
     required this.name,
+    this.lineItemId = 0,
     required this.quantity,
     required this.total,
     this.variationId = 0,
@@ -398,6 +400,10 @@ class OrderItem {
     final price = _parseDouble(json['price'] ?? json['unit_price']);
 
     return OrderItem(
+      lineItemId: _parseInt(
+        json['line_item_id'] ?? json['lineItemId'] ?? json['id'],
+        fallback: 0,
+      ),
       productId: _parseInt(
         json['product_id'] ?? json['productId'] ?? json['id_product'],
         fallback: 0,

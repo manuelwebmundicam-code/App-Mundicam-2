@@ -143,7 +143,9 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
       }
 
       if (!mounted || token != _requestToken) return;
-      final sorted = _SearchEngine.sortByRelevance(result.products, _cleanedQuery);
+      final sorted = _orderBy.trim().isEmpty
+          ? _SearchEngine.sortByRelevance(result.products, _cleanedQuery)
+          : result.products;
       final localCategoryFacets = _categoryFacets(sorted, onlyMainLike: true);
       final brandFacets = _brandFacets(_SearchEngine.productsForFilterFacets(sorted, _cleanedQuery));
 
@@ -231,7 +233,9 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         ..._productos,
         ...result.products,
       ]);
-      final sorted = _SearchEngine.sortByRelevance(merged, _cleanedQuery);
+      final sorted = _orderBy.trim().isEmpty
+          ? _SearchEngine.sortByRelevance(merged, _cleanedQuery)
+          : merged;
       final localCategoryFacets = _categoryFacets(sorted, onlyMainLike: true);
       final brandFacets = _brandFacets(_SearchEngine.productsForFilterFacets(sorted, _cleanedQuery));
 
@@ -1913,7 +1917,7 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
                       label: Text(
                         p.isUnderConsultation
                             ? 'BAJO CONSULTA'
-                            : (p.hasStock ? 'AÑADIR CARRITO' : 'SIN STOCK'),
+                            : (p.hasStock ? 'AÑADIR CARRITO' : 'SIN EXISTENCIAS'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -2066,8 +2070,8 @@ class _ProductTileBusquedaState extends ConsumerState<ProductTileBusqueda> {
     final label = bajoConsulta
         ? 'Bajo consulta'
         : hasStock
-        ? 'En stock'
-        : 'Sin stock';
+        ? 'Disponible 24/48h'
+        : 'Sin Existencias';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

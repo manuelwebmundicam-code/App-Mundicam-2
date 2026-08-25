@@ -6,8 +6,9 @@ import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 const Color _pageBg = Color(0xFFF4F7FB);
 const Color _dark = Color(0xFF111827);
-const Color _muted = Color(0xFF6B7280);
-const Color _border = Color(0xFFE5E7EB);
+const Color _muted = Color(0xFF667085);
+const Color _border = Color(0xFFE3E8EF);
+const Color _softBg = Color(0xFFF8FAFC);
 const Color _footerBg = Color(0xFFEAF0F6);
 const Color _whatsappGreen = Color(0xFF25D366);
 
@@ -41,46 +42,32 @@ class EmpresaPage extends StatelessWidget {
         ),
         padding: EdgeInsets.zero,
         children: [
-          const _CompanyHero(),
-
-          const SizedBox(height: 22),
-
+          const SizedBox(height: 16),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: _SimpleCompanyCard(),
+          ),
+          const SizedBox(height: 26),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: _SectionHeader(
-              title: 'Quiénes somos',
-              subtitle:
-              'Distribución profesional de seguridad electrónica para instaladores, integradores, ingenierías y empresas de seguridad.',
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _CompanyStoryCard(),
-          ),
-
-          const SizedBox(height: 22),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _SectionHeader(
+              eyebrow: 'ENFOQUE PROFESIONAL',
               title: 'Valor para el profesional',
               subtitle:
-              'Acompañamiento técnico-comercial, producto especializado y trabajo directo con fabricantes.',
+                  'Producto especializado, acompañamiento técnico-comercial y una relación directa con el canal profesional.',
             ),
           ),
-
           const SizedBox(height: 14),
-
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _ValueBlock(),
+            child: _ProfessionalValueGrid(),
           ),
-
           const SizedBox(height: 22),
-
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: _ProfessionalCommitmentCard(),
+          ),
+          const SizedBox(height: 22),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: _SupportContactCard(
@@ -93,9 +80,7 @@ class EmpresaPage extends StatelessWidget {
               ),
             ),
           ),
-
-          const SizedBox(height: 22),
-
+          const SizedBox(height: 26),
           _CompanyFooter(
             onOpenWeb: () => _launchUrl('https://www.mundicam.com'),
             onPhone: () => _launchUrl('tel:+34968629383'),
@@ -112,26 +97,163 @@ class EmpresaPage extends StatelessWidget {
   }
 }
 
+
+class _SimpleCompanyCard extends StatelessWidget {
+  const _SimpleCompanyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'MUNDICAM',
+            style: TextStyle(
+              color: AppColors.primary,
+              fontFamily: 'Oswald',
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+            ),
+          ),
+          SizedBox(height: 5),
+          Text(
+            'QUIÉNES SOMOS',
+            style: TextStyle(
+              color: _dark,
+              fontFamily: 'Oswald',
+              fontSize: 24,
+              height: 1.05,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.3,
+            ),
+          ),
+          SizedBox(height: 14),
+          Text(
+            'MundiCam Security Distribution está especializada en la distribución de sistemas de seguridad electrónica profesional.',
+            style: TextStyle(
+              color: _dark,
+              fontSize: 13.4,
+              height: 1.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          SizedBox(height: 10),
+          Text(
+            'Formamos parte de VISIONA I GROUP, un grupo empresarial con experiencia en seguridad privada y seguridad electrónica profesional.',
+            style: TextStyle(
+              color: _muted,
+              fontSize: 12.8,
+              height: 1.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          SizedBox(height: 16),
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: _border,
+          ),
+          SizedBox(height: 16),
+          _SimpleInfoRow(
+            icon: Icons.business_center_outlined,
+            text: 'Distribución especializada para el canal profesional B2B.',
+          ),
+          SizedBox(height: 11),
+          _SimpleInfoRow(
+            icon: Icons.support_agent_outlined,
+            text: 'Asesoramiento técnico y comercial para cada proyecto.',
+          ),
+          SizedBox(height: 11),
+          _SimpleInfoRow(
+            icon: Icons.inventory_2_outlined,
+            text: 'Atención, logística y postventa orientadas al profesional.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimpleInfoRow extends StatelessWidget {
+  const _SimpleInfoRow({
+    required this.icon,
+    required this.text,
+  });
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Color(0xFFFDECEC),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            icon,
+            size: 17,
+            color: AppColors.primary,
+          ),
+        ),
+        SizedBox(width: 10),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              text,
+              style: TextStyle(
+                color: _dark,
+                fontSize: 12.4,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _CompanyHero extends StatelessWidget {
   const _CompanyHero();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      color: _pageBg,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Container(
-        height: 245,
+        height: 292,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: _dark,
-          borderRadius: BorderRadius.circular(26),
+          borderRadius: BorderRadius.circular(28),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.14),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
+              color: Colors.black.withOpacity(0.16),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
@@ -141,7 +263,10 @@ class _CompanyHero extends StatelessWidget {
             Image.asset(
               'assets/banners/banner5.png',
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(color: _dark),
+              alignment: Alignment.center,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (context, error, stackTrace) =>
+                  Container(color: _dark),
             ),
             Container(
               decoration: BoxDecoration(
@@ -149,72 +274,100 @@ class _CompanyHero extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    _dark.withOpacity(0.64),
-                    _dark.withOpacity(0.96),
+                    _dark.withOpacity(0.40),
+                    _dark.withOpacity(0.82),
+                    _dark.withOpacity(0.98),
                   ],
+                  stops: const [0.0, 0.55, 1.0],
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 24, 22, 24),
-              child: Center(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.24),
-                            blurRadius: 12,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.domain_rounded,
-                        color: Colors.white,
-                        size: 27,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    const Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'MundiCam Security Distribution',
-                            textAlign: TextAlign.left,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontFamily: 'Oswald',
-                              fontSize: 27,
-                              fontWeight: FontWeight.w900,
-                              height: 1.05,
-                            ),
-                          ),
-                          SizedBox(height: 10),
-                          Text(
-                            'Distribución profesional de seguridad electrónica para el canal B2B.',
-                            textAlign: TextAlign.left,
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                              height: 1.35,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
+            Positioned(
+              left: 20,
+              top: 20,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.12),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
+                child: Image.asset(
+                  'assets/logo.png',
+                  height: 27,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  errorBuilder: (context, error, stackTrace) => const Text(
+                    'MUNDICAM',
+                    style: TextStyle(
+                      color: _dark,
+                      fontFamily: 'Oswald',
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 20,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'DISTRIBUCIÓN PROFESIONAL B2B',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'Oswald',
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 11),
+                  const Text(
+                    'Seguridad electrónica\npara el canal profesional',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'Oswald',
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      height: 1.02,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  Text(
+                    'MundiCam Security Distribution · Especialización, soporte y soluciones para profesionales.',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.78),
+                      fontSize: 12.5,
+                      height: 1.35,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -226,54 +379,63 @@ class _CompanyHero extends StatelessWidget {
 
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
+    required this.eyebrow,
     required this.title,
     required this.subtitle,
   });
 
+  final String eyebrow;
   final String title;
   final String subtitle;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 4,
-          height: 28,
-          margin: const EdgeInsets.only(top: 2),
-          decoration: BoxDecoration(
-            color: AppColors.primary,
-            borderRadius: BorderRadius.circular(20),
+        Row(
+          children: [
+            Container(
+              width: 28,
+              height: 3,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Text(
+              eyebrow,
+              style: const TextStyle(
+                color: AppColors.primary,
+                fontFamily: 'Oswald',
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            color: _dark,
+            fontFamily: 'Oswald',
+            fontSize: 23,
+            height: 1.04,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.4,
           ),
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title.toUpperCase(),
-                style: const TextStyle(
-                  color: _dark,
-                  fontFamily: 'Oswald',
-                  fontSize: 21,
-                  height: 1,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.6,
-                ),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  color: _muted,
-                  fontSize: 12.5,
-                  height: 1.35,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
+        const SizedBox(height: 7),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            color: _muted,
+            fontSize: 12.7,
+            height: 1.42,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ],
@@ -294,8 +456,8 @@ class _CompanyStoryCard extends StatelessWidget {
         border: Border.all(color: _border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.035),
-            blurRadius: 14,
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 16,
             offset: const Offset(0, 6),
           ),
         ],
@@ -304,15 +466,16 @@ class _CompanyStoryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(
-            aspectRatio: 16 / 8.5,
+            aspectRatio: 16 / 7.8,
             child: Stack(
               fit: StackFit.expand,
               children: [
                 Image.asset(
                   'assets/banners/banner2.png',
                   fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
                   errorBuilder: (context, error, stackTrace) => Container(
-                    color: const Color(0xFFE5E7EB),
+                    color: const Color(0xFFE9EDF2),
                   ),
                 ),
                 Container(
@@ -322,7 +485,7 @@ class _CompanyStoryCard extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.transparent,
-                        Colors.black.withOpacity(0.72),
+                        Colors.black.withOpacity(0.76),
                       ],
                     ),
                   ),
@@ -332,7 +495,7 @@ class _CompanyStoryCard extends StatelessWidget {
                   right: 16,
                   bottom: 14,
                   child: Text(
-                    'Seguridad electrónica profesional con enfoque técnico-comercial',
+                    'Especialización técnica con visión comercial',
                     style: TextStyle(
                       color: Colors.white,
                       fontFamily: 'Oswald',
@@ -346,15 +509,15 @@ class _CompanyStoryCard extends StatelessWidget {
             ),
           ),
           const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 16),
+            padding: EdgeInsets.fromLTRB(18, 18, 18, 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'MundiCam Security Distribution es una compañía especializada en la distribución de sistemas de seguridad electrónica profesional.',
+                  'MundiCam Security Distribution está especializada en la distribución de sistemas de seguridad electrónica profesional.',
                   style: TextStyle(
                     color: _dark,
-                    fontSize: 13.4,
+                    fontSize: 13.5,
                     height: 1.48,
                     fontWeight: FontWeight.w700,
                   ),
@@ -364,11 +527,13 @@ class _CompanyStoryCard extends StatelessWidget {
                   'Formamos parte de VISIONA I GROUP, un grupo empresarial con experiencia en seguridad privada y seguridad electrónica profesional.',
                   style: TextStyle(
                     color: _muted,
-                    fontSize: 13,
-                    height: 1.45,
+                    fontSize: 12.8,
+                    height: 1.46,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
+                SizedBox(height: 16),
+                _AudienceChips(),
               ],
             ),
           ),
@@ -378,45 +543,121 @@ class _CompanyStoryCard extends StatelessWidget {
   }
 }
 
-class _ValueBlock extends StatelessWidget {
-  const _ValueBlock();
+class _AudienceChips extends StatelessWidget {
+  const _AudienceChips();
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
-      children: [
-        _ValueCard(
-          icon: Icons.support_agent_outlined,
-          title: 'Asesoramiento especializado',
-          text:
-          'El equipo profesional de MundiCam ofrece apoyo en materia de seguridad electrónica y selección de soluciones.',
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: const [
+        _AudienceChip(
+          icon: Icons.handyman_outlined,
+          label: 'Instaladores',
         ),
-        SizedBox(height: 10),
-        _ValueCard(
-          icon: Icons.precision_manufacturing_outlined,
-          title: 'I+D+i y fabricantes',
-          text:
-          'Trabajo directo con fabricantes para incorporar producto innovador dentro de la seguridad electrónica profesional.',
+        _AudienceChip(
+          icon: Icons.hub_outlined,
+          label: 'Integradores',
         ),
-        SizedBox(height: 10),
-        _ValueCard(
-          icon: Icons.groups_outlined,
-          title: 'Equipo MundiCam',
-          text:
-          'Un equipo orientado a soporte, atención al cliente, logística, postventa y acompañamiento al canal profesional.',
+        _AudienceChip(
+          icon: Icons.architecture_outlined,
+          label: 'Ingenierías',
+        ),
+        _AudienceChip(
+          icon: Icons.shield_outlined,
+          label: 'Seguridad',
         ),
       ],
     );
   }
 }
 
-class _ValueCard extends StatelessWidget {
-  const _ValueCard({
+class _AudienceChip extends StatelessWidget {
+  const _AudienceChip({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: _softBg,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            color: AppColors.primary,
+            size: 15,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: _dark,
+              fontSize: 11.4,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfessionalValueGrid extends StatelessWidget {
+  const _ProfessionalValueGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      children: [
+        _ProfessionalValueCard(
+          number: '01',
+          icon: Icons.support_agent_outlined,
+          title: 'Asesoramiento especializado',
+          text:
+              'Apoyo técnico-comercial para seleccionar soluciones de seguridad electrónica adaptadas a cada proyecto.',
+        ),
+        SizedBox(height: 10),
+        _ProfessionalValueCard(
+          number: '02',
+          icon: Icons.precision_manufacturing_outlined,
+          title: 'Producto y fabricantes',
+          text:
+              'Trabajo directo con fabricantes para incorporar soluciones especializadas e innovación al canal profesional.',
+        ),
+        SizedBox(height: 10),
+        _ProfessionalValueCard(
+          number: '03',
+          icon: Icons.groups_outlined,
+          title: 'Equipo MundiCam',
+          text:
+              'Atención al cliente, soporte, logística y postventa orientados a acompañar al profesional antes y después de la compra.',
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfessionalValueCard extends StatelessWidget {
+  const _ProfessionalValueCard({
+    required this.number,
     required this.icon,
     required this.title,
     required this.text,
   });
 
+  final String number;
   final IconData icon;
   final String title;
   final String text;
@@ -424,10 +665,10 @@ class _ValueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(15),
+      padding: const EdgeInsets.fromLTRB(15, 15, 15, 15),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _border),
         boxShadow: [
           BoxShadow(
@@ -441,15 +682,15 @@ class _ValueCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 43,
-            height: 43,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
+              color: AppColors.primary,
               borderRadius: BorderRadius.circular(15),
             ),
             child: Icon(
               icon,
-              color: AppColors.primary,
+              color: Colors.white,
               size: 23,
             ),
           ),
@@ -458,23 +699,39 @@ class _ValueCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: _dark,
-                    fontFamily: 'Oswald',
-                    fontSize: 16.5,
-                    fontWeight: FontWeight.w900,
-                    height: 1.15,
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          color: _dark,
+                          fontFamily: 'Oswald',
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w900,
+                          height: 1.12,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      number,
+                      style: TextStyle(
+                        color: AppColors.primary.withOpacity(0.40),
+                        fontFamily: 'Oswald',
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 6),
                 Text(
                   text,
                   style: const TextStyle(
                     color: _muted,
-                    fontSize: 12.5,
-                    height: 1.4,
+                    fontSize: 12.4,
+                    height: 1.42,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -483,6 +740,134 @@ class _ValueCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ProfessionalCommitmentCard extends StatelessWidget {
+  const _ProfessionalCommitmentCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFDECEC),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.verified_user_outlined,
+                  color: AppColors.primary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'UN PARTNER PARA EL PROFESIONAL',
+                      style: TextStyle(
+                        color: _dark,
+                        fontFamily: 'Oswald',
+                        fontSize: 17.5,
+                        fontWeight: FontWeight.w900,
+                        height: 1.08,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Acompañamiento orientado a proyectos de seguridad electrónica.',
+                      style: TextStyle(
+                        color: _muted,
+                        fontSize: 11.8,
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const _CommitmentRow(
+            icon: Icons.fact_check_outlined,
+            text: 'Selección de soluciones y producto especializado',
+          ),
+          const SizedBox(height: 10),
+          const _CommitmentRow(
+            icon: Icons.forum_outlined,
+            text: 'Soporte técnico-comercial para el canal profesional',
+          ),
+          const SizedBox(height: 10),
+          const _CommitmentRow(
+            icon: Icons.inventory_2_outlined,
+            text: 'Atención, logística y postventa dentro del equipo MundiCam',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommitmentRow extends StatelessWidget {
+  const _CommitmentRow({
+    required this.icon,
+    required this.text,
+  });
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: _softBg,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(
+            icon,
+            size: 15,
+            color: AppColors.primary,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: _dark,
+                fontSize: 12.3,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -507,8 +892,8 @@ class _SupportContactCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.10),
-            blurRadius: 16,
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 18,
             offset: const Offset(0, 8),
           ),
         ],
@@ -684,7 +1069,7 @@ class _CompanyFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 17, 18, 18),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 19),
       decoration: const BoxDecoration(
         color: _footerBg,
       ),
@@ -693,9 +1078,12 @@ class _CompanyFooter extends StatelessWidget {
         children: [
           Image.asset(
             'assets/logo.png',
-            height: 21,
+            height: 23,
             fit: BoxFit.contain,
-            errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+            alignment: Alignment.centerLeft,
+            filterQuality: FilterQuality.high,
+            errorBuilder: (context, error, stackTrace) =>
+                const SizedBox.shrink(),
           ),
           const SizedBox(height: 11),
           const Text(
@@ -717,7 +1105,7 @@ class _CompanyFooter extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 13),
           _FooterLink(
             icon: Icons.phone_outlined,
             text: '+34 968 629 383',
@@ -736,13 +1124,13 @@ class _CompanyFooter extends StatelessWidget {
             color: _dark,
             onTap: onEmail,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 11),
           _FooterButton(
             label: 'Ir a web oficial',
             icon: Icons.language_outlined,
             onTap: onOpenWeb,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 13),
           const Text(
             '© MUNDICAM 2025-2026 · Todos los derechos reservados',
             style: TextStyle(

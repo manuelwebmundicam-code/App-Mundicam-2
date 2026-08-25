@@ -495,7 +495,7 @@ class NotificationService {
     if (_localNotificationsInitialized) return;
 
     const androidSettings = AndroidInitializationSettings(
-      'ic_stat_mundicam',
+      'mundicam_notification_logo',
     );
 
     const darwinSettings = DarwinInitializationSettings(
@@ -631,7 +631,7 @@ class NotificationService {
     final androidDetails = AndroidNotificationDetails(
       androidChannelId,
       androidChannelName,
-      icon: 'ic_stat_mundicam',
+      icon: 'mundicam_notification_logo',
       color: const Color(0xFFA60909),
       channelDescription: androidChannelDescription,
       importance: Importance.max,

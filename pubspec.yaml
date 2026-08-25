@@ -2,7 +2,7 @@ name: mundicam
 description: "App oficial de Mundicam"
 publish_to: "none"
 
-version: 1.0.5+18
+version: 1.5.5+26
 
 environment:
   sdk: ">=3.9.2 <4.0.0"
@@ -24,6 +24,7 @@ dependencies:
 
   # Diseño
   cupertino_icons: ^1.0.8
+  material_symbols_icons: ^4.2960.0
 
   # Firebase / notificaciones push
   firebase_core: ^3.15.1
@@ -55,9 +56,6 @@ flutter:
     - assets/brands/
     - assets/images/
     - assets/categorias/
-    - assets/banners/
-    - assets/noticias/
-    - assets/productos/
 
   fonts:
     - family: Oswald
@@ -69,9 +67,19 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/mundicamlogo.png"
+
+  # Android mantiene su icono actual
+  image_path_android: "assets/images/mundicamlogo.png"
+
+  # iOS usa el icono corregido
+  image_path_ios: "assets/images/mundicamlogo_ios_corregido.png"
+
+  # Elimina transparencia para iOS
+  remove_alpha_ios: true
+
+  # Android adaptativo
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/images/mundicamlogo.png"
+  adaptive_icon_foreground: "assets/images/mundicamlogo_android_foreground.png"
 
 flutter_native_splash:
   color: "#FFFFFF"

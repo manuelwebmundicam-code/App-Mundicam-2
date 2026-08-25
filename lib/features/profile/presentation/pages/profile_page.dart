@@ -9,8 +9,6 @@ import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
-import 'package:mundicam/features/orders/presentation/pages/orders_page.dart';
-import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
 import 'package:mundicam/features/support/presentation/pages/support_tickets_page.dart';
 
@@ -439,10 +437,52 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     return manager;
   }
 
-  String _getAssignedManager() {
-    // El backend puede devolver un nombre separado. En la versión actual,
-    // wpuef_cid_c30 contiene principalmente el correo del gestor.
+  static const Map<String, Map<String, String>> _localManagerContacts = {
+    'damian mateo': {
+      'email': 'dmateo@mundicam.com',
+      'phone': '633806898',
+    },
+    'juan garcia': {
+      'email': 'jgarcia@mundicam.com',
+      'phone': '622943654',
+    },
+    'manuel': {
+      'email': 'mreynaldo@mundicam.com',
+      'phone': '619078632',
+    },
+    'proshop murcia': {
+      'email': 'proshop.murcia@mundicam.com',
+      'phone': '616545669',
+    },
+    'ricardo': {
+      'email': 'rcano@mundicam.com',
+      'phone': '606111983',
+    },
+  };
+
+  String _normalizeManagerLookupKey(String value) {
+    var normalized = value.trim().toLowerCase();
+    const replacements = <String, String>{
+      'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a',
+      'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+      'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
+      'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o',
+      'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
+      'ñ': 'n',
+    };
+    replacements.forEach((from, to) {
+      normalized = normalized.replaceAll(from, to);
+    });
+    normalized = normalized.replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+    return normalized.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _getAssignedManagerNameCandidate() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
+
     final directCandidates = <dynamic>[
+      nestedManager['name'],
       _wooCustomer?['manager_name'],
       _wooCustomer?['gestor_asignado'],
       _wooCustomer?['assigned_manager'],
@@ -470,13 +510,29 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (manager.isNotEmpty) return manager;
     }
 
+    return '';
+  }
+
+  Map<String, String>? _getLocalManagerContact() {
+    final name = _getAssignedManagerNameCandidate();
+    if (name.isEmpty) return null;
+    return _localManagerContacts[_normalizeManagerLookupKey(name)];
+  }
+
+  String _getAssignedManager() {
+    final manager = _getAssignedManagerNameCandidate();
+    if (manager.isNotEmpty) return manager;
+
     return _getManagerEmail().contains('@')
         ? 'Gestor / técnico asignado'
         : 'No asignado';
   }
 
   String _getManagerEmail() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
     final candidates = <dynamic>[
+      nestedManager['email'],
       _wooCustomer?['manager_email'],
       _getMeta('manager_email'),
     ];
@@ -491,11 +547,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       }
     }
 
+    final localEmail = _getLocalManagerContact()?['email']?.trim() ?? '';
+    if (localEmail.contains('@')) return localEmail;
+
     return '—';
   }
 
   String _getManagerPhone() {
+    final managerData = _wooCustomer?['manager'];
+    final nestedManager = managerData is Map ? managerData : const <dynamic, dynamic>{};
     final candidates = <dynamic>[
+      nestedManager['phone'],
       _wooCustomer?['manager_phone'],
       _getMeta('manager_phone'),
     ];
@@ -508,6 +570,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         return phone;
       }
     }
+    final localPhone = _getLocalManagerContact()?['phone']?.trim() ?? '';
+    if (localPhone.isNotEmpty) return localPhone;
+
     return '—';
   }
 
@@ -632,30 +697,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 children: [
                   _buildMainCard(),
                   const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      _quickButton(
-                        context,
-                        Icons.request_quote_outlined,
-                        "Presupuestos",
-                        const QuotesPage(),
-                      ),
-                      const SizedBox(width: 10),
-                      _quickButton(
-                        context,
-                        Icons.handyman_outlined,
-                        "RMA's",
-                        const RmaPage(),
-                      ),
-                      const SizedBox(width: 10),
-                      _quickButton(
-                        context,
-                        Icons.local_shipping_outlined,
-                        "Mis Pedidos",
-                        const OrdersPage(),
-                      ),
-                    ],
-                  ),
+                  _buildManagerCard(),
                   const SizedBox(height: 22),
                   _buildMenuCard(
                     context,
@@ -716,8 +758,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Widget _buildHeader() {
-    final email = _wooCustomer?['email']?.toString() ?? '';
-
     return Container(
       width: double.infinity,
       color: _pageBg,
@@ -802,18 +842,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         fontWeight: FontWeight.w900,
                         fontFamily: 'Oswald',
                         height: 1.1,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      email,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _muted,
-                        fontSize: 12.2,
-                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],

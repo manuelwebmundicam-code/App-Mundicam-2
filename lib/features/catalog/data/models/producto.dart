@@ -298,8 +298,8 @@ class Product {
 
   String get commercialStatusLabel {
     if (isUnderConsultation || !hasValidPrice) return 'Bajo consulta';
-    if (hasStock) return 'En stock';
-    return 'Sin stock';
+    if (hasStock) return 'Disponible 24/48h';
+    return 'Sin Existencias';
   }
 
   // =========================

@@ -25,10 +25,12 @@ const Color _softCard = Color(0xFFFBFCFE);
 
 class OrdersPage extends ConsumerStatefulWidget {
   final VoidCallback? onGoHome;
+  final VoidCallback? onGoRma;
 
   const OrdersPage({
     super.key,
     this.onGoHome,
+    this.onGoRma,
   });
 
   @override
@@ -54,7 +56,10 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => OrderDetailPage(order: order),
+        builder: (_) => OrderDetailPage(
+          order: order,
+          onGoRma: widget.onGoRma,
+        ),
       ),
     );
   }
@@ -376,10 +381,12 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
 
 class OrderDetailPage extends ConsumerStatefulWidget {
   final OrderMundicam order;
+  final VoidCallback? onGoRma;
 
   const OrderDetailPage({
     super.key,
     required this.order,
+    this.onGoRma,
   });
 
   @override
@@ -756,7 +763,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
-              'No se pudo repetir el pedido. Los productos pueden estar sin stock o descatalogados.',
+              'No se pudo repetir el pedido. Los productos pueden estar sin existencias o descatalogados.',
             ),
             backgroundColor: Colors.orange.shade700,
             behavior: SnackBarBehavior.floating,
@@ -1635,6 +1642,10 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                               orderId: widget.order.id,
                               productId: item.productId,
                               productName: item.name,
+                              lineItemId: item.lineItemId,
+                              variationId: item.variationId,
+                              maxQuantity: item.quantity > 0 ? item.quantity : 1,
+                              onGoRma: widget.onGoRma,
                             ),
                           ),
                         );
@@ -1707,6 +1718,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
 }
 
 class _PedidoProducto {
+  final int lineItemId;
   final int productId;
   final int variationId;
   final String name;
@@ -1722,6 +1734,7 @@ class _PedidoProducto {
   const _PedidoProducto({
     required this.productId,
     required this.name,
+    this.lineItemId = 0,
     required this.quantity,
     required this.total,
     this.variationId = 0,
@@ -1741,6 +1754,7 @@ class _PedidoProducto {
   }
 
   _PedidoProducto copyWith({
+    int? lineItemId,
     int? productId,
     int? variationId,
     String? name,
@@ -1754,6 +1768,7 @@ class _PedidoProducto {
     String? permalink,
   }) {
     return _PedidoProducto(
+      lineItemId: lineItemId ?? this.lineItemId,
       productId: productId ?? this.productId,
       variationId: variationId ?? this.variationId,
       name: name ?? this.name,
@@ -1770,6 +1785,7 @@ class _PedidoProducto {
 
   factory _PedidoProducto.fromOrderItem(OrderItem item) {
     return _PedidoProducto(
+      lineItemId: item.lineItemId,
       productId: item.productId,
       variationId: item.variationId,
       name: item.name,
@@ -1791,6 +1807,7 @@ class _PedidoProducto {
     final taxTotal = _parseDouble(json['tax_total'] ?? json['tax'] ?? json['line_tax']);
 
     return _PedidoProducto(
+      lineItemId: _parseInt(json['line_item_id'] ?? json['lineItemId'] ?? json['id'], fallback: 0),
       productId: _parseInt(json['product_id'] ?? json['productId'] ?? json['id_product']),
       variationId: _parseInt(json['variation_id'] ?? json['variationId'], fallback: 0),
       name: _cleanText(

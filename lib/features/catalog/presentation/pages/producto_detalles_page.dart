@@ -1201,7 +1201,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         : enStock
         ? const Color(0xFF218047)
         : const Color(0xFFC62828);
-    final label = bajoConsulta ? 'Bajo consulta' : enStock ? 'En stock' : 'Sin stock';
+    final label = bajoConsulta ? 'Bajo consulta' : enStock ? 'Disponible 24/48h' : 'Sin Existencias';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1340,7 +1340,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         ? 'Bajo consulta'
                         : canAddToCart
                         ? 'Añadir carrito'
-                        : 'Sin stock',
+                        : 'Sin Existencias',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900),
@@ -2052,7 +2052,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                       disabledBackgroundColor: Colors.grey.shade300,
                                     ),
                                     child: Text(
-                                      rp.canAddToCart ? 'Añadir' : (rp.isUnderConsultation ? 'Consulta' : 'Sin stock'),
+                                      rp.canAddToCart ? 'Añadir' : (rp.isUnderConsultation ? 'Consulta' : 'Sin Existencias'),
                                       style: const TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,

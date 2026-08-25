@@ -18,6 +18,7 @@ import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
+import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -45,9 +46,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
     false,
     false,
     false,
+    false,
   ];
 
   final List<GlobalKey<NavigatorState>> _navigatorKeys = [
+    GlobalKey<NavigatorState>(),
     GlobalKey<NavigatorState>(),
     GlobalKey<NavigatorState>(),
     GlobalKey<NavigatorState>(),
@@ -308,6 +311,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
       'orders',
       'quotes',
       'cart',
+      'rma',
     ];
     unawaited(
       MundicamAnalyticsService.instance.screenView(
@@ -462,6 +466,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
               index: 2,
               child: OrdersPage(
                 onGoHome: () => _switchToTab(0, popToRoot: true),
+                onGoRma: () => _switchToTab(5, popToRoot: true),
               ),
             ),
             _buildTabNavigator(
@@ -479,6 +484,13 @@ class _MainScreenState extends ConsumerState<MainScreen>
                 onGoHome: () => _switchToTab(0, popToRoot: true),
                 onGoBack: _goBackFromCart,
                 onGoQuotes: () => _switchToTab(3, popToRoot: true),
+              ),
+            ),
+            _buildTabNavigator(
+              index: 5,
+              child: RmaPage(
+                onGoHome: () => _switchToTab(0, popToRoot: true),
+                onGoOrders: () => _switchToTab(2, popToRoot: true),
               ),
             ),
           ],
@@ -510,9 +522,16 @@ class _MainScreenState extends ConsumerState<MainScreen>
                 _BottomTabItem(
                   icon: Icons.grid_view,
                   activeIcon: Icons.grid_view_rounded,
-                  label: 'Productos',
+                  label: 'Categorías',
                   isSelected: _selectedIndex == 1,
                   onTap: () => _onItemTapped(1),
+                ),
+                _BottomTabItem(
+                  icon: Icons.build_outlined,
+                  activeIcon: Icons.build,
+                  label: 'RMA',
+                  isSelected: _selectedIndex == 5,
+                  onTap: () => _onItemTapped(5),
                 ),
                 _BottomTabItem(
                   icon: Icons.local_shipping_outlined,

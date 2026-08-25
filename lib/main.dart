@@ -15,6 +15,8 @@ import 'package:mundicam/core/cache/storage_cache_service.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:mundicam/core/config/force_update_service.dart';
+import 'package:mundicam/features/system/presentation/pages/force_update_page.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
@@ -164,10 +166,29 @@ Future<void> _postRunAppBootstrap() async {
       );
       await remoteConfig.setDefaults({
         'api_base_url': 'https://www.mundicam.com',
+
+        // Mecanismo de actualización mínima preparado pero DESACTIVADO.
+        // Solo bloqueará cuando force_update_enabled=true y todos los
+        // parámetros obligatorios estén correctamente configurados.
+        ForceUpdateService.enabledKey: false,
+        ForceUpdateService.minAndroidVersionKey: '',
+        ForceUpdateService.minIosVersionKey: '',
+        ForceUpdateService.androidStoreUrlKey: '',
+        ForceUpdateService.iosStoreUrlKey: '',
+        ForceUpdateService.titleKey: '',
+        ForceUpdateService.messageKey: '',
+        ForceUpdateService.buttonLabelKey: '',
       });
+
+      // Evalúa primero los últimos valores activados que Firebase pudiera
+      // tener guardados localmente y luego vuelve a evaluar tras el fetch.
+      await ForceUpdateService.instance.evaluate(remoteConfig);
+
       await remoteConfig.fetchAndActivate().timeout(
         const Duration(seconds: 12),
       );
+
+      await ForceUpdateService.instance.evaluate(remoteConfig);
       debugPrint('✅ Remote Config inicializado correctamente');
     } catch (e) {
       debugPrint('⚠️ Remote Config no crítico: $e');
@@ -248,7 +269,32 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Mundicam',
       theme: AppTheme.lightTheme,
-      home: const AuthWrapper(),
+      home: const ForceUpdateGate(
+        child: AuthWrapper(),
+      ),
+    );
+  }
+}
+
+class ForceUpdateGate extends StatelessWidget {
+  final Widget child;
+
+  const ForceUpdateGate({
+    super.key,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<ForceUpdateState>(
+      valueListenable: ForceUpdateService.instance.state,
+      builder: (context, updateState, _) {
+        if (updateState.required) {
+          return ForceUpdatePage(state: updateState);
+        }
+
+        return child;
+      },
     );
   }
 }

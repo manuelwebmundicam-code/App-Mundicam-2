@@ -3,11 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/shared/widgets/chatbox.dart';
-import 'package:mundicam/features/home/presentation/widgets/brands_banner.dart';
 import 'package:mundicam/features/home/presentation/widgets/header.dart';
 import 'package:mundicam/features/home/presentation/widgets/search_bar.dart';
 import 'package:mundicam/features/home/presentation/widgets/menu_bar.dart';
 import 'package:mundicam/features/home/presentation/widgets/category_grid.dart';
+import 'package:mundicam/features/home/presentation/widgets/brand_grid.dart';
+import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/features/home/presentation/widgets/news_section.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/features/home/presentation/providers/noticias_provider.dart';
@@ -30,18 +31,24 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   bool _showSecondaryContent = false;
   bool _showChatBox = false;
+  bool _showBrands = false;
+
+  final ApiService _apiService = ApiService();
+  String _managerName = '';
+  String _managerEmail = '';
+  String _managerPhone = '';
   bool _didLogFirstBuild = false;
 
   static const Color _pageBg = Colors.white;
   static const Color _footerBg = Color(0xFFEAF0F6);
   static const Color _footerBlack = Color(0xFF111827);
   static const Color _footerMuted = Color(0xFF5F6B7A);
-  static const Color _whatsappGreen = Color(0xFF128C4A);
 
   @override
   void initState() {
     super.initState();
     debugPrint('🍎 HOMEPAGE_INIT');
+    _loadManagerContact();
 
     Future.delayed(const Duration(milliseconds: 250), () {
       if (!mounted) return;
@@ -56,8 +63,10 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _refreshHome() async {
     ref.invalidate(categoriesProvider);
+    ref.invalidate(homeBrandsProvider);
     ref.invalidate(noticiasProvider);
     ref.invalidate(bannerMixProvider);
+    await _loadManagerContact();
     await Future.delayed(const Duration(milliseconds: 350));
   }
 
@@ -101,21 +110,29 @@ class _HomePageState extends ConsumerState<HomePage> {
                     children: [
                       _buildTopPanel(),
                       const SizedBox(height: 22),
-                      _buildSectionTitle('CATEGORÍAS'),
+                      _buildCatalogSelector(),
                       const SizedBox(height: 12),
-                      CategoryGrid(
-                        onGoCart: widget.onGoCart,
-                        onGoQuotes: widget.onGoQuotes,
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        child: _showBrands
+                            ? BrandGrid(
+                                key: const ValueKey('home-brands'),
+                                onGoCart: widget.onGoCart,
+                                onGoQuotes: widget.onGoQuotes,
+                              )
+                            : CategoryGrid(
+                                key: const ValueKey('home-categories'),
+                                onGoCart: widget.onGoCart,
+                                onGoQuotes: widget.onGoQuotes,
+                              ),
                       ),
                       if (_showSecondaryContent) ...[
-                        const SizedBox(height: 14),
-                        const BrandsBanner(),
                         const SizedBox(height: 22),
                         _buildNewsPanel(),
                         _buildMundicamFooter(),
                       ] else ...[
-                        const SizedBox(height: 18),
-                        _buildSkeletonBlock(height: 66),
                         const SizedBox(height: 22),
                         _buildNewsSkeletonPanel(),
                         _buildSkeletonBlock(height: 150),
@@ -126,6 +143,211 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
               if (_showChatBox) const ChatBox(),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadManagerContact() async {
+    try {
+      final user = await _apiService.currentSessionUser();
+      if (!mounted || user.isEmpty) return;
+
+      final managerRaw = user['manager'];
+      final manager = managerRaw is Map
+          ? Map<String, dynamic>.from(managerRaw)
+          : const <String, dynamic>{};
+
+      String firstValid(Iterable<dynamic> values, {bool email = false}) {
+        for (final value in values) {
+          final clean = value?.toString().trim() ?? '';
+          if (clean.isEmpty || clean == '—' || clean.toLowerCase() == 'null') {
+            continue;
+          }
+          if (email && !clean.contains('@')) continue;
+          return clean;
+        }
+        return '';
+      }
+
+      final managerName = firstValid([
+        manager['name'],
+        user['manager_name'],
+        user['assigned_manager'],
+        user['gestor_asignado'],
+        user['wpuef_cid_c30'],
+      ]);
+
+      var managerEmail = firstValid([
+        manager['email'],
+        user['manager_email'],
+        user['assigned_manager_email'],
+        user['gestor_email'],
+      ], email: true);
+
+      var managerPhone = firstValid([
+        manager['phone'],
+        user['manager_phone'],
+        user['assigned_manager_phone'],
+        user['gestor_phone'],
+      ]);
+
+      if ((managerEmail.isEmpty || managerPhone.isEmpty) && managerName.isNotEmpty) {
+        final fallback = _localManagerContact(managerName);
+        managerEmail = managerEmail.isNotEmpty
+            ? managerEmail
+            : (fallback?['email'] ?? '');
+        managerPhone = managerPhone.isNotEmpty
+            ? managerPhone
+            : (fallback?['phone'] ?? '');
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _managerName = managerName;
+        _managerEmail = managerEmail;
+        _managerPhone = managerPhone;
+      });
+    } catch (_) {
+      // El contacto del gestor es informativo: un fallo puntual no bloquea Inicio.
+    }
+  }
+
+  Map<String, String>? _localManagerContact(String managerName) {
+    final key = managerName
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    const contacts = <String, Map<String, String>>{
+      'damian mateo': {
+        'email': 'dmateo@mundicam.com',
+        'phone': '633806898',
+      },
+      'juan garcia': {
+        'email': 'jgarcia@mundicam.com',
+        'phone': '622943654',
+      },
+      'manuel': {
+        'email': 'mreynaldo@mundicam.com',
+        'phone': '619078632',
+      },
+      'proshop murcia': {
+        'email': 'proshop.murcia@mundicam.com',
+        'phone': '616545669',
+      },
+      'ricardo': {
+        'email': 'rcano@mundicam.com',
+        'phone': '606111983',
+      },
+    };
+
+    return contacts[key];
+  }
+
+  Widget _buildCatalogSelector() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE4E8EE)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: _catalogSelectorTab(
+                label: 'CATEGORÍAS',
+                selected: !_showBrands,
+                onTap: () {
+                  if (_showBrands) {
+                    setState(() => _showBrands = false);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: _catalogSelectorTab(
+                label: 'MARCAS',
+                selected: _showBrands,
+                onTap: () {
+                  if (!_showBrands) {
+                    setState(() => _showBrands = true);
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _catalogSelectorTab({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.055),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : const [],
+          ),
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            style: TextStyle(
+              color: selected ? Colors.white : Colors.black,
+              fontSize: 14.5,
+              fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+              fontFamily: 'Oswald',
+              letterSpacing: 0.75,
+            ),
+            child: Text(label),
           ),
         ),
       ),
@@ -296,34 +518,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 11),
-          _footerContactRow(
-            icon: Icons.phone_outlined,
-            text: '+34 968 629 383',
-            color: _footerBlack,
-            onTap: () => _openFooterLink(Uri.parse('tel:968629383')),
-          ),
-          _footerContactRow(
-            customIcon: _whatsAppIcon(),
-            text: '+34 619 078 632',
-            color: _whatsappGreen,
-            onTap: () => _openFooterLink(
-              Uri.parse('https://wa.me/34619078632'),
-            ),
-          ),
-          _footerContactRow(
-            icon: Icons.email_outlined,
-            text: 'pedidos@mundicam.com',
-            color: _footerBlack,
-            onTap: () => _openFooterLink(
-              Uri(
-                scheme: 'mailto',
-                path: 'pedidos@mundicam.com',
-                query: 'subject=Consulta desde App MundiCam',
-              ),
-            ),
-          ),
-          const SizedBox(height: 9),
+          const SizedBox(height: 14),
           _footerWebButton(
             onTap: () => _openFooterLink(
               Uri.parse('https://www.mundicam.com'),
@@ -348,7 +543,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     Widget? customIcon,
     required String text,
     required Color color,
-    required VoidCallback onTap,
+    VoidCallback? onTap,
   }) {
     return Material(
       color: Colors.transparent,
@@ -427,21 +622,5 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _whatsAppIcon() {
-    return Container(
-      width: 15,
-      height: 15,
-      decoration: const BoxDecoration(
-        color: Color(0xFF25D366),
-        shape: BoxShape.circle,
-      ),
-      child: const Center(
-        child: Icon(
-          Icons.phone_rounded,
-          color: Colors.white,
-          size: 9.5,
-        ),
-      ),
-    );
-  }
+
 }

@@ -1607,6 +1607,96 @@ class ApiService {
     return brands;
   }
 
+  Future<List<CategoryModel>> getCategoriasPorMarca({
+    required int brandId,
+    String? brandName,
+    String? brandTaxonomy,
+    int? parent,
+    bool forceRefresh = false,
+  }) async {
+    if (brandId <= 0 && (brandName ?? '').trim().isEmpty) {
+      return const <CategoryModel>[];
+    }
+
+    try {
+      final response = await _appGet(
+        '/brands/categories',
+        queryParameters: <String, dynamic>{
+          if (brandId > 0) 'brand_id': brandId,
+          if ((brandName ?? '').trim().isNotEmpty)
+            'brand_name': brandName!.trim(),
+          if ((brandTaxonomy ?? '').trim().isNotEmpty)
+            'brand_taxonomy': brandTaxonomy!.trim(),
+          if (parent != null) 'parent': parent,
+          if (forceRefresh) '_refresh': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
+
+      final data = _responseMap(response.data);
+      final raw = _firstList([
+        data['categories'],
+        data['data'],
+        response.data,
+      ]);
+
+      return raw
+          .whereType<Map>()
+          .map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)))
+          .where((category) => category.id > 0 && !_isForbiddenCategory(category.name))
+          .toList();
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? 0;
+      if (status != 404 && status != 405) {
+        rethrow;
+      }
+
+      // Compatibilidad de despliegue: si el PHP todavía no tiene el endpoint
+      // 1.9.57, resolvemos solo el nivel solicitado con los endpoints existentes.
+      // Es más lento, pero evita dejar la navegación de marcas rota durante una
+      // actualización escalonada de Flutter/PHP.
+      if (kDebugMode) {
+        debugPrint('⚠️ /brands/categories no disponible, usando fallback: $error');
+      }
+
+      final candidates = parent == null
+          ? await getCategorias(hideEmpty: true, parentOnly: true)
+          : await getCategorias(hideEmpty: true, parent: parent);
+
+      if (candidates.isEmpty) return const <CategoryModel>[];
+
+      final available = <CategoryModel>[];
+      for (final category in candidates) {
+        try {
+          final response = await _appGet(
+            '/products',
+            queryParameters: <String, dynamic>{
+              'category': category.id,
+              if (brandId > 0) 'brand_id': brandId,
+              if ((brandName ?? '').trim().isNotEmpty)
+                'brand_name': brandName!.trim(),
+              'page': 1,
+              'per_page': 1,
+            },
+          );
+          final root = _responseMap(response.data);
+          final products = _firstList([root['products'], root['data']]);
+          final total = _parseInt(root['total']);
+          if (total > 0 || products.isNotEmpty) {
+            available.add(
+              category.copyWith(
+                count: total > 0 ? total : products.length,
+              ),
+            );
+          }
+        } catch (_) {
+          // Un fallo puntual de una categoría no debe ocultar toda la marca.
+        }
+      }
+
+      return available;
+    }
+  }
+
   Future<int?> getMarcaIdPorNombre(String? brandName) async {
     final clean = _normalizeText(brandName ?? '');
     if (clean.isEmpty) return null;
@@ -1870,6 +1960,13 @@ class ApiService {
           ? '✅ Búsqueda rápida MundiCam App API'
           : '✅ Productos MundiCam App API',
     );
+
+    // v1.9.65: si el usuario ha elegido un orden explícito (precio/nombre/fecha),
+    // el servidor ya ha ordenado el universo completo ANTES de paginar. Reaplicar
+    // relevancia aquí destruía ese orden, especialmente precio asc/desc.
+    if ((orderBy ?? '').trim().isNotEmpty) {
+      return result;
+    }
 
     return _applyClientSearchRanking(
       result,
@@ -3443,18 +3540,27 @@ class ApiService {
   // RMA / SOPORTE
   // ================================================================
 
-  Future<bool> crearRma({
+  Future<Map<String, dynamic>> crearRmaDetalle({
     required String email,
     required int orderId,
     required int productId,
+    int lineItemId = 0,
+    int variationId = 0,
+    required int quantity,
     required String motivo,
     required String descripcion,
   }) async {
     try {
+      final safeQuantity = quantity < 1 ? 1 : quantity;
       final response = await _appPost('/rma', data: {
+        // El servidor valida siempre la identidad real del app_token.
+        // email se mantiene únicamente por compatibilidad con versiones anteriores.
         'email': email,
         'order_id': orderId,
         'product_id': productId,
+        if (lineItemId > 0) 'line_item_id': lineItemId,
+        if (variationId > 0) 'variation_id': variationId,
+        'quantity': safeQuantity,
         'reason': motivo,
         'motivo': motivo,
         'description': descripcion,
@@ -3465,15 +3571,42 @@ class ApiService {
         final message = data['message']?.toString().trim();
         throw Exception(message?.isNotEmpty == true ? message : 'No se pudo crear la solicitud RMA.');
       }
-      return response.statusCode == 200 || response.statusCode == 201 || data['success'] != false;
+      if (response.statusCode != 200 && response.statusCode != 201 && data['success'] != true) {
+        throw Exception('El servidor no confirmó la solicitud RMA.');
+      }
+      return data;
     } on DioException catch (e) {
       final message = _mapDioError(e);
-      if (kDebugMode) debugPrint('❌ Error crearRma: $message');
+      if (kDebugMode) debugPrint('❌ Error crearRmaDetalle: $message');
       throw Exception(message);
     } catch (e) {
-      if (kDebugMode) debugPrint('❌ Error crearRma: $e');
+      if (kDebugMode) debugPrint('❌ Error crearRmaDetalle: $e');
       rethrow;
     }
+  }
+
+  // Compatibilidad con llamadas antiguas: por defecto solicita una unidad.
+  Future<bool> crearRma({
+    required String email,
+    required int orderId,
+    required int productId,
+    int lineItemId = 0,
+    int variationId = 0,
+    int quantity = 1,
+    required String motivo,
+    required String descripcion,
+  }) async {
+    final data = await crearRmaDetalle(
+      email: email,
+      orderId: orderId,
+      productId: productId,
+      lineItemId: lineItemId,
+      variationId: variationId,
+      quantity: quantity,
+      motivo: motivo,
+      descripcion: descripcion,
+    );
+    return data['success'] != false;
   }
 
   Future<List<Map<String, dynamic>>> getRmaRequests(String customerEmail) async {
@@ -3484,9 +3617,13 @@ class ApiService {
       final data = _responseMap(response.data);
       final raw = _firstList([data['rma'], data['requests'], data['data'], response.data]);
       return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    } on DioException catch (e) {
+      final message = _mapDioError(e);
+      if (kDebugMode) debugPrint('⚠️ Error getRmaRequests: $message');
+      throw Exception(message);
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ Error getRmaRequests: $e');
-      return [];
+      rethrow;
     }
   }
 
@@ -3719,8 +3856,11 @@ class ApiService {
       case 'menu_order':
         return 'menu_order';
       case 'date':
+        return 'date';
       default:
-        return order.isEmpty ? 'date' : order;
+        // Si el usuario no ha elegido orden, no forzamos fecha desde Flutter.
+        // El backend aplica el orden por defecto real de WooCommerce/web.
+        return order;
     }
   }
 
@@ -3729,6 +3869,8 @@ class ApiService {
     Map<String, dynamic> user,
   ) {
     final nestedData = _asMap(root['data']);
+    final rootManager = _asMap(root['manager']);
+    final userManager = _asMap(user['manager']);
     final billing = _asMap(user['billing']);
     final shipping = _asMap(user['shipping']);
     final meta = user['meta_data'];
@@ -3762,6 +3904,8 @@ class ApiService {
     }
 
     final managerEmail = <dynamic>[
+      rootManager['email'],
+      userManager['email'],
       root['manager_email'],
       nestedData['manager_email'],
       user['manager_email'],
@@ -3777,6 +3921,8 @@ class ApiService {
         );
 
     final managerName = <dynamic>[
+      rootManager['name'],
+      userManager['name'],
       root['manager_name'],
       root['wpuef_cid_c30'],
       root['gestor_asignado'],
@@ -3801,6 +3947,8 @@ class ApiService {
         );
 
     final managerPhone = <dynamic>[
+      rootManager['phone'],
+      userManager['phone'],
       root['manager_phone'],
       nestedData['manager_phone'],
       user['manager_phone'],
@@ -3851,6 +3999,11 @@ class ApiService {
       addMeta('manager_phone', phone);
     }
 
+    user['manager'] = <String, dynamic>{
+      'name': user['manager_name']?.toString().trim() ?? '',
+      'email': user['manager_email']?.toString().trim() ?? '',
+      'phone': user['manager_phone']?.toString().trim() ?? '',
+    };
     user['meta_data'] = metaData;
   }
 
