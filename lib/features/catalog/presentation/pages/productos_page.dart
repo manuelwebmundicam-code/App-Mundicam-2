@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
@@ -474,7 +473,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
     if (n.contains('video cctv') ||
         n.contains('cctv hd') ||
         n.contains('cctv')) {
-      return Symbols.speed_camera_rounded;
+      return Icons.videocam_rounded;
     }
 
     if (n.contains('intrusion') ||
@@ -528,7 +527,7 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
     if (n.contains('drone') ||
         n.contains('drones') ||
         n.contains('dron')) {
-      return Symbols.drone_2_rounded;
+      return Icons.flight_rounded;
     }
 
     if (n.contains('outlet')) {
