@@ -2,9 +2,9 @@
 description: "App oficial de Mundicam"
 publish_to: "none"
 
-# Nueva versiÃ³n para Android e iOS.
-# Se usa build 26 para superar las versiones/builds anteriores del proyecto.
-version: 1.5.5+28
+# Nueva versión para Android e iOS.
+# Versión comercial 1.6.6 y build 29.
+version: 1.6.6+29
 
 environment:
   sdk: ">=3.9.2 <4.0.0"
@@ -24,7 +24,7 @@ dependencies:
   webview_flutter: ^4.2.1
   url_launcher: ^6.3.0
 
-  # DiseÃ±o
+  # Diseño
   cupertino_icons: ^1.0.8
   material_symbols_icons: ^4.2960.0
 
@@ -36,7 +36,7 @@ dependencies:
   firebase_messaging: ^15.2.10
   flutter_local_notifications: 19.5.0
 
-  # CachÃ© / utilidades
+  # Caché / utilidades
   shared_preferences: ^2.5.5
   flutter_secure_storage: ^9.2.4
   intl: ^0.20.2
