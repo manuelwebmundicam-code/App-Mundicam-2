@@ -1999,8 +1999,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                               children: [
                                 Text(
                                   rp.name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     height: 1.2,

@@ -389,7 +389,8 @@ Size _brandVisualSize(String brandName) {
       key == 'aiscan' ||
       key == 'yale' ||
       key == 'wisim' ||
-      key == 'security360') {
+      key == 'security360' ||
+      key == 'unv') {
     return const Size(0.86, 0.82);
   }
 
@@ -482,6 +483,14 @@ String _canonicalBrandKey(
 
   if (key == 'visionic') {
     return 'visonic';
+  }
+
+  // UNV / Uniview: unificamos cualquier variante del nombre que pueda
+  // devolver WooCommerce/API para que siempre use el asset local nuevo.
+  if (key == 'unv' ||
+      key.startsWith('unv') ||
+      key.startsWith('uniview')) {
+    return 'unv';
   }
 
   if (key == 'secury360') {
@@ -579,6 +588,17 @@ String? _brandAssetPath(
     Map<String, String>
     discoveredAssets,
     ) {
+  final rawKey = _brandKey(name);
+
+  // UNV se fuerza a un nombre de asset NUEVO y único.
+  // Evita cualquier colisión con el antiguo assets/brands/UNV.png,
+  // con el manifiesto o con la imagen remota de WooCommerce.
+  if (rawKey == 'unv' ||
+      rawKey.startsWith('unv') ||
+      rawKey.startsWith('uniview')) {
+    return 'assets/brands/UNV_TECHNOLOGY.png';
+  }
+
   final canonical =
   _canonicalBrandKey(name);
 
@@ -645,6 +665,7 @@ String? _brandAssetPath(
     'tvt': 'assets/brands/TVT.png',
     'ubiquiti': 'assets/brands/Ubiquiti.png',
     'uniarch': 'assets/brands/Uniarch.png',
+    'unv': 'assets/brands/UNV.png',
     'urfog': 'assets/brands/Ur-Fog.png',
     'vaelsys': 'assets/brands/vaelsys.png',
     'videofied': 'assets/brands/videofied.png',

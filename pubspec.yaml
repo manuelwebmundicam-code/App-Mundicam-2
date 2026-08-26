@@ -4,7 +4,7 @@ publish_to: "none"
 
 # Nueva versión para Android e iOS.
 # Se usa build 26 para superar las versiones/builds anteriores del proyecto.
-version: 1.5.5+26
+version: 1.5.5+27
 
 environment:
   sdk: ">=3.9.2 <4.0.0"

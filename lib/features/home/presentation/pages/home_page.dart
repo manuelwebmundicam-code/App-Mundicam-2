@@ -203,6 +203,12 @@ class _HomePageState extends ConsumerState<HomePage> {
             : (fallback?['phone'] ?? '');
       }
 
+      final normalizedManagerName = managerName.trim().toLowerCase();
+      if (normalizedManagerName == 'ricardo') {
+        managerPhone = '+34 968 629 383';
+        managerEmail = 'pedidos@mundicam.com';
+      }
+
       if (!mounted) return;
       setState(() {
         _managerName = managerName;
@@ -261,8 +267,8 @@ class _HomePageState extends ConsumerState<HomePage> {
         'phone': '616545669',
       },
       'ricardo': {
-        'email': 'rcano@mundicam.com',
-        'phone': '606111983',
+        'email': 'pedidos@mundicam.com',
+        'phone': '+34 968 629 383',
       },
     };
 
@@ -494,8 +500,9 @@ class _HomePageState extends ConsumerState<HomePage> {
         children: [
           Image.asset(
             'assets/logo.png',
-            height: 21,
+            height: 42,
             fit: BoxFit.contain,
+            alignment: Alignment.centerLeft,
             errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
           ),
           const SizedBox(height: 10),
@@ -518,7 +525,49 @@ class _HomePageState extends ConsumerState<HomePage> {
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 11),
+          if (_managerName.isNotEmpty) ...[
+            Text(
+              'Tu gestor: ${_managerName.toUpperCase()}',
+              style: const TextStyle(
+                fontSize: 11.8,
+                color: _footerMuted,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
+          _footerContactRow(
+            icon: Icons.phone_outlined,
+            text: _managerPhone.isNotEmpty
+                ? _managerPhone
+                : 'Teléfono disponible en tu perfil',
+            color: _footerBlack,
+            onTap: _managerPhone.isNotEmpty
+                ? () => _openFooterLink(
+                      Uri(scheme: 'tel', path: _managerPhone),
+                    )
+                : null,
+          ),
+          _footerContactRow(
+            icon: Icons.email_outlined,
+            text: _managerEmail.isNotEmpty
+                ? _managerEmail
+                : 'Email disponible en tu perfil',
+            color: _footerBlack,
+            onTap: _managerEmail.isNotEmpty
+                ? () => _openFooterLink(
+                      Uri(
+                        scheme: 'mailto',
+                        path: _managerEmail,
+                        queryParameters: const <String, String>{
+                          'subject': 'Consulta desde App MundiCam',
+                        },
+                      ),
+                    )
+                : null,
+          ),
+          const SizedBox(height: 9),
           _footerWebButton(
             onTap: () => _openFooterLink(
               Uri.parse('https://www.mundicam.com'),

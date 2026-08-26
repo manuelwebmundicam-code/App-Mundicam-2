@@ -3505,6 +3505,7 @@ class ProductTile extends ConsumerStatefulWidget {
 class _ProductTileState extends ConsumerState<ProductTile> {
   int cantidad = 1;
   bool _isAddingToQuote = false;
+  bool _descripcionExpandida = false;
 
   double _precioDouble(Product p) {
     return double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
@@ -3568,7 +3569,6 @@ class _ProductTileState extends ConsumerState<ProductTile> {
           .trim();
     })
         .where((line) => line.isNotEmpty)
-        .take(3)
         .join('\n')
         .trim();
   }
@@ -3678,25 +3678,14 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  widget.p.name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 14.5,
-                                    fontWeight: FontWeight.w900,
-                                    color: AppColors.textPrimary,
-                                    height: 1.17,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              _stockChip(),
-                            ],
+                          Text(
+                            widget.p.name,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.textPrimary,
+                              height: 1.17,
+                            ),
                           ),
                           if (canViewStockDetails) ...[
                             const SizedBox(height: 6),
@@ -3707,28 +3696,93 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           ],
                           if (descripcionTarjeta.isNotEmpty) ...[
                             const SizedBox(height: 7),
-                            Text(
-                              descripcionTarjeta,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 10.8,
-                                color: Color(0xFF6B7280),
-                                height: 1.23,
-                                fontWeight: FontWeight.w500,
-                              ),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                const descriptionStyle = TextStyle(
+                                  fontSize: 10.8,
+                                  color: Color(0xFF6B7280),
+                                  height: 1.23,
+                                  fontWeight: FontWeight.w500,
+                                );
+
+                                final textPainter = TextPainter(
+                                  text: TextSpan(
+                                    text: descripcionTarjeta,
+                                    style: descriptionStyle,
+                                  ),
+                                  maxLines: 2,
+                                  textDirection: Directionality.of(context),
+                                )..layout(maxWidth: constraints.maxWidth);
+
+                                final necesitaVerMas =
+                                    textPainter.didExceedMaxLines;
+
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      descripcionTarjeta,
+                                      maxLines:
+                                          _descripcionExpandida ? null : 2,
+                                      overflow: _descripcionExpandida
+                                          ? TextOverflow.visible
+                                          : TextOverflow.ellipsis,
+                                      style: descriptionStyle,
+                                    ),
+                                    if (necesitaVerMas ||
+                                        _descripcionExpandida) ...[
+                                      const SizedBox(height: 2),
+                                      GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: () {
+                                          setState(() {
+                                            _descripcionExpandida =
+                                                !_descripcionExpandida;
+                                          });
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 2,
+                                          ),
+                                          child: Text(
+                                            _descripcionExpandida
+                                                ? 'Ver menos'
+                                                : 'Ver más',
+                                            style: const TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: AppColors.primary,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
                             ),
                           ],
                           const SizedBox(height: 10),
-                          Text(
-                            _formatearPrecioCompleto(precio),
-                            style: TextStyle(
-                              fontSize: precio > 0 ? 22 : 18,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.primary,
-                              fontFamily: 'Oswald',
-                              height: 1,
-                            ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Text(
+                                _formatearPrecioCompleto(precio),
+                                style: TextStyle(
+                                  fontSize: precio > 0 ? 22 : 18,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.primary,
+                                  fontFamily: 'Oswald',
+                                  height: 1,
+                                ),
+                              ),
+                              const Spacer(),
+                              _stockChip(),
+                              if (_tieneStock && !_bajoConsulta) ...[
+                                const SizedBox(width: 6),
+                                _shippingChip(),
+                              ],
+                            ],
                           ),
                         ],
                       ),
@@ -3917,7 +3971,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
     final label = _bajoConsulta
         ? 'Bajo consulta'
         : _tieneStock
-        ? 'Disponible 24/48h'
+        ? 'Disponible'
         : 'Sin Existencias';
 
     return Container(
@@ -3944,6 +3998,37 @@ class _ProductTileState extends ConsumerState<ProductTile> {
             style: TextStyle(
               fontSize: 10.5,
               color: textColor,
+              fontWeight: FontWeight.w800,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _shippingChip() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFD9DEE7)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.local_shipping_outlined,
+            size: 12,
+            color: AppColors.textPrimary,
+          ),
+          SizedBox(width: 4),
+          Text(
+            'Envío 24-48h',
+            style: TextStyle(
+              fontSize: 9.4,
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.w800,
               height: 1,
             ),
