@@ -15,7 +15,7 @@
     },
     {
       "name": "archive",
-      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/archive-4.0.9",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/archive-4.1.0",
       "packageUri": "lib/",
       "languageVersion": "3.0"
     },
@@ -129,13 +129,13 @@
     },
     {
       "name": "dio",
-      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/dio-5.10.0",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/dio-5.11.0",
       "packageUri": "lib/",
       "languageVersion": "2.18"
     },
     {
       "name": "dio_web_adapter",
-      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/dio_web_adapter-2.2.0",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/dio_web_adapter-2.2.1",
       "packageUri": "lib/",
       "languageVersion": "3.3"
     },
@@ -249,9 +249,9 @@
     },
     {
       "name": "flutter_cache_manager",
-      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/flutter_cache_manager-3.4.1",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/flutter_cache_manager-3.4.2",
       "packageUri": "lib/",
-      "languageVersion": "3.0"
+      "languageVersion": "3.8"
     },
     {
       "name": "flutter_launcher_icons",
@@ -369,7 +369,7 @@
     },
     {
       "name": "image",
-      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/image-4.8.0",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/image-4.9.2",
       "packageUri": "lib/",
       "languageVersion": "3.0"
     },
@@ -426,6 +426,12 @@
       "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/material_color_utilities-0.11.1",
       "packageUri": "lib/",
       "languageVersion": "2.17"
+    },
+    {
+      "name": "material_symbols_icons",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/material_symbols_icons-4.2960.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
     },
     {
       "name": "meta",
@@ -507,7 +513,7 @@
     },
     {
       "name": "posix",
-      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/posix-6.5.0",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/posix-6.5.2",
       "packageUri": "lib/",
       "languageVersion": "3.0"
     },
@@ -729,7 +735,7 @@
     },
     {
       "name": "vm_service",
-      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/vm_service-15.2.0",
+      "rootUri": "file:///C:/Users/Tony-WebApp/AppData/Local/Pub/Cache/hosted/pub.dev/vm_service-15.3.0",
       "packageUri": "lib/",
       "languageVersion": "3.5"
     },

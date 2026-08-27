@@ -5,7 +5,7 @@
   "packages": [
     {
       "name": "mundicam",
-      "version": "1.0.5+16",
+      "version": "1.6.6+31",
       "dependencies": [
         "cached_network_image",
         "cloud_firestore",
@@ -24,6 +24,7 @@
         "flutter_secure_storage",
         "http",
         "intl",
+        "material_symbols_icons",
         "shared_preferences",
         "url_launcher",
         "webview_flutter"
@@ -74,7 +75,7 @@
     },
     {
       "name": "flutter_cache_manager",
-      "version": "3.4.1",
+      "version": "3.4.2",
       "dependencies": [
         "clock",
         "collection",
@@ -194,6 +195,13 @@
       ]
     },
     {
+      "name": "material_symbols_icons",
+      "version": "4.2960.0",
+      "dependencies": [
+        "flutter"
+      ]
+    },
+    {
       "name": "cupertino_icons",
       "version": "1.0.9",
       "dependencies": []
@@ -224,7 +232,7 @@
     },
     {
       "name": "dio",
-      "version": "5.10.0",
+      "version": "5.11.0",
       "dependencies": [
         "async",
         "collection",
@@ -327,11 +335,9 @@
     },
     {
       "name": "image",
-      "version": "4.8.0",
+      "version": "4.9.2",
       "dependencies": [
-        "archive",
-        "meta",
-        "xml"
+        "archive"
       ]
     },
     {
@@ -837,7 +843,7 @@
     },
     {
       "name": "dio_web_adapter",
-      "version": "2.2.0",
+      "version": "2.2.1",
       "dependencies": [
         "dio",
         "http_parser",
@@ -988,7 +994,7 @@
     },
     {
       "name": "archive",
-      "version": "4.0.9",
+      "version": "4.1.0",
       "dependencies": [
         "path",
         "posix"
@@ -1205,7 +1211,7 @@
     },
     {
       "name": "posix",
-      "version": "6.5.0",
+      "version": "6.5.2",
       "dependencies": [
         "ffi",
         "meta",
@@ -1214,7 +1220,7 @@
     },
     {
       "name": "vm_service",
-      "version": "15.2.0",
+      "version": "15.3.0",
       "dependencies": []
     },
     {
