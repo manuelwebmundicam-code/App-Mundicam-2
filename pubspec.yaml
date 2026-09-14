@@ -2,8 +2,7 @@ name: mundicam
 description: "App oficial de Mundicam"
 publish_to: "none"
 
-# Nueva versiÃ³n para Android e iOS.
-# Se usa build 26 para superar las versiones/builds anteriores del proyecto.
+# Versión comercial MundiCam
 version: 1.6.7+31
 
 environment:
@@ -13,6 +12,7 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Base
   equatable: ^2.0.5
   cached_network_image: ^3.4.1
   flutter_riverpod: ^2.5.1
@@ -24,7 +24,7 @@ dependencies:
   webview_flutter: ^4.2.1
   url_launcher: ^6.3.0
 
-  # DiseÃ±o
+  # Diseño
   cupertino_icons: ^1.0.8
   material_symbols_icons: ^4.2960.0
 
@@ -36,7 +36,7 @@ dependencies:
   firebase_messaging: ^15.2.10
   flutter_local_notifications: 19.5.0
 
-  # CachÃ© / utilidades
+  # Caché / utilidades
   shared_preferences: ^2.5.5
   flutter_secure_storage: ^9.2.4
   intl: ^0.20.2
@@ -71,21 +71,12 @@ flutter:
           weight: 700
 
 flutter_launcher_icons:
-  android: true
+  # No regeneramos Android en este paso.
+  # Conservamos la configuración específica de iOS de GitHub.
+  android: false
   ios: true
-
-  # Android conserva su icono actual
-  image_path_android: "assets/images/mundicamlogo.png"
-
-  # iOS usa exclusivamente el icono corregido
   image_path_ios: "assets/images/mundicamlogo_ios_corregido.png"
-
-  # Elimina transparencia para cumplir los requisitos de iOS
   remove_alpha_ios: true
-
-  # Android adaptativo sin cambios
-  adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/images/mundicamlogo_android_foreground.png"
 
 flutter_native_splash:
   color: "#FFFFFF"
