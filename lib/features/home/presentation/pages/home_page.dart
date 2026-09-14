@@ -9,10 +9,11 @@ import 'package:mundicam/features/home/presentation/widgets/menu_bar.dart';
 import 'package:mundicam/features/home/presentation/widgets/category_grid.dart';
 import 'package:mundicam/features/home/presentation/widgets/brand_grid.dart';
 import 'package:mundicam/core/network/api_service.dart';
-import 'package:mundicam/features/home/presentation/widgets/news_section.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
-import 'package:mundicam/features/home/presentation/providers/noticias_provider.dart';
 import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
+import 'package:mundicam/features/company/presentation/pages/empresa_page.dart';
+import 'package:mundicam/features/promotions/presentation/providers/promotions_provider.dart';
+import 'package:mundicam/features/promotions/presentation/widgets/promotions_banner.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   final VoidCallback? onGoCart;
@@ -33,6 +34,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _showChatBox = false;
   bool _showBrands = false;
 
+  final GlobalKey _homeStackKey = GlobalKey();
+  final GlobalKey _footerKey = GlobalKey();
+  final GlobalKey _footerTitleKey = GlobalKey();
+  final ScrollController _homeScrollController = ScrollController();
+
+  double _chatBottomOffset = 16;
   final ApiService _apiService = ApiService();
   String _managerName = '';
   String _managerEmail = '';
@@ -49,22 +56,86 @@ class _HomePageState extends ConsumerState<HomePage> {
     super.initState();
     debugPrint('🍎 HOMEPAGE_INIT');
     _loadManagerContact();
+    _homeScrollController.addListener(_handleHomeScroll);
 
     Future.delayed(const Duration(milliseconds: 250), () {
       if (!mounted) return;
       setState(() => _showSecondaryContent = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateChatFooterLimit();
+      });
     });
 
     Future.delayed(const Duration(milliseconds: 800), () {
       if (!mounted) return;
       setState(() => _showChatBox = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateChatFooterLimit();
+      });
     });
+  }
+
+  void _handleHomeScroll() {
+    if (!_homeScrollController.hasClients || !mounted) return;
+    _updateChatFooterLimit();
+  }
+
+  void _updateChatFooterLimit() {
+    if (!mounted) return;
+
+    final stackContext = _homeStackKey.currentContext;
+    final footerTitleContext = _footerTitleKey.currentContext;
+
+    if (stackContext == null || footerTitleContext == null) {
+      if ((_chatBottomOffset - 16).abs() > 0.5) {
+        setState(() => _chatBottomOffset = 16);
+      }
+      return;
+    }
+
+    final stackBox = stackContext.findRenderObject();
+    final footerTitleBox = footerTitleContext.findRenderObject();
+
+    if (stackBox is! RenderBox ||
+        footerTitleBox is! RenderBox ||
+        !stackBox.hasSize ||
+        !footerTitleBox.hasSize) {
+      return;
+    }
+
+    final stackTop = stackBox.localToGlobal(Offset.zero).dy;
+    final titleTop = footerTitleBox.localToGlobal(Offset.zero).dy;
+    final titleTopInsideStack = titleTop - stackTop;
+
+    // El ChatBox puede entrar en la zona superior del footer y pasar sobre
+    // el logo, pero NO puede bajar del título "MundiCam Security Distribution".
+    // Ese título es el tope visual definitivo.
+    const defaultBottom = 16.0;
+    const titleGap = 8.0;
+
+    final requiredBottom =
+        stackBox.size.height - titleTopInsideStack + titleGap;
+
+    final nextBottom = requiredBottom > defaultBottom
+        ? requiredBottom
+        : defaultBottom;
+
+    if ((nextBottom - _chatBottomOffset).abs() > 0.5) {
+      setState(() => _chatBottomOffset = nextBottom);
+    }
+  }
+
+  @override
+  void dispose() {
+    _homeScrollController.removeListener(_handleHomeScroll);
+    _homeScrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _refreshHome() async {
     ref.invalidate(categoriesProvider);
     ref.invalidate(homeBrandsProvider);
-    ref.invalidate(noticiasProvider);
+    ref.invalidate(promotionsProvider);
     ref.invalidate(bannerMixProvider);
     await _loadManagerContact();
     await Future.delayed(const Duration(milliseconds: 350));
@@ -76,6 +147,14 @@ class _HomePageState extends ConsumerState<HomePage> {
     } catch (_) {
       debugPrint('No se pudo abrir: $uri');
     }
+  }
+
+  void _openCompanyPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const EmpresaPage(),
+      ),
+    );
   }
 
   @override
@@ -95,16 +174,18 @@ class _HomePageState extends ConsumerState<HomePage> {
           behavior: HitTestBehavior.translucent,
           onTap: () => FocusScope.of(context).unfocus(),
           child: Stack(
+            key: _homeStackKey,
             children: [
               RefreshIndicator(
                 color: AppColors.primary,
                 onRefresh: _refreshHome,
                 child: SingleChildScrollView(
+                  controller: _homeScrollController,
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: ClampingScrollPhysics(),
                   ),
                   keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
+                      ScrollViewKeyboardDismissBehavior.onDrag,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -141,7 +222,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                 ),
               ),
-              if (_showChatBox) const ChatBox(),
+              if (_showChatBox)
+                ChatBox(
+                  bottomOffset: _chatBottomOffset,
+                ),
             ],
           ),
         ),
@@ -193,14 +277,13 @@ class _HomePageState extends ConsumerState<HomePage> {
         user['gestor_phone'],
       ]);
 
-      if ((managerEmail.isEmpty || managerPhone.isEmpty) && managerName.isNotEmpty) {
+      if ((managerEmail.isEmpty || managerPhone.isEmpty) &&
+          managerName.isNotEmpty) {
         final fallback = _localManagerContact(managerName);
-        managerEmail = managerEmail.isNotEmpty
-            ? managerEmail
-            : (fallback?['email'] ?? '');
-        managerPhone = managerPhone.isNotEmpty
-            ? managerPhone
-            : (fallback?['phone'] ?? '');
+        managerEmail =
+            managerEmail.isNotEmpty ? managerEmail : (fallback?['email'] ?? '');
+        managerPhone =
+            managerPhone.isNotEmpty ? managerPhone : (fallback?['phone'] ?? '');
       }
 
       final normalizedManagerName = managerName.trim().toLowerCase();
@@ -410,9 +493,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('NOVEDADES'),
+          _buildSectionTitle('PROMOCIONES'),
           const SizedBox(height: 12),
-          const NewsBanner(),
+          const PromotionsBanner(),
         ],
       ),
     );
@@ -435,9 +518,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       ),
       child: Column(
         children: [
-          _buildSectionTitle('NOVEDADES'),
+          _buildSectionTitle('PROMOCIONES'),
           const SizedBox(height: 12),
-          _buildSkeletonBlock(height: 205),
+          _buildSkeletonBlock(height: 248),
         ],
       ),
     );
@@ -489,26 +572,39 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _buildMundicamFooter() {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final logoHeight = (screenWidth * 0.108).clamp(42.0, 58.0).toDouble();
+    final logoMaxWidth = (screenWidth * 0.52).clamp(160.0, 260.0).toDouble();
+
     return Container(
+      key: _footerKey,
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
       decoration: const BoxDecoration(
         color: _footerBg,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Image.asset(
-            'assets/logo.png',
-            height: 42,
-            fit: BoxFit.contain,
-            alignment: Alignment.centerLeft,
-            errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: logoMaxWidth),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Image.asset(
+                'assets/logo.png',
+                height: logoHeight,
+                fit: BoxFit.contain,
+                alignment: Alignment.centerLeft,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+              ),
+            ),
           ),
           const SizedBox(height: 10),
-          const Text(
+          Text(
             'MundiCam Security Distribution',
-            style: TextStyle(
+            key: _footerTitleKey,
+            style: const TextStyle(
               fontFamily: 'Oswald',
               fontSize: 17,
               fontWeight: FontWeight.w900,
@@ -568,21 +664,73 @@ class _HomePageState extends ConsumerState<HomePage> {
                 : null,
           ),
           const SizedBox(height: 9),
-          _footerWebButton(
-            onTap: () => _openFooterLink(
-              Uri.parse('https://www.mundicam.com'),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            '© MUNDICAM 2025-2026 · Todos los derechos reservados',
-            style: TextStyle(
-              fontSize: 10,
-              color: Color(0xFF7A8594),
-              fontWeight: FontWeight.w500,
-            ),
+          Row(
+            children: [
+              Expanded(
+                flex: 5,
+                child: _footerWebButton(
+                  onTap: () => _openFooterLink(
+                    Uri.parse('https://www.mundicam.com'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 4,
+                child: _footerCompanyButton(
+                  onTap: _openCompanyPage,
+                ),
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _footerCompanyButton({required VoidCallback onTap}) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: double.infinity,
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFD8E0E8)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.035),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.business_outlined,
+                size: 15,
+                color: AppColors.textPrimary,
+              ),
+              SizedBox(width: 6),
+              Text(
+                'Empresa',
+                style: TextStyle(
+                  fontFamily: 'Oswald',
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -628,7 +776,9 @@ class _HomePageState extends ConsumerState<HomePage> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(22),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          width: double.infinity,
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
           decoration: BoxDecoration(
             color: AppColors.primary,
             borderRadius: BorderRadius.circular(22),
@@ -641,7 +791,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             ],
           ),
           child: const Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 Icons.language_outlined,
@@ -650,9 +800,9 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
               SizedBox(width: 7),
               Text(
-                'Ir a web oficial',
+                'Ir a la web',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
                   fontFamily: 'Oswald',
@@ -670,6 +820,4 @@ class _HomePageState extends ConsumerState<HomePage> {
       ),
     );
   }
-
-
 }

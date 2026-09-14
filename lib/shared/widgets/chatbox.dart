@@ -6,7 +6,12 @@ import 'package:mundicam/features/support/presentation/pages/chat_search_page.da
 final chatBoxProvider = StateProvider<bool>((ref) => true);
 
 class ChatBox extends ConsumerWidget {
-  const ChatBox({super.key});
+  final double bottomOffset;
+
+  const ChatBox({
+    super.key,
+    this.bottomOffset = 16,
+  });
 
   static const Color _brandRed = Color(0xFFA60909);
   static const Color _dark = Color(0xFF111827);
@@ -31,9 +36,11 @@ class ChatBox extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    return Positioned(
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
       right: 14,
-      bottom: 16,
+      bottom: bottomOffset,
       child: SafeArea(
         top: false,
         child: Material(

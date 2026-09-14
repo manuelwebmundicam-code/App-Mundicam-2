@@ -6,6 +6,7 @@ import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
+import 'package:mundicam/features/catalog/presentation/widgets/cross_sell_widgets.dart';
 import 'package:mundicam/features/checkout/presentation/pages/checkout_page.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
@@ -253,8 +254,16 @@ class CartPage extends ConsumerWidget {
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               physics: const BouncingScrollPhysics(),
-              itemCount: cartItems.length,
+              itemCount: cartItems.length + 1,
               itemBuilder: (context, index) {
+                if (index == cartItems.length) {
+                  return CartCrossSellSection(
+                    key: const ValueKey('mundicam-cart-cross-sells'),
+                    cartItems: cartItems,
+                    disabled: ref.read(cartProvider.notifier).hasQuoteSource,
+                  );
+                }
+
                 final item = cartItems[index];
                 final price = double.tryParse(
                   item.product.price.replaceAll(',', '.'),

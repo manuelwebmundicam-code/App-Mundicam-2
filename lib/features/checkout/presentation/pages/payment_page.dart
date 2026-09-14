@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:mundicam/core/reviews/mundicam_review_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 class PaymentPage extends StatefulWidget {
@@ -481,6 +482,15 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
       _waitingForConfirmation = false;
       _errorMessage = null;
       _progress = 100;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        MundicamReviewService.instance.requestIfEligible(
+          trigger: MundicamReviewTrigger.orderCompleted,
+        ),
+      );
     });
   }
 

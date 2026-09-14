@@ -1,7 +1,6 @@
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/foundation.dart';
-
-import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 @immutable
 class ForceUpdateState {
@@ -37,6 +36,8 @@ class ForceUpdateState {
 ///
 /// IMPORTANTE:
 /// - Está desactivado por defecto mediante Remote Config.
+/// - La versión comercial se lee del binario instalado (p. ej. 1.6.6).
+/// - El número de build (+31, +32...) se ignora deliberadamente.
 /// - Si falta cualquier dato necesario para bloquear de forma segura,
 ///   la app NO bloquea al usuario (fail-open).
 /// - No interviene en login, pedidos, precios, RMA ni notificaciones.
@@ -54,13 +55,50 @@ class ForceUpdateService {
   static const String messageKey = 'force_update_message';
   static const String buttonLabelKey = 'force_update_button_label';
 
+  static const String _definedVersion = String.fromEnvironment(
+    'MUNDICAM_APP_VERSION',
+    defaultValue: '',
+  );
+
   final ValueNotifier<ForceUpdateState> state =
       ValueNotifier<ForceUpdateState>(const ForceUpdateState.allowed());
 
-  String get currentVersion => MundicamAnalyticsService.appVersion;
+  String _currentVersion = '';
+
+  String get currentVersion => _currentVersion;
+
+  Future<String> _resolveCurrentVersion() async {
+    final cached = _currentVersion.trim();
+    if (cached.isNotEmpty) return cached;
+
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final version = info.version.trim();
+      if (version.isNotEmpty) {
+        _currentVersion = version;
+        return version;
+      }
+    } catch (e) {
+      debugPrint('⚠️ No se pudo leer la versión instalada: $e');
+    }
+
+    final defined = _definedVersion.trim();
+    if (defined.isNotEmpty) {
+      _currentVersion = defined;
+      return defined;
+    }
+
+    return '';
+  }
 
   Future<void> evaluate(FirebaseRemoteConfig remoteConfig) async {
     try {
+      final resolvedCurrentVersion = await _resolveCurrentVersion();
+      if (resolvedCurrentVersion.isEmpty) {
+        _allow('no se pudo determinar la versión instalada');
+        return;
+      }
+
       final enabled = remoteConfig.getBool(enabledKey);
 
       if (!enabled) {
@@ -68,7 +106,8 @@ class ForceUpdateService {
         return;
       }
 
-      final isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      final isAndroid =
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
       final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
       if (!isAndroid && !isIos) {
@@ -103,7 +142,8 @@ class ForceUpdateService {
         return;
       }
 
-      final comparison = _compareVersions(currentVersion, minimumVersion);
+      final comparison =
+          _compareVersions(resolvedCurrentVersion, minimumVersion);
       if (comparison == null) {
         _allow('versión no válida');
         return;
@@ -111,18 +151,19 @@ class ForceUpdateService {
 
       if (comparison >= 0) {
         state.value = ForceUpdateState.allowed(
-          currentVersion: currentVersion,
+          currentVersion: resolvedCurrentVersion,
           minimumVersion: minimumVersion,
         );
         debugPrint(
-          '✅ Versión MundiCam permitida: $currentVersion >= $minimumVersion',
+          '✅ Versión MundiCam permitida: '
+          '$resolvedCurrentVersion >= $minimumVersion',
         );
         return;
       }
 
       state.value = ForceUpdateState(
         required: true,
-        currentVersion: currentVersion,
+        currentVersion: resolvedCurrentVersion,
         minimumVersion: minimumVersion,
         title: title,
         message: message,
@@ -131,7 +172,8 @@ class ForceUpdateService {
       );
 
       debugPrint(
-        '⛔ Actualización obligatoria: $currentVersion < $minimumVersion',
+        '⛔ Actualización obligatoria: '
+        '$resolvedCurrentVersion < $minimumVersion',
       );
     } catch (e) {
       // Una caída de Firebase Remote Config nunca debe bloquear por error a
@@ -174,6 +216,7 @@ class ForceUpdateService {
       value = value.substring(1);
     }
 
+    // +31/+32 son builds internos y NO cambian la versión comercial mínima.
     value = value.split('+').first.split('-').first;
     if (value.isEmpty) return null;
 

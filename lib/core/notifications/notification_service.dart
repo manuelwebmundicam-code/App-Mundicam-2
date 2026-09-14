@@ -42,7 +42,24 @@ class MundiCamOrderNotification {
   bool get isOrderCreated => event == 'order_created';
   bool get isStatusChanged => event == 'order_status_changed';
 
+  bool get isPromotionNotification {
+    final type = data['type']?.toString().trim().toLowerCase() ?? '';
+    final tipo = data['tipo']?.toString().trim().toLowerCase() ?? '';
+    final screen = data['screen']?.toString().trim().toLowerCase() ?? '';
+    final route = data['route']?.toString().trim().toLowerCase() ?? '';
+
+    return event == 'promotion' ||
+        event == 'promotion_synced' ||
+        type == 'promotion' ||
+        tipo == 'promocion' ||
+        tipo == 'promoción' ||
+        screen == 'promotions' ||
+        route == 'promotions';
+  }
+
   bool get isGeneralNotification {
+    if (isPromotionNotification) return false;
+
     final type = data['type']?.toString().trim().toLowerCase() ?? '';
 
     return event == 'general' ||
@@ -54,7 +71,8 @@ class MundiCamOrderNotification {
         type == 'notificacion';
   }
 
-  bool get isOrderNotification => !isGeneralNotification;
+  bool get isOrderNotification =>
+      !isGeneralNotification && !isPromotionNotification;
 
   MundiCamOrderNotification copyWith({
     bool? showPopup,
@@ -174,6 +192,29 @@ class MundiCamOrderNotification {
     final data = Map<String, dynamic>.from(message.data);
     final type = data['type']?.toString().trim().toLowerCase() ?? '';
     final event = data['event']?.toString().trim().toLowerCase() ?? '';
+    final tipo = data['tipo']?.toString().trim().toLowerCase() ?? '';
+    final screen = data['screen']?.toString().trim().toLowerCase() ?? '';
+    final route = data['route']?.toString().trim().toLowerCase() ?? '';
+
+    final isPromotionNotification = event == 'promotion' ||
+        event == 'promotion_synced' ||
+        type == 'promotion' ||
+        tipo == 'promocion' ||
+        tipo == 'promoción' ||
+        screen == 'promotions' ||
+        route == 'promotions';
+
+    // El PHP de Promociones 2.1.0 puede usar type=general, pero tipo/event/route
+    // identifican la promoción. Se prioriza antes de heurísticas de pedido.
+    if (isPromotionNotification) {
+      return _fromGeneralMessage(
+        message,
+        data: data,
+        event: event,
+        showPopup: showPopup,
+        openedByUser: openedByUser,
+      );
+    }
 
     final titleHint = _firstNonEmptyString([
           data['title'],
@@ -693,9 +734,11 @@ class NotificationService {
   void _emitNotification(MundiCamOrderNotification notification) {
     if (kDebugMode) {
       debugPrint(
-        notification.isGeneralNotification
-            ? '📩 Notificación general: ${notification.title}'
-            : '📩 Notificación pedido: ${notification.title}',
+        notification.isPromotionNotification
+            ? '📩 Notificación promoción: ${notification.title}'
+            : notification.isGeneralNotification
+                ? '📩 Notificación general: ${notification.title}'
+                : '📩 Notificación pedido: ${notification.title}',
       );
       debugPrint('   Body: ${notification.body}');
       debugPrint('   Opened by user: ${notification.openedByUser}');

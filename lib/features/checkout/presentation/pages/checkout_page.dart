@@ -11,6 +11,7 @@ import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:mundicam/core/reviews/mundicam_review_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
@@ -36,11 +37,13 @@ class _CheckoutPaymentMethod {
 class CheckoutPage extends ConsumerStatefulWidget {
   final VoidCallback? onGoHome;
   final VoidCallback? onGoCart;
+  final String couponCode;
 
   const CheckoutPage({
     super.key,
     this.onGoHome,
     this.onGoCart,
+    this.couponCode = '',
   });
 
   @override
@@ -69,6 +72,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   final _stateController = TextEditingController();
   final _countryController = TextEditingController();
   final _notesController = TextEditingController();
+  final _couponController = TextEditingController();
 
   bool _isLoading = false;
   bool _loadingProfile = true;
@@ -88,7 +92,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   String? _shippingMessage;
   Timer? _shippingDebounce;
 
-  static const String _baseUrl = 'https://www.mundicam.com';
+  bool _couponLoading = false;
+  CouponValidationResult? _couponResult;
+  String? _couponError;
+  String _appliedCouponCode = '';
+
 
   static const List<_CheckoutPaymentMethod> _paymentMethods = [
     _CheckoutPaymentMethod(
@@ -118,6 +126,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   @override
   void initState() {
     super.initState();
+    _appliedCouponCode = widget.couponCode.trim();
+    _couponController.text = _appliedCouponCode;
     for (final controller in [
       _addressController,
       _cityController,
@@ -182,6 +192,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       _stateController,
       _countryController,
       _notesController,
+      _couponController,
     ]) {
       c.dispose();
     }
@@ -191,6 +202,104 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   // ──────────────────────────────────────────────
   // Helpers
   // ──────────────────────────────────────────────
+
+  String get _effectiveCouponCode => _appliedCouponCode.trim();
+
+  String _customerNoteForOrder() {
+    final userNote = _notesController.text.trim();
+    final couponCode = _effectiveCouponCode;
+
+    if (couponCode.isEmpty) {
+      return userNote;
+    }
+
+    final couponNote = 'Código de descuento utilizado: $couponCode';
+    if (userNote.isEmpty) {
+      return couponNote;
+    }
+
+    return '$userNote\n\n$couponNote';
+  }
+
+  Future<void> _applyCoupon() async {
+    final code = _couponController.text.trim();
+    if (code.isEmpty || _couponLoading) return;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _couponLoading = true;
+      _couponError = null;
+      _couponResult = null;
+    });
+
+    final result = await ApiService().validateCartCoupon(
+      code: code,
+      lineItems: _currentLineItems(),
+    );
+
+    if (!mounted) return;
+
+    if (!result.success) {
+      setState(() {
+        _couponLoading = false;
+        _appliedCouponCode = '';
+        _couponResult = null;
+        _couponError = result.message;
+      });
+      await _refreshShippingAndPreview();
+      return;
+    }
+
+    final normalizedCode = result.code.trim().isNotEmpty
+        ? result.code.trim()
+        : code;
+
+    setState(() {
+      _couponLoading = false;
+      _appliedCouponCode = normalizedCode;
+      _couponController.text = normalizedCode;
+      _couponResult = result;
+      _couponError = null;
+    });
+
+    HapticFeedback.selectionClick();
+    await _refreshShippingAndPreview();
+  }
+
+  void _clearCoupon() {
+    final hadCoupon = _effectiveCouponCode.isNotEmpty;
+    setState(() {
+      _couponController.clear();
+      _appliedCouponCode = '';
+      _couponResult = null;
+      _couponError = null;
+    });
+
+    if (hadCoupon) {
+      unawaited(_refreshShippingAndPreview());
+    }
+  }
+
+  void _onCouponChanged(String value) {
+    final normalizedInput = value.trim().toLowerCase();
+    final normalizedApplied = _effectiveCouponCode.toLowerCase();
+    final changedAppliedCode =
+        normalizedApplied.isNotEmpty && normalizedInput != normalizedApplied;
+
+    if (!changedAppliedCode && _couponError == null) return;
+
+    setState(() {
+      if (changedAppliedCode) {
+        _appliedCouponCode = '';
+        _couponResult = null;
+      }
+      _couponError = null;
+    });
+
+    if (changedAppliedCode) {
+      unawaited(_refreshShippingAndPreview());
+    }
+  }
 
   String _normalizePaymentMethod(String? value) {
     final text = value?.trim().toLowerCase() ?? '';
@@ -569,6 +678,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
           lineItems: lineItems,
           shippingAddress: address,
           shippingMethodId: selected.id,
+          couponCode: _effectiveCouponCode,
         );
       }
 
@@ -583,6 +693,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             lineItems: lineItems,
             shippingAddress: address,
             shippingMethodId: selected.id,
+            couponCode: _effectiveCouponCode,
           );
         }
       }
@@ -629,6 +740,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         lineItems: _currentLineItems(),
         shippingAddress: _shippingAddressPayload(),
         shippingMethodId: option.id,
+        couponCode: _effectiveCouponCode,
       );
     } catch (e) {
       debugPrint('❌ Error seleccionando envío: $e');
@@ -656,6 +768,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       lineItems: _currentLineItems(),
       shippingAddress: _shippingAddressPayload(),
       shippingMethodId: _selectedShippingOption!.id,
+      couponCode: _effectiveCouponCode,
     );
 
     if (preview != null && mounted) {
@@ -682,7 +795,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   }
 
   /// Vuelve al Home usando el callback si existe, si no, hace pop de la ruta.
-  void _irAlInicio({String? mensaje}) {
+  void _irAlInicio({
+    String? mensaje,
+    bool solicitarValoracion = false,
+  }) {
     if (!mounted) return;
 
     if (mensaje != null && mensaje.isNotEmpty) {
@@ -700,6 +816,16 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       widget.onGoHome!();
     } else {
       Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+
+    if (solicitarValoracion) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(
+          MundicamReviewService.instance.requestIfEligible(
+            trigger: MundicamReviewTrigger.orderCompleted,
+          ),
+        );
+      });
     }
   }
 
@@ -1136,6 +1262,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       if (preview.cartHash.isNotEmpty) 'cart_hash': preview.cartHash,
       if (preview.shippingHash.isNotEmpty) 'shipping_hash': preview.shippingHash,
       'shipping_option_id': _selectedShippingOption!.id,
+      if (_effectiveCouponCode.isNotEmpty)
+        'coupon_code': _effectiveCouponCode,
       'line_items': lineItems,
       'expected_subtotal': preview.subtotal.toStringAsFixed(2),
       'expected_shipping_total': preview.shipping.toStringAsFixed(2),
@@ -1143,7 +1271,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       'expected_total': total.toStringAsFixed(2),
       'expected_currency': preview.currency.isEmpty ? 'EUR' : preview.currency,
       'idempotency_key': effectiveIdempotencyKey,
-      'customer_note': _notesController.text.trim(),
+      'customer_note': _customerNoteForOrder(),
       'meta_data': [
         {'key': '_billing_nif', 'value': _nifController.text.trim()},
         {'key': 'billing_nif', 'value': _nifController.text.trim()},
@@ -1268,6 +1396,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
             ? 'Solicitud registrada. El presupuesto seguirá visible hasta que '
                 'el pago quede confirmado.'
             : '✅ Pedido confirmado. Te llevamos al inicio.',
+        solicitarValoracion: !hasQuoteSource,
       );
     } catch (e) {
       debugPrint('❌ Error creando pedido: $e');
@@ -1427,6 +1556,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
                     maxLines: 3, required: false),
               ],
             ),
+            const SizedBox(height: 16),
+            _buildCouponSection(),
             const SizedBox(height: 24),
             _buildSummary(),
             const SizedBox(height: 16),
@@ -1535,6 +1666,165 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     color: Colors.grey.shade300,
     margin: const EdgeInsets.only(bottom: 18),
   );
+
+  Widget _buildCouponSection() {
+    final previewCode = _orderPreview?.couponCode.trim() ?? '';
+    final shownCode = previewCode.isNotEmpty ? previewCode : _effectiveCouponCode;
+    final discount = _orderPreview?.discount ?? _couponResult?.discount ?? 0.0;
+    final couponApplied = shownCode.isNotEmpty &&
+        ((_couponResult?.success ?? false) || previewCode.isNotEmpty);
+
+    return _buildSectionCard(
+      icon: Icons.local_offer_outlined,
+      title: 'CUPÓN DE DESCUENTO',
+      subtitle: 'Opcional',
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _couponController,
+                enabled: !_couponLoading,
+                textCapitalization: TextCapitalization.characters,
+                textInputAction: TextInputAction.done,
+                onChanged: _onCouponChanged,
+                onSubmitted: (_) => _applyCoupon(),
+                decoration: InputDecoration(
+                  hintText: 'Código del cupón',
+                  isDense: true,
+                  filled: true,
+                  fillColor: const Color(0xFFF8F9FB),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(13),
+                    borderSide: const BorderSide(color: Color(0xFFDDE1E7)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(13),
+                    borderSide: const BorderSide(color: Color(0xFFDDE1E7)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(13),
+                    borderSide: const BorderSide(
+                      color: AppColors.primary,
+                      width: 1.4,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 46,
+              child: ElevatedButton(
+                onPressed: _couponLoading ? null : _applyCoupon,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                ),
+                child: _couponLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'APLICAR',
+                        style: TextStyle(
+                          fontFamily: 'Oswald',
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+        if (couponApplied) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAF7EE),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFCDEAD5)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_outline,
+                  size: 19,
+                  color: Color(0xFF18864B),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    discount > 0
+                        ? 'Cupón $shownCode aplicado · -${discount.toStringAsFixed(2)} €'
+                        : 'Cupón $shownCode aplicado',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF176A3D),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _clearCoupon,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 4,
+                    ),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('QUITAR'),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (_couponError != null && _couponError!.trim().isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                size: 18,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  _couponError!,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    height: 1.3,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
 
   Widget _buildSectionCard({
     required IconData icon,
@@ -2171,6 +2461,10 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     final notifier = ref.watch(cartProvider.notifier);
     final preview = _orderPreview;
     final subtotal = preview?.subtotal ?? notifier.subtotal;
+    final discount = preview?.discount ?? 0.0;
+    final couponCode = preview?.couponCode.trim().isNotEmpty == true
+        ? preview!.couponCode.trim()
+        : _effectiveCouponCode;
     final shipping = preview?.shipping ?? 0.0;
     final taxTotal = preview?.taxTotal ?? notifier.iva;
     final total = preview?.expectedTotal ?? notifier.total;
@@ -2194,6 +2488,22 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               Text(_formatMoney(subtotal)),
             ],
           ),
+          if (discount > 0) ...[
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    couponCode.isNotEmpty ? 'Cupón $couponCode' : 'Cupón',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Text('-${_formatMoney(discount)}'),
+              ],
+            ),
+          ],
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

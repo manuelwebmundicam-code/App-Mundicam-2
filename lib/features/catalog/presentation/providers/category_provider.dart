@@ -9,11 +9,27 @@ final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 final categoriesProvider = FutureProvider<List<CategoryModel>>((ref) async {
   final cache = CategoryCacheService();
 
-  // Verificar caché primero
+  // Verificar caché primero. La caché puede haber sido precargada con
+  // categorías y subcategorías; Inicio debe mostrar únicamente categorías raíz.
   final cached = cache.getCachedCategories();
   if (cached != null && cached.isNotEmpty) {
-    debugPrint('📦 Categorías desde caché (${cached.length})');
-    return cached;
+    final filteredCached = cached.where((cat) {
+      final name = cat.name.toLowerCase().trim();
+      final normalized = name
+          .replaceAll('í', 'i')
+          .replaceAll('á', 'a')
+          .replaceAll('é', 'e')
+          .replaceAll('ó', 'o')
+          .replaceAll('ú', 'u');
+      final isMain = cat.parent == 0;
+      final isForbidden = normalized.contains('sincategoria');
+      return isMain && !isForbidden;
+    }).toList();
+
+    debugPrint(
+      '📦 Categorías principales desde caché (${filteredCached.length})',
+    );
+    return filteredCached;
   }
 
   // Si no hay caché, cargar de WooCommerce

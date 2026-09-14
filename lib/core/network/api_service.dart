@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/cache/product_cache_service.dart';
@@ -14,6 +15,7 @@ import 'package:mundicam/features/home/data/models/noticia.dart';
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/features/quotes/data/models/quote_model.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
+import 'package:mundicam/features/promotions/data/models/promotion_model.dart';
 import 'package:mundicam/features/training/data/models/cursos_model.dart';
 
 
@@ -330,6 +332,9 @@ class ShippingOption {
 class OrderPreviewResult {
   final String currency;
   final double subtotal;
+  final double discount;
+  final double discountTax;
+  final String couponCode;
   final double shipping;
   final double taxTotal;
   final double total;
@@ -346,6 +351,9 @@ class OrderPreviewResult {
   const OrderPreviewResult({
     required this.currency,
     required this.subtotal,
+    required this.discount,
+    required this.discountTax,
+    required this.couponCode,
     required this.shipping,
     required this.taxTotal,
     required this.total,
@@ -369,10 +377,14 @@ class OrderPreviewResult {
         .where((option) => option.id.isNotEmpty)
         .toList();
     final total = _parseDouble(totals['total']);
+    final coupon = _asMap(json['coupon']);
 
     return OrderPreviewResult(
       currency: json['currency']?.toString().trim() ?? 'EUR',
       subtotal: _parseDouble(totals['subtotal']),
+      discount: _parseDouble(totals['discount']),
+      discountTax: _parseDouble(totals['discount_tax']),
+      couponCode: coupon['code']?.toString().trim() ?? '',
       shipping: _parseDouble(totals['shipping_total'] ?? totals['shipping']),
       taxTotal: _parseDouble(totals['tax_total']),
       total: total,
@@ -490,6 +502,41 @@ class _CatalogFiltersCacheEntry {
       DateTime.now().difference(createdAt) < const Duration(minutes: 5);
 }
 
+class CouponValidationResult {
+  final bool success;
+  final String code;
+  final double discount;
+  final double subtotal;
+  final double subtotalAfterDiscount;
+  final String description;
+  final String discountType;
+  final String currency;
+  final bool freeShipping;
+  final String message;
+
+  const CouponValidationResult({
+    required this.success,
+    this.code = '',
+    this.discount = 0,
+    this.subtotal = 0,
+    this.subtotalAfterDiscount = 0,
+    this.description = '',
+    this.discountType = '',
+    this.currency = 'EUR',
+    this.freeShipping = false,
+    this.message = '',
+  });
+
+  factory CouponValidationResult.failure(String message) {
+    return CouponValidationResult(
+      success: false,
+      message: message.trim().isNotEmpty
+          ? message.trim()
+          : 'No se pudo validar el cupón.',
+    );
+  }
+}
+
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -497,6 +544,12 @@ class ApiService {
   static const String _baseUrl = 'https://www.mundicam.com';
   static const String _appNamespace = '/wp-json/mundicam-app/v1';
   static const String _filtersNamespace = '/wp-json/mundicam/v1';
+
+  // Identificación comercial visible en la nota del pedido.
+  // Se añade desde Flutter justo antes de /order/create y no depende del
+  // contenido que el cliente escriba en "Notas adicionales".
+  static const String _appOrderCustomerNotePrefix =
+      'Pedido Generado desde APP MundiCam';
 
   // Sensación de velocidad del buscador:
   // primera pantalla pequeña y páginas siguientes precargadas en segundo plano.
@@ -526,7 +579,9 @@ class ApiService {
   DateTime? _lastSessionContextRefresh;
 
   List<Map<String, dynamic>>? _cachedBrandTerms;
+  bool? _cachedBrandTermsHideEmpty;
   final Map<String, _CatalogFiltersCacheEntry> _catalogFiltersCache = {};
+  final Map<int, CategoryModel> _knownCategories = <int, CategoryModel>{};
   final Set<String> _backgroundSearchPrefetchRunning = <String>{};
 
   ApiService._internal() {
@@ -876,6 +931,7 @@ class ApiService {
         ProductCacheService().clearAll();
         _catalogFiltersCache.clear();
         _cachedBrandTerms = null;
+        _cachedBrandTermsHideEmpty = null;
         if (kDebugMode) {
           debugPrint('🧹 Caché limpiada por roles/permisos actualizados desde PHP v1.8.0');
         }
@@ -983,6 +1039,7 @@ class ApiService {
     ProductCacheService().clearAll();
     _catalogFiltersCache.clear();
     _cachedBrandTerms = null;
+    _cachedBrandTermsHideEmpty = null;
 
     if (kDebugMode) {
       debugPrint(
@@ -1185,6 +1242,7 @@ class ApiService {
     ProductCacheService().clearAll();
     _catalogFiltersCache.clear();
     _cachedBrandTerms = null;
+    _cachedBrandTermsHideEmpty = null;
 
     if (kDebugMode) {
       debugPrint('🧹 Sesión MundiCam App API borrada');
@@ -1535,11 +1593,17 @@ class ApiService {
       response.data,
     ]);
 
-    return raw
+    final categories = raw
         .whereType<Map>()
         .map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)))
         .where((cat) => cat.id > 0 && !_isForbiddenCategory(cat.name))
         .toList();
+
+    for (final category in categories) {
+      _knownCategories[category.id] = category;
+    }
+
+    return categories;
   }
 
   Future<List<CategoryModel>> getSubcategoriasDe(int? parentId) async {
@@ -1578,7 +1642,21 @@ class ApiService {
     bool forceRefresh = false,
   }) async {
     if (!forceRefresh && _cachedBrandTerms != null) {
-      return _cachedBrandTerms!;
+      // La caché de marcas debe respetar hide_empty. Antes una llamada con
+      // hide_empty=false podía contaminar llamadas posteriores con true y hacer
+      // aparecer marcas sin productos en Inicio/filtros.
+      if (_cachedBrandTermsHideEmpty == hideEmpty) {
+        return _cachedBrandTerms!;
+      }
+
+      // Una respuesta completa (hide_empty=false) sí puede reutilizarse para
+      // hide_empty=true filtrando por count. Al revés no: habría que recuperar
+      // términos que la respuesta reducida nunca trajo.
+      if (_cachedBrandTermsHideEmpty == false && hideEmpty) {
+        return _cachedBrandTerms!
+            .where((brand) => _parseInt(brand['count']) > 0)
+            .toList();
+      }
     }
 
     final response = await _appGet('/brands', queryParameters: {
@@ -1590,20 +1668,52 @@ class ApiService {
 
     final brands = raw.whereType<Map>().map((item) {
       final map = Map<String, dynamic>.from(item);
+
+      // MundiCam App Extensions 1.0.1 amplía /brands de forma aditiva:
+      // - image_full: original/full para cuentas habilitadas en pruebas;
+      // - image_thumbnail: miniatura anterior para compatibilidad;
+      // - image_attachment_id: attachment real de WordPress.
+      // Para versiones sin Extensions seguimos usando "image" exactamente igual.
+      final imageFull = map['image_full']?.toString().trim() ?? '';
+      final image = imageFull.isNotEmpty
+          ? imageFull
+          : (map['image']?.toString().trim() ?? '');
+
       return {
         'id': _parseInt(map['id']),
         'name': map['name']?.toString() ?? '',
         'slug': map['slug']?.toString() ?? '',
         'count': _parseInt(map['count']),
         'taxonomy': map['taxonomy']?.toString() ?? 'pa_marcas',
-        'image': map['image']?.toString() ?? '',
+        'image': image,
+        'image_full': imageFull,
+        'image_thumbnail': map['image_thumbnail']?.toString().trim() ?? '',
+        'image_attachment_id': _parseInt(map['image_attachment_id']),
       };
     }).where((item) {
-      return _parseInt(item['id']) > 0 &&
-          item['name'].toString().trim().isNotEmpty;
+      final id = _parseInt(item['id']);
+      final name = item['name']?.toString().trim() ?? '';
+      final slug = item['slug']?.toString().trim() ?? '';
+
+      if (id <= 0 || name.isEmpty) {
+        return false;
+      }
+
+      // Decisión de producto: MCI PRO deja de existir como marca independiente
+      // dentro de la app. WooCommerce puede conservarla en la web, pero cualquier
+      // resolución "MCI PRO" seguirá cayendo sobre MCI mediante el canonicalizador
+      // existente, sin exponer un segundo término de marca en Flutter.
+      final normalizedName = _normalizeText(name);
+      final normalizedSlug = _normalizeText(slug);
+      if (normalizedName == 'mcipro' || normalizedSlug == 'mcipro') {
+        return false;
+      }
+
+      return true;
     }).toList();
 
     _cachedBrandTerms = brands;
+    _cachedBrandTermsHideEmpty = hideEmpty;
     return brands;
   }
 
@@ -1639,11 +1749,17 @@ class ApiService {
         response.data,
       ]);
 
-      return raw
+      final categories = raw
           .whereType<Map>()
           .map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)))
           .where((category) => category.id > 0 && !_isForbiddenCategory(category.name))
           .toList();
+
+      for (final category in categories) {
+        _knownCategories[category.id] = category;
+      }
+
+      return categories;
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? 0;
       if (status != 404 && status != 405) {
@@ -1698,10 +1814,13 @@ class ApiService {
   }
 
   Future<int?> getMarcaIdPorNombre(String? brandName) async {
-    final clean = _normalizeText(brandName ?? '');
+    final rawBrandName = (brandName ?? '').trim();
+    final clean = _normalizeText(rawBrandName);
     if (clean.isEmpty) return null;
 
     final marcas = await getMarcas(hideEmpty: true);
+
+    // 1) Coincidencia exacta de nombre/slug: siempre tiene prioridad.
     for (final marca in marcas) {
       final id = _parseInt(marca['id']);
       final name = _normalizeText(marca['name']?.toString() ?? '');
@@ -1712,10 +1831,17 @@ class ApiService {
       }
     }
 
+    // 2) Alias controlados. Evitamos el antiguo contains() genérico porque
+    // podía confundir familias distintas como HIKVISION y HIKVISION HiWatch.
     for (final marca in marcas) {
       final id = _parseInt(marca['id']);
-      final name = _normalizeText(marca['name']?.toString() ?? '');
-      if (id > 0 && (name.contains(clean) || clean.contains(name))) {
+      if (id <= 0) continue;
+
+      final name = marca['name']?.toString() ?? '';
+      final slug = marca['slug']?.toString() ?? '';
+
+      if (_brandKeysEquivalent(rawBrandName, name) ||
+          _brandKeysEquivalent(rawBrandName, slug)) {
         return id;
       }
     }
@@ -1732,6 +1858,26 @@ class ApiService {
         return name == null || name.isEmpty ? null : name;
       }
     }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> resolveExactCatalogBrand(String query) async {
+    final raw = query.trim();
+    if (raw.isEmpty) return null;
+
+    final expected = _canonicalBrandKey(raw);
+    if (expected.isEmpty) return null;
+
+    final brands = await getMarcas(hideEmpty: true);
+    for (final brand in brands) {
+      final name = brand['name']?.toString().trim() ?? '';
+      final slug = brand['slug']?.toString().trim() ?? '';
+      if (_canonicalBrandKey(name) == expected ||
+          _canonicalBrandKey(slug) == expected) {
+        return Map<String, dynamic>.from(brand);
+      }
+    }
+
     return null;
   }
 
@@ -1798,7 +1944,9 @@ class ApiService {
     final cleanSearch = (search ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
     final mappedOrderBy = _mapOrderByForApp(orderBy);
 
-    final effectiveBrandId = brandId ?? await getMarcaIdPorNombre(brandName);
+    final effectiveBrandId = (brandId != null && brandId > 0)
+        ? brandId
+        : await getMarcaIdPorNombre(brandName);
 
     // Si la búsqueda es amplia, no bloqueamos la pantalla esperando 60/80/100 productos.
     // Devolvemos 10 rápido y dejamos preparadas las páginas siguientes en caché.
@@ -1856,7 +2004,307 @@ class ApiService {
       );
     }
 
-    return result;
+    // Defensa final de catálogo: si el backend devuelve explícitamente un
+    // producto de otra marca, nunca lo mostramos dentro de una marca bloqueada.
+    // Los productos sin marca explícita se conservan para no ocultar referencias
+    // legítimas de endpoints antiguos que no incluyan fabricante en el JSON.
+    final effectiveBrandName = cleanBrandName.isNotEmpty
+        ? cleanBrandName
+        : ((await getMarcaNombrePorId(effectiveBrandId)) ?? '');
+    final guarded = _guardCatalogResultBrand(result, effectiveBrandName);
+
+    // Si la API de catálogo no devuelve nada para una marca concreta, usamos
+    // la propia web de MundiCam como fuente de descubrimiento (mc_brand +
+    // product_cat) y después resolvemos cada SKU por la API autenticada. Así la
+    // web decide qué referencias pertenecen realmente a la marca/categoría,
+    // pero precios, stock y permisos siguen viniendo de la sesión B2B real.
+    if (guarded.products.isEmpty &&
+        effectiveBrandName.isNotEmpty &&
+        requestedPage == 1) {
+      final websiteFallback = await _websiteBrandProductsFallback(
+        brandId: effectiveBrandId,
+        brandName: effectiveBrandName,
+        categoryId: categoryId,
+        perPage: requestedPerPage,
+      );
+      if (websiteFallback != null && websiteFallback.products.isNotEmpty) {
+        return websiteFallback;
+      }
+    }
+
+    return guarded;
+  }
+
+  Future<CatalogProductsResult?> _websiteBrandProductsFallback({
+    required int? brandId,
+    required String brandName,
+    required int? categoryId,
+    required int perPage,
+  }) async {
+    try {
+      final brands = await getMarcas(hideEmpty: false);
+      Map<String, dynamic>? brandRecord;
+
+      if (brandId != null && brandId > 0) {
+        for (final brand in brands) {
+          if (_parseInt(brand['id']) == brandId) {
+            brandRecord = Map<String, dynamic>.from(brand);
+            break;
+          }
+        }
+      }
+
+      brandRecord ??= await resolveExactCatalogBrand(brandName);
+      if (brandRecord == null) return null;
+
+      final rawBrandSlug = brandRecord['slug']?.toString().trim() ?? '';
+      final brandSlugCandidates = <String>[];
+
+      void addBrandSlug(String value) {
+        final clean = value.trim().toLowerCase();
+        if (clean.isEmpty) return;
+        if (!brandSlugCandidates.contains(clean)) {
+          brandSlugCandidates.add(clean);
+        }
+      }
+
+      addBrandSlug(rawBrandSlug);
+      if (rawBrandSlug.endsWith('-woo')) {
+        addBrandSlug(rawBrandSlug.substring(0, rawBrandSlug.length - 4));
+      }
+      addBrandSlug(_websiteSlug(brandName));
+
+      String categorySlug = '';
+      if (categoryId != null && categoryId > 0) {
+        categorySlug = _knownCategories[categoryId]?.slug.trim() ?? '';
+
+        if (categorySlug.isEmpty && brandId != null && brandId > 0) {
+          try {
+            final categories = await getCategoriasPorMarca(
+              brandId: brandId,
+              brandName: brandName,
+              brandTaxonomy: brandRecord['taxonomy']?.toString(),
+              parent: null,
+            );
+            for (final category in categories) {
+              if (category.id == categoryId) {
+                categorySlug = category.slug.trim();
+                break;
+              }
+            }
+          } catch (_) {
+            // El fallback de web sigue pudiendo trabajar solo por marca.
+          }
+        }
+      }
+
+      List<String> skus = const <String>[];
+      for (final brandSlug in brandSlugCandidates) {
+        skus = await _websiteSkusForBrand(
+          brandSlug: brandSlug,
+          categorySlug: categorySlug,
+          limit: perPage <= 0 ? 30 : perPage,
+        );
+        if (skus.isNotEmpty) break;
+      }
+
+      if (skus.isEmpty) return null;
+
+      final products = <Product>[];
+      final seenIds = <int>{};
+      final requestedBrand = brandName.trim();
+
+      for (var offset = 0; offset < skus.length; offset += 4) {
+        final batch = skus.skip(offset).take(4).toList();
+        final resolved = await Future.wait(
+          batch.map((sku) async {
+            try {
+              final result = await getProductosCatalogoFiltrado(
+                search: sku,
+                page: 1,
+                perPage: 5,
+              );
+              final expectedSku = _normalizeSkuForCompare(sku);
+              for (final product in result.products) {
+                if (_normalizeSkuForCompare(product.sku) == expectedSku) {
+                  return product;
+                }
+              }
+            } catch (_) {}
+            return null;
+          }),
+        );
+
+        for (final product in resolved.whereType<Product>()) {
+          if (product.id <= 0 || !seenIds.add(product.id)) continue;
+
+          // En este punto la pertenencia a la marca la ha decidido la propia
+          // web mediante mc_brand. Conservamos todo el producto/precio/stock de
+          // la API autenticada, pero fijamos el fabricante visual al término
+          // real de la web. Esto es especialmente importante para separar
+          // HIKVISION de HIKVISION Hiwatch aunque un endpoint antiguo devuelva
+          // un atributo de fabricante incompleto.
+          products.add(_withWebsiteResolvedBrand(product, requestedBrand));
+        }
+
+        if (products.length >= perPage) break;
+      }
+
+      if (products.isEmpty) return null;
+
+      if (kDebugMode) {
+        debugPrint(
+          '🌐 Fallback web MundiCam: marca="$brandName" '
+          'categoria=${categoryId ?? 0} · ${products.length} producto(s).',
+        );
+      }
+
+      return CatalogProductsResult(
+        products: products.take(perPage <= 0 ? 30 : perPage).toList(),
+        currentPage: 1,
+        totalPages: 1,
+        totalItems: products.length,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Fallback web de marca no disponible: $e');
+      }
+      return null;
+    }
+  }
+
+  Future<List<String>> _websiteSkusForBrand({
+    required String brandSlug,
+    required String categorySlug,
+    required int limit,
+  }) async {
+    if (brandSlug.trim().isEmpty) return const <String>[];
+
+    final cacheKey =
+        'website_brand_skus|brand:${brandSlug.trim()}|cat:${categorySlug.trim()}';
+    final cached = ProductCacheService().getMemory<List<String>>(cacheKey);
+    if (cached != null) return cached.take(limit).toList();
+
+    final response = await _dio.get<String>(
+      '/shop/',
+      queryParameters: <String, dynamic>{
+        'mc_brand': brandSlug.trim(),
+        if (categorySlug.trim().isNotEmpty) 'product_cat': categorySlug.trim(),
+      },
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: const <String, dynamic>{
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+      ),
+    );
+
+    final html = response.data ?? '';
+    if (html.trim().isEmpty) return const <String>[];
+
+    final document = html_parser.parse(html);
+    final plainText = document.body?.text ?? '';
+    final matches = RegExp(
+      r'SKU\s*:\s*([A-Za-z0-9][A-Za-z0-9._/+()\-]{1,100})',
+      caseSensitive: false,
+    ).allMatches(plainText);
+
+    final skus = <String>[];
+    for (final match in matches) {
+      final sku = match.group(1)?.trim() ?? '';
+      if (sku.isEmpty || skus.contains(sku)) continue;
+      skus.add(sku);
+      if (skus.length >= limit) break;
+    }
+
+    ProductCacheService().cacheMemory<List<String>>(
+      cacheKey,
+      skus,
+      ttl: const Duration(minutes: 5),
+    );
+    return skus;
+  }
+
+  static String _websiteSlug(String value) {
+    return value
+        .toLowerCase()
+        .trim()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+  }
+
+  static String _normalizeSkuForCompare(String value) {
+    return value
+        .trim()
+        .toUpperCase()
+        .replaceAll(RegExp(r'\s+'), '');
+  }
+
+  static Product _withWebsiteResolvedBrand(
+    Product product,
+    String brandName,
+  ) {
+    final cleanBrand = brandName.trim();
+    if (cleanBrand.isEmpty) return product;
+
+    final nextAttributes = <ProductAttribute>[];
+    var replaced = false;
+
+    for (final attribute in product.attributes) {
+      final key = _normalizeText(attribute.name);
+      final isBrandAttribute = key == 'marca' ||
+          key == 'marcas' ||
+          key == 'fabricante' ||
+          key == 'fabricantes' ||
+          key == 'brand' ||
+          key == 'brands' ||
+          key == 'pamarcas' ||
+          key.contains('fabricante');
+
+      if (isBrandAttribute) {
+        nextAttributes.add(
+          ProductAttribute(
+            name: attribute.name.trim().isEmpty ? 'Fabricante' : attribute.name,
+            options: <String>[cleanBrand],
+          ),
+        );
+        replaced = true;
+      } else {
+        nextAttributes.add(attribute);
+      }
+    }
+
+    if (!replaced) {
+      nextAttributes.add(
+        ProductAttribute(
+          name: 'Fabricante',
+          options: <String>[cleanBrand],
+        ),
+      );
+    }
+
+    return product.copyWith(attributes: nextAttributes);
   }
 
   Future<CatalogProductsResult?> _requestContextSearchPage({
@@ -2404,20 +2852,92 @@ class ApiService {
   }
 
   String? _knownBrandInSearch(String query) {
-    final normalized = ' ${_looseSearchTokens(query).join(' ')} ';
-    const brands = <String>[
-      'dahua', 'hikvision', 'ajax', 'ksenia', 'teletek', 'mobotix',
-      'hanwha', 'wisenet', 'axis', 'uniview', 'tplink', 'tp-link',
-      'vigi', 'omada', 'secury360', 'evolve', 'wisim', 'zkteco',
-      'anviz', 'paradox', 'satel', 'bosch', 'honeywell',
+    final queryTokens = _looseSearchTokens(query);
+    if (queryTokens.isEmpty) return null;
+
+    final tokenPhrase = ' ${queryTokens.join(' ')} ';
+    final compactQuery = _normalizeText(query);
+
+    // Marcas actuales de MundiCam. Las variantes más específicas van primero
+    // para que "HIKVISION Hiwatch" nunca se degrade a HIKVISION normal.
+    // MCI PRO se conserva solo como alias de entrada y se resuelve a MCI,
+    // porque en la app esa marca se ha fusionado/ocultado por decisión de producto.
+    const aliases = <List<String>>[
+      ['hikvision hiwatch', 'HIKVISION Hiwatch'],
+      ['hiwatch', 'HIKVISION Hiwatch'],
+      ['evolve xtender', 'EVOLVE Xtender'],
+      ['assa abloy', 'ASSA ABLOY'],
+      ['be wave', 'BE WAVE'],
+      ['ip com', 'IP-COM'],
+      ['jade bird', 'JADE BIRD'],
+      ['visiona protect', 'VISIONA PROTECT'],
+      ['western digital', 'WESTERN DIGITAL'],
+      ['tp link', 'TP-LINK'],
+      ['tplink', 'TP-LINK'],
+      ['mci pro', 'MCi'],
+      ['power safe', 'POWERSAFE'],
+      ['security360', 'SECURY360'],
+      ['secury360', 'SECURY360'],
+      ['ur fog', 'URFOG'],
+      ['unv', 'UNIVIEW'],
+      ['aiscan', 'AISCAN'],
+      ['ajax', 'AJAX'],
+      ['amc', 'AMC'],
+      ['anviz', 'ANVIZ'],
+      ['byfog', 'BYFOG'],
+      ['century', 'CENTURY'],
+      ['dahua', 'DAHUA'],
+      ['defendertech', 'DEFENDERTECH'],
+      ['dji', 'DJI'],
+      ['dmtech', 'DMTECH'],
+      ['evolve', 'EVOLVE Xtender'],
+      ['ezviz', 'EZVIZ'],
+      ['hectronica', 'HECTRONICA'],
+      ['hikvision', 'HIKVISION'],
+      ['hysoon', 'HYSOON'],
+      ['imou', 'IMOU'],
+      ['ksenia', 'Ksenia'],
+      ['llenari', 'LLENARI'],
+      ['mci', 'MCi'],
+      ['mobotix', 'MOBOTIX'],
+      ['optex', 'OPTEX'],
+      ['paradox', 'PARADOX'],
+      ['powersafe', 'POWERSAFE'],
+      ['pyronix', 'PYRONIX'],
+      ['rbtec', 'RBTEC'],
+      ['satel', 'SATEL'],
+      ['seagate', 'SEAGATE'],
+      ['teletek', 'TELETEK'],
+      ['tenda', 'TENDA'],
+      ['toa', 'TOA'],
+      ['trikdis', 'TRIKDIS'],
+      ['tvt', 'TVT'],
+      ['ubiquiti', 'UBIQUITI'],
+      ['uniarch', 'UNIARCH'],
+      ['uniview', 'UNIVIEW'],
+      ['urfog', 'URFOG'],
+      ['vaelsys', 'VAELSYS'],
+      ['videofied', 'VIDEOFIED'],
+      ['visonic', 'VISONIC'],
+      ['visionic', 'VISONIC'],
+      ['wisim', 'WISIM'],
+      ['yale', 'YALE'],
+      ['zkteco', 'ZKTECO'],
+      ['zte', 'ZTE'],
     ];
 
-    for (final brand in brands) {
-      final clean = brand.replaceAll('-', '');
-      if (normalized.contains(' $brand ') || normalized.contains(' $clean ')) {
-        return brand == 'tplink' ? 'TP-Link' : brand;
+    for (final entry in aliases) {
+      final alias = entry[0];
+      final aliasTokens = _looseSearchTokens(alias);
+      if (aliasTokens.isEmpty) continue;
+
+      final aliasPhrase = ' ${aliasTokens.join(' ')} ';
+      final aliasCompact = _normalizeText(alias);
+      if (tokenPhrase.contains(aliasPhrase) || compactQuery == aliasCompact) {
+        return entry[1];
       }
     }
+
     return null;
   }
 
@@ -2846,6 +3366,508 @@ class ApiService {
     }
   }
 
+  /// Promociones activas publicadas por MundiCam Promociones App 2.1.0.
+  /// El PHP devuelve una lista plana con id, titulo, imagen_url y
+  /// fecha_publicacion. Se usa primero el alias inglés y se conserva el alias
+  /// español como compatibilidad de despliegue.
+  Future<List<PromotionModel>> getPromotions() async {
+    for (final path in const <String>['/promotions', '/promociones']) {
+      try {
+        final response = await _appGet(path);
+        final root = _responseMap(response.data);
+        final raw = _firstList([
+          response.data,
+          root['promotions'],
+          root['promociones'],
+          root['data'],
+        ]);
+
+        return raw
+            .whereType<Map>()
+            .map((item) => PromotionModel.fromJson(
+                  Map<String, dynamic>.from(item),
+                ))
+            .where((item) => item.id > 0 && item.title.isNotEmpty)
+            .toList();
+      } on DioException catch (error) {
+        final status = error.response?.statusCode ?? 0;
+        if (status == 404 || status == 405) {
+          continue;
+        }
+        if (kDebugMode) {
+          debugPrint('⚠️ No se pudieron cargar promociones: $error');
+        }
+        return const <PromotionModel>[];
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('⚠️ No se pudieron cargar promociones: $error');
+        }
+        return const <PromotionModel>[];
+      }
+    }
+
+    return const <PromotionModel>[];
+  }
+
+  /// Resuelve la página pública real de una promoción en mundicam.com.
+  ///
+  /// La API de promociones actual no expone permalink. Para no tocar PHP,
+  /// Flutter busca el post público de WordPress por las palabras relevantes
+  /// del título y solo acepta una coincidencia suficientemente clara.
+  ///
+  /// Nunca devuelve productos, categorías, etiquetas ni páginas de checkout.
+  Future<Uri?> resolvePromotionWebUri(PromotionModel promotion) async {
+    final direct = Uri.tryParse(promotion.webUrl.trim());
+    if (_isSafePromotionWebUri(direct)) {
+      return direct;
+    }
+
+    final tokens = _promotionSearchTokens(promotion.title);
+    if (tokens.length < 2) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ Promoción sin suficientes términos para resolver web: '
+          '${promotion.title}',
+        );
+      }
+      return null;
+    }
+
+    final query = tokens.take(5).join(' ');
+    final candidates = <Map<String, String>>[];
+
+    // 1) WordPress REST Search: solo posts públicos.
+    try {
+      final response = await _dio.get(
+        '/wp-json/wp/v2/search',
+        queryParameters: <String, dynamic>{
+          'search': query,
+          'per_page': 10,
+          'subtype': 'post',
+        },
+      );
+
+      if (response.data is List) {
+        for (final raw in response.data as List) {
+          if (raw is! Map) continue;
+          final item = Map<String, dynamic>.from(raw);
+          final url = item['url']?.toString().trim() ?? '';
+          final title = _promotionPlainText(
+            item['title']?.toString() ?? '',
+          );
+
+          if (url.isNotEmpty && title.isNotEmpty) {
+            candidates.add(<String, String>{
+              'title': title,
+              'url': url,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint(
+          'ℹ️ WP REST Search no resolvió promoción; '
+          'se probará búsqueda web: $error',
+        );
+      }
+    }
+
+    final restMatch = _bestPromotionWebCandidate(
+      promotion.title,
+      candidates,
+    );
+    if (restMatch != null) {
+      if (kDebugMode) {
+        debugPrint(
+          '✅ Promoción web resuelta por WordPress REST: $restMatch',
+        );
+      }
+      return restMatch;
+    }
+
+    // 2) Fallback totalmente público: resultados de búsqueda de mundicam.com.
+    // Sigue sin depender del plugin PHP de promociones.
+    try {
+      final response = await _dio.get<String>(
+        '/',
+        queryParameters: <String, dynamic>{'s': query},
+        options: Options(
+          responseType: ResponseType.plain,
+          receiveTimeout: const Duration(seconds: 12),
+          sendTimeout: const Duration(seconds: 8),
+          headers: const <String, dynamic>{
+            'Accept': 'text/html,application/xhtml+xml',
+            'User-Agent': 'MundiCam-App/Public-Content',
+          },
+        ),
+      );
+
+      final document = html_parser.parse(response.data ?? '');
+      final htmlCandidates = <Map<String, String>>[];
+
+      for (final anchor in document.querySelectorAll('a[href]')) {
+        final href = anchor.attributes['href']?.trim() ?? '';
+        final title = anchor.text.trim();
+
+        if (href.isEmpty || title.isEmpty) continue;
+
+        final uri = Uri.tryParse(href);
+        if (!_isSafePromotionWebUri(uri)) continue;
+
+        htmlCandidates.add(<String, String>{
+          'title': title,
+          'url': uri.toString(),
+        });
+      }
+
+      final htmlMatch = _bestPromotionWebCandidate(
+        promotion.title,
+        htmlCandidates,
+      );
+
+      if (htmlMatch != null) {
+        if (kDebugMode) {
+          debugPrint(
+            '✅ Promoción web resuelta por búsqueda pública: $htmlMatch',
+          );
+        }
+        return htmlMatch;
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo resolver promoción en la web: $error');
+      }
+    }
+
+    if (kDebugMode) {
+      debugPrint(
+        '⚠️ No se encontró una página web segura para: ${promotion.title}',
+      );
+    }
+
+    return null;
+  }
+
+  Uri? _bestPromotionWebCandidate(
+    String promotionTitle,
+    List<Map<String, String>> candidates,
+  ) {
+    final sourceTokens = _promotionSearchTokens(promotionTitle);
+    if (sourceTokens.length < 2) return null;
+
+    Uri? bestUri;
+    var bestScore = -1;
+
+    for (final candidate in candidates) {
+      final rawUrl = candidate['url']?.trim() ?? '';
+      final rawTitle = candidate['title']?.trim() ?? '';
+      final uri = Uri.tryParse(rawUrl);
+
+      if (!_isSafePromotionWebUri(uri) || rawTitle.isEmpty) {
+        continue;
+      }
+
+      final candidateTokens = _promotionSearchTokens(rawTitle);
+      final overlap = sourceTokens
+          .where((token) => candidateTokens.contains(token))
+          .length;
+
+      // Con menos de dos palabras relevantes coincidentes preferimos
+      // no abrir nada antes que mandar al usuario a una noticia equivocada.
+      if (overlap < 2) continue;
+
+      var score = overlap * 20;
+
+      final sourceSet = sourceTokens.toSet();
+      final candidateSet = candidateTokens.toSet();
+      if (sourceSet.every(candidateSet.contains)) {
+        score += 25;
+      }
+
+      final path = uri!.path.toLowerCase();
+      if (path.contains('promo') || path.contains('promoc')) {
+        score += 12;
+      }
+
+      for (final token in sourceTokens) {
+        if (path.contains(token)) score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestUri = uri;
+      }
+    }
+
+    // Umbral deliberadamente alto: mejor no abrir que abrir mal.
+    return bestScore >= 52 ? bestUri : null;
+  }
+
+  bool _isSafePromotionWebUri(Uri? uri) {
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty) {
+      return false;
+    }
+
+    final host = uri.host.toLowerCase();
+    if (host != 'mundicam.com' && host != 'www.mundicam.com') {
+      return false;
+    }
+
+    final path = uri.path.toLowerCase();
+
+    const blockedPrefixes = <String>[
+      '/wp-admin',
+      '/wp-json',
+      '/cart',
+      '/checkout',
+      '/my-account',
+      '/producto/',
+      '/product/',
+      '/categoria-producto/',
+      '/product-category/',
+      '/etiqueta-producto/',
+      '/product-tag/',
+      '/category/',
+      '/tag/',
+      '/author/',
+    ];
+
+    for (final prefix in blockedPrefixes) {
+      if (path.startsWith(prefix)) return false;
+    }
+
+    return true;
+  }
+
+  List<String> _promotionSearchTokens(String value) {
+    final normalized = _normalizePromotionSearchText(
+      _promotionPlainText(value),
+    );
+
+    const ignored = <String>{
+      'mundicam',
+      'promo',
+      'promocion',
+      'promociones',
+      'trae',
+      'aprovecha',
+      'estos',
+      'estas',
+      'este',
+      'esta',
+      'del',
+      'los',
+      'las',
+      'una',
+      'uno',
+      'unos',
+      'unas',
+      'con',
+      'para',
+      'por',
+      'desde',
+      'hasta',
+      'sobre',
+      'descuento',
+      'descuentos',
+      'oferta',
+      'ofertas',
+      'especial',
+      'especiales',
+      'cliente',
+      'clientes',
+      'profesional',
+      'profesionales',
+    };
+
+    final result = <String>[];
+    final seen = <String>{};
+
+    for (final token in normalized.split(' ')) {
+      final clean = token.trim();
+      if (clean.length < 3 || ignored.contains(clean)) continue;
+      if (RegExp(r'^\d+$').hasMatch(clean)) continue;
+
+      if (seen.add(clean)) {
+        result.add(clean);
+      }
+    }
+
+    return result;
+  }
+
+  String _normalizePromotionSearchText(String value) {
+    var text = value.toLowerCase();
+
+    const replacements = <String, String>{
+      'á': 'a',
+      'à': 'a',
+      'ä': 'a',
+      'â': 'a',
+      'é': 'e',
+      'è': 'e',
+      'ë': 'e',
+      'ê': 'e',
+      'í': 'i',
+      'ì': 'i',
+      'ï': 'i',
+      'î': 'i',
+      'ó': 'o',
+      'ò': 'o',
+      'ö': 'o',
+      'ô': 'o',
+      'ú': 'u',
+      'ù': 'u',
+      'ü': 'u',
+      'û': 'u',
+      'ñ': 'n',
+      'ç': 'c',
+    };
+
+    replacements.forEach((from, to) {
+      text = text.replaceAll(from, to);
+    });
+
+    return text
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  String _promotionPlainText(String value) {
+    if (value.trim().isEmpty) return '';
+    final parsed = html_parser.parse(value);
+    return parsed.documentElement?.text.trim() ?? value.trim();
+  }
+
+  /// Ventas cruzadas configuradas en WooCommerce para un producto.
+  ///
+  /// El PHP auxiliar construye cada payload con el mismo motor del plugin
+  /// principal, por lo que el precio recibido aquí ya es el precio efectivo
+  /// del usuario autenticado. Flutter no recalcula tarifas ni descuentos.
+  Future<List<Product>> getCrossSells({
+    required int productId,
+    int limit = 4,
+  }) async {
+    if (productId <= 0) return const <Product>[];
+
+    final safeLimit = limit < 1 ? 1 : (limit > 12 ? 12 : limit);
+
+    try {
+      final response = await _appGet(
+        '/cross-sells',
+        queryParameters: <String, dynamic>{
+          'product_id': productId,
+          'limit': safeLimit,
+        },
+      );
+
+      final root = _responseMap(response.data);
+      if (root['success'] == false) return const <Product>[];
+
+      final data = _asMap(root['data']);
+      final rawProducts = _firstList([
+        root['products'],
+        data['products'],
+      ]);
+
+      final products = <Product>[];
+      for (final raw in rawProducts.whereType<Map>()) {
+        try {
+          final product = Product.fromJson(Map<String, dynamic>.from(raw));
+          if (product.id > 0) {
+            products.add(product);
+          }
+        } catch (error) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Cross-sell descartado por payload inválido: $error');
+          }
+        }
+      }
+
+      return products;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? 0;
+      // La venta cruzada es una mejora comercial, nunca debe bloquear compra.
+      // Si el auxiliar aún no está activo, se comporta como "sin sugerencias".
+      if (kDebugMode && status != 404 && status != 405) {
+        debugPrint('⚠️ No se pudieron cargar ventas cruzadas: $error');
+      }
+      return const <Product>[];
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudieron cargar ventas cruzadas: $error');
+      }
+      return const <Product>[];
+    }
+  }
+
+  /// Devuelve null si no fue posible consultar el servidor. Una lista vacía
+  /// significa que el servidor respondió correctamente y el carrito está vacío.
+  Future<List<Map<String, dynamic>>?> getRemoteCartItems() async {
+    try {
+      final response = await _appGet('/cart');
+      final root = _responseMap(response.data);
+      if (root['success'] == false) return null;
+
+      final raw = _firstList([
+        root['cart_items'],
+        root['items'],
+      ]);
+
+      return raw
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo leer el carrito remoto: $error');
+      }
+      return null;
+    }
+  }
+
+  Future<bool> updateRemoteCartProduct({
+    required int productId,
+    required int quantity,
+    int variationId = 0,
+  }) async {
+    try {
+      final response = await _appPost('/cart/update', data: {
+        'product_id': productId,
+        if (variationId > 0) 'variation_id': variationId,
+        'quantity': quantity,
+      });
+      return _responseMap(response.data)['success'] != false;
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo actualizar el carrito remoto: $error');
+      }
+      return false;
+    }
+  }
+
+  Future<bool> removeRemoteCartProduct({
+    required int productId,
+    int variationId = 0,
+  }) async {
+    try {
+      final response = await _appPost('/cart/remove', data: {
+        'product_id': productId,
+        if (variationId > 0) 'variation_id': variationId,
+      });
+      return _responseMap(response.data)['success'] != false;
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo eliminar del carrito remoto: $error');
+      }
+      return false;
+    }
+  }
+
   // ================================================================
   // CARRITO / PEDIDOS / PRESUPUESTOS
   // ================================================================
@@ -2877,6 +3899,61 @@ class ApiService {
     }
   }
 
+
+
+  /// Valida el código contra el carrito real en WooCommerce.
+  /// El resultado se conserva en Flutter solo para la cesta actual; el servidor
+  /// vuelve a validarlo en /order/preview y /order/create antes de usarlo.
+  Future<CouponValidationResult> validateCartCoupon({
+    required String code,
+    required List<Map<String, dynamic>> lineItems,
+  }) async {
+    final cleanCode = code.trim();
+    if (cleanCode.isEmpty) {
+      return CouponValidationResult.failure('Introduce un código de cupón.');
+    }
+
+    final cleanItems = _sanitizeLineItems(lineItems);
+    if (cleanItems.isEmpty) {
+      return CouponValidationResult.failure(
+        'No hay productos válidos para aplicar el cupón.',
+      );
+    }
+
+    try {
+      final response = await _appPost('/cart/coupon/validate', data: {
+        'coupon_code': cleanCode,
+        'line_items': cleanItems,
+      });
+
+      final root = _responseMap(response.data);
+      if (root['success'] == false || root['valid'] == false) {
+        return CouponValidationResult.failure(
+          root['message']?.toString() ?? 'El cupón no es válido.',
+        );
+      }
+
+      final coupon = _asMap(root['coupon']);
+      return CouponValidationResult(
+        success: true,
+        code: (coupon['code'] ?? cleanCode).toString().trim(),
+        discount: _parseDouble(root['discount_total'] ?? root['discount']),
+        subtotal: _parseDouble(root['subtotal']),
+        subtotalAfterDiscount: _parseDouble(root['subtotal_after_discount']),
+        description: (coupon['description'] ?? '').toString().trim(),
+        discountType: (coupon['discount_type'] ?? '').toString().trim(),
+        currency: (root['currency'] ?? 'EUR').toString().trim(),
+        freeShipping: coupon['free_shipping'] == true,
+        message: 'Cupón válido.',
+      );
+    } on DioException catch (e) {
+      return CouponValidationResult.failure(_mapDioError(e));
+    } catch (e) {
+      return CouponValidationResult.failure(
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
 
   Future<List<ShippingOption>> getShippingMethods({
     required List<Map<String, dynamic>> lineItems,
@@ -2928,6 +4005,7 @@ class ApiService {
     required List<Map<String, dynamic>> lineItems,
     required Map<String, dynamic> shippingAddress,
     String? shippingMethodId,
+    String? couponCode,
   }) async {
     final cleanItems = _sanitizeLineItems(lineItems);
     if (cleanItems.isEmpty) return null;
@@ -2940,6 +4018,8 @@ class ApiService {
           'shipping_method_id': shippingMethodId!.trim(),
           'shipping_option_id': shippingMethodId!.trim(),
         },
+        if ((couponCode ?? '').trim().isNotEmpty)
+          'coupon_code': couponCode!.trim(),
       });
       final root = _responseMap(response.data);
       final nested = _asMap(root['data']);
@@ -2955,6 +4035,23 @@ class ApiService {
     }
   }
 
+  String _withAppOrderCustomerNote(dynamic currentNote) {
+    final additionalNote = currentNote?.toString().trim() ?? '';
+
+    if (additionalNote.isEmpty) {
+      return _appOrderCustomerNotePrefix;
+    }
+
+    // Evita duplicar el marcador si un flujo futuro ya lo hubiera añadido.
+    if (additionalNote
+        .toLowerCase()
+        .contains(_appOrderCustomerNotePrefix.toLowerCase())) {
+      return additionalNote;
+    }
+
+    return '$_appOrderCustomerNotePrefix\n\n$additionalNote';
+  }
+
   Future<OrderCreateResult> crearPedidoConResultado(
     Map<String, dynamic> orderData, {
     bool forceProcessingIfPending = false,
@@ -2965,8 +4062,12 @@ class ApiService {
         return OrderCreateResult.failure('No hay productos válidos para crear el pedido.');
       }
 
+      final appOrderData = Map<String, dynamic>.from(orderData);
+      appOrderData['customer_note'] =
+          _withAppOrderCustomerNote(appOrderData['customer_note']);
+
       final enrichedOrderData =
-          await MundicamAnalyticsService.instance.enrichPayload(orderData);
+          await MundicamAnalyticsService.instance.enrichPayload(appOrderData);
       final response = await _appPost('/order/create', data: {
         ...enrichedOrderData,
         'line_items': lineItems,
@@ -3540,6 +4641,72 @@ class ApiService {
   // RMA / SOPORTE
   // ================================================================
 
+  /// Consulta los números de serie reales de una línea de pedido cuando
+  /// MundiCam App Extensions 1.0.1 está activo para el usuario autenticado.
+  ///
+  /// El endpoint es una mejora progresiva: en clientes fuera del modo de
+  /// pruebas, instalaciones sin Extensions o servidores antiguos puede devolver
+  /// 404. En esos casos devolvemos [] y el RMA principal sigue funcionando.
+  Future<List<String>> getRmaSerialNumbers({
+    required int orderId,
+    required int productId,
+    int lineItemId = 0,
+    int variationId = 0,
+  }) async {
+    if (orderId <= 0 || productId <= 0) {
+      return const <String>[];
+    }
+
+    try {
+      final response = await _appGet(
+        '/rma/serials',
+        queryParameters: <String, dynamic>{
+          'order_id': orderId,
+          'product_id': productId,
+          if (lineItemId > 0) 'line_item_id': lineItemId,
+          if (variationId > 0) 'variation_id': variationId,
+        },
+      );
+
+      final root = _responseMap(response.data);
+      final raw = _firstList([
+        root['serial_numbers'],
+        root['serials'],
+        root['data'],
+      ]);
+
+      final serials = <String>[];
+      for (final value in raw) {
+        final serial = value?.toString().trim() ?? '';
+        if (serial.isEmpty || serials.contains(serial)) continue;
+        serials.add(serial);
+      }
+
+      return serials;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? 0;
+
+      // Extensions usa 404 deliberadamente cuando la función no está habilitada
+      // para esa cuenta. 405 cubre despliegues intermedios/ruta aún no registrada.
+      if (status == 404 || status == 405) {
+        return const <String>[];
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ No se pudieron consultar los SN del RMA '
+          '(HTTP $status): ${_mapDioError(error)}',
+        );
+      }
+      return const <String>[];
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudieron consultar los SN del RMA: $error');
+      }
+      return const <String>[];
+    }
+  }
+
   Future<Map<String, dynamic>> crearRmaDetalle({
     required String email,
     required int orderId,
@@ -3547,6 +4714,7 @@ class ApiService {
     int lineItemId = 0,
     int variationId = 0,
     required int quantity,
+    String serialNumber = '',
     required String motivo,
     required String descripcion,
   }) async {
@@ -3561,6 +4729,7 @@ class ApiService {
         if (lineItemId > 0) 'line_item_id': lineItemId,
         if (variationId > 0) 'variation_id': variationId,
         'quantity': safeQuantity,
+        if (serialNumber.trim().isNotEmpty) 'sn': serialNumber.trim(),
         'reason': motivo,
         'motivo': motivo,
         'description': descripcion,
@@ -3593,6 +4762,7 @@ class ApiService {
     int lineItemId = 0,
     int variationId = 0,
     int quantity = 1,
+    String serialNumber = '',
     required String motivo,
     required String descripcion,
   }) async {
@@ -3603,6 +4773,7 @@ class ApiService {
       lineItemId: lineItemId,
       variationId: variationId,
       quantity: quantity,
+      serialNumber: serialNumber,
       motivo: motivo,
       descripcion: descripcion,
     );
@@ -3779,6 +4950,92 @@ class ApiService {
         .replaceAll('ü', 'u')
         .replaceAll('ñ', 'n')
         .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  static CatalogProductsResult _guardCatalogResultBrand(
+    CatalogProductsResult result,
+    String requestedBrand,
+  ) {
+    final expected = requestedBrand.trim();
+    if (expected.isEmpty || result.products.isEmpty) return result;
+
+    final filtered = result.products.where((product) {
+      final productBrand = product.brandName?.trim() ?? '';
+      if (productBrand.isEmpty) return true;
+      return _brandKeysEquivalent(expected, productBrand);
+    }).toList();
+
+    if (filtered.length == result.products.length) return result;
+
+    if (kDebugMode) {
+      debugPrint(
+        '🛡️ Marca protegida "$requestedBrand": '
+        '${result.products.length - filtered.length} producto(s) de otra marca descartados.',
+      );
+    }
+
+    return result.copyWith(products: filtered);
+  }
+
+  static bool _brandKeysEquivalent(String left, String right) {
+    final a = _canonicalBrandKey(left);
+    final b = _canonicalBrandKey(right);
+    if (a.isEmpty || b.isEmpty) return false;
+    if (a == b) return true;
+
+    // Hikvision normal y HiWatch son familias distintas aunque un nombre
+    // comercial pueda contener la palabra Hikvision.
+    if ((a == 'hikvision' || a == 'hiwatch') ||
+        (b == 'hikvision' || b == 'hiwatch')) {
+      return false;
+    }
+
+    // Para denominaciones comerciales extendidas (p.ej. "DefenderTech
+    // Security Fog System") aceptamos inclusión solo con claves suficientemente
+    // específicas. No se usa para Hikvision/HiWatch por la protección anterior.
+    if (a.length >= 4 && b.length >= 4) {
+      return a.contains(b) || b.contains(a);
+    }
+
+    return false;
+  }
+
+  static String _canonicalBrandKey(String value) {
+    final key = _normalizeText(value);
+    if (key.isEmpty) return '';
+
+    if (key == 'hiwatch' ||
+        key == 'hiwatchseries' ||
+        key == 'hiwatchbyhikvision' ||
+        key == 'hikvisionhiwatch' ||
+        key == 'hikvisionhiwatchseries' ||
+        key.contains('hiwatch')) {
+      return 'hiwatch';
+    }
+
+    if (key == 'hickvision') return 'hikvision';
+    if (key == 'ajaxsystem' || key == 'ajaxsystems') return 'ajax';
+    if (key == 'tplinksystems') return 'tplink';
+    if (key == 'dmtechsecurity') return 'dmtech';
+    if (key == 'centuryc') return 'century';
+    if (key == 'visionic') return 'visonic';
+    if (key == 'secury360') return 'security360';
+    if (key == 'zkteko') return 'zkteco';
+    if (key == 'mci' || key == 'mcipro') return 'mcipro';
+    if (key == 'evolveextended' ||
+        key == 'evolve' ||
+        key == 'evolvextender' ||
+        key == 'evolvextendermobilesecuritybox') {
+      return 'evolveextended';
+    }
+    if (key == 'assaabloy' || key == 'tesaassaabloy') {
+      return 'tesaassaabloy';
+    }
+    if (key == 'unv' || key.startsWith('unv') || key.startsWith('uniview')) {
+      return 'unv';
+    }
+
+    return key;
   }
 
   static bool _looksLikeSku(String value) {

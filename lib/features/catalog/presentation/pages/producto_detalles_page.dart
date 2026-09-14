@@ -14,6 +14,7 @@ import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
+import 'package:mundicam/features/catalog/presentation/widgets/cross_sell_widgets.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
@@ -256,87 +257,398 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   }
 
   Future<void> _cargarRecomendados() async {
+    if (mounted) {
+      setState(() => _cargandoRecomendados = true);
+    }
+
     try {
       final api = ApiService();
       final product = widget.product;
-      String? marca;
-      for (final attr in product.attributes) {
-        if (attr.name.toLowerCase().contains('marca') && attr.options.isNotEmpty) {
-          marca = attr.options.first;
-          break;
-        }
-      }
+      final brand = product.brandName?.trim() ?? '';
+      final preferredCategoryIds = _preferredRelatedCategoryIds(product);
 
-      List<Product> todos = [];
-      if (marca != null && marca.isNotEmpty) {
-        todos.addAll(await api.getProductos(brand: marca, perPage: 20));
-      }
-      if (todos.length < 10) {
-        todos.addAll(await api.getProductos(perPage: 50));
-      }
+      // Buscamos solo en universos que tengan relación real con el producto.
+      // No hacemos un fallback global de 50 productos porque era precisamente
+      // lo que generaba recomendaciones sin sentido.
+      final requests = <Future<List<Product>>>[];
 
-      final seen = <int>{};
-      todos = todos.where((p) => seen.add(p.id)).toList();
-
-      final precioActual = double.tryParse(product.price.replaceAll(',', '.').trim()) ?? 0;
-      final recomendados = todos
-          .where((p) => p.id != product.id && p.canAddToCart)
-          .map((p) {
-        int score = 0;
-        if (marca != null) {
-          for (final a in p.attributes) {
-            if (a.name.toLowerCase().contains('marca') &&
-                a.options.any(
-                      (o) => o.toLowerCase() == marca!.toLowerCase(),
-                )) {
-              score += 100;
-            }
-          }
-        }
-        final pp = double.tryParse(p.price.replaceAll(',', '.').trim()) ?? 0;
-        if (precioActual > 0 && pp > 0) {
-          final diff = (pp - precioActual).abs() / precioActual;
-          if (diff < 0.15) {
-            score += 50;
-          } else if (diff < 0.30) {
-            score += 30;
-          } else if (diff < 0.50) {
-            score += 10;
-          }
-        }
-        return MapEntry(p, score);
-      })
-          .where((e) => e.value > 0)
-          .toList();
-
-      recomendados.sort((a, b) => b.value.compareTo(a.value));
-      List<Product> finales = recomendados.map((e) => e.key).take(8).toList();
-
-      if (finales.length < 4) {
-        finales.addAll(
-          todos
-              .where(
-                (p) =>
-            p.id != product.id &&
-                p.canAddToCart &&
-                !finales.any((f) => f.id == p.id),
-          )
-              .take(8 - finales.length),
+      for (final categoryId in preferredCategoryIds) {
+        requests.add(
+          api.getProductos(
+            categoryId: categoryId,
+            perPage: 28,
+          ),
         );
       }
 
+      if (brand.isNotEmpty) {
+        requests.add(
+          api.getProductos(
+            brand: brand,
+            perPage: 28,
+          ),
+        );
+      }
+
+      if (requests.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _recomendados = <Product>[];
+          _cargandoRecomendados = false;
+        });
+        return;
+      }
+
+      final groups = await Future.wait(requests);
+      final candidatesById = <int, Product>{};
+
+      for (final group in groups) {
+        for (final candidate in group) {
+          if (candidate.id <= 0 ||
+              candidate.id == product.id ||
+              !candidate.canAddToCart) {
+            continue;
+          }
+          candidatesById[candidate.id] = candidate;
+        }
+      }
+
+      final scored = candidatesById.values.map((candidate) {
+        return MapEntry(
+          candidate,
+          _relatedProductScore(
+            product,
+            candidate,
+            preferredCategoryIds.toSet(),
+          ),
+        );
+      }).where((entry) {
+        // Un candidato tiene que compartir una categoría útil o sumar
+        // suficiente afinidad por marca + atributos + nombre.
+        return entry.value >= 120;
+      }).toList();
+
+      scored.sort((a, b) {
+        final byScore = b.value.compareTo(a.value);
+        if (byScore != 0) return byScore;
+
+        // A igualdad de afinidad damos prioridad a stock real.
+        if (a.key.isInstock != b.key.isInstock) {
+          return b.key.isInstock ? 1 : -1;
+        }
+
+        return a.key.name.compareTo(b.key.name);
+      });
+
+      final finalProducts =
+          scored.map((entry) => entry.key).take(6).toList();
+
       if (!mounted) return;
       setState(() {
-        _recomendados = finales;
+        _recomendados = finalProducts;
         _cargandoRecomendados = false;
       });
-    } catch (_) {
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('No se pudieron cargar relacionados coherentes: $error');
+      }
+
       if (mounted) {
         setState(() {
+          _recomendados = <Product>[];
           _cargandoRecomendados = false;
         });
       }
     }
+  }
+
+  List<int> _preferredRelatedCategoryIds(Product product) {
+    if (product.categoryIds.isEmpty) return const <int>[];
+
+    final indexes = List<int>.generate(product.categoryIds.length, (i) => i);
+
+    indexes.sort((a, b) {
+      final aName = a < product.categoryNames.length
+          ? product.categoryNames[a]
+          : '';
+      final bName = b < product.categoryNames.length
+          ? product.categoryNames[b]
+          : '';
+
+      final aGeneric = _isGenericRelatedCategory(aName);
+      final bGeneric = _isGenericRelatedCategory(bName);
+
+      if (aGeneric != bGeneric) {
+        return aGeneric ? 1 : -1;
+      }
+
+      // Normalmente la categoría más específica tiene un nombre más
+      // descriptivo que el padre general.
+      return bName.trim().length.compareTo(aName.trim().length);
+    });
+
+    final ids = <int>[];
+    for (final index in indexes) {
+      final id = product.categoryIds[index];
+      if (id <= 0 || ids.contains(id)) continue;
+
+      final name = index < product.categoryNames.length
+          ? product.categoryNames[index]
+          : '';
+
+      if (!_isGenericRelatedCategory(name) || ids.isEmpty) {
+        ids.add(id);
+      }
+
+      if (ids.length >= 2) break;
+    }
+
+    if (ids.isEmpty) {
+      for (final id in product.categoryIds) {
+        if (id > 0 && !ids.contains(id)) {
+          ids.add(id);
+        }
+        if (ids.length >= 2) break;
+      }
+    }
+
+    return ids;
+  }
+
+  int _relatedProductScore(
+    Product source,
+    Product candidate,
+    Set<int> preferredCategoryIds,
+  ) {
+    var score = 0;
+
+    final sourceMeaningfulCategories = _meaningfulRelatedCategoryIds(source);
+    final candidateCategories = candidate.categoryIds.toSet();
+    final sharedMeaningfulCategories =
+        sourceMeaningfulCategories.intersection(candidateCategories);
+
+    score += sharedMeaningfulCategories.length * 170;
+
+    if (sharedMeaningfulCategories
+        .any((categoryId) => preferredCategoryIds.contains(categoryId))) {
+      score += 70;
+    }
+
+    final sourceAllCategories = source.categoryIds.toSet();
+    final sharedAnyCategories =
+        sourceAllCategories.intersection(candidateCategories);
+
+    if (sharedMeaningfulCategories.isEmpty && sharedAnyCategories.isNotEmpty) {
+      score += 35;
+    }
+
+    final sourceBrand = _normalizeRelatedText(source.brandName ?? '');
+    final candidateBrand = _normalizeRelatedText(candidate.brandName ?? '');
+    final sameBrand = sourceBrand.isNotEmpty &&
+        candidateBrand.isNotEmpty &&
+        sourceBrand == candidateBrand;
+
+    if (sameBrand) {
+      score += 55;
+    }
+
+    final sharedAttributes = _sharedRelatedAttributes(source, candidate);
+    score += sharedAttributes * 35;
+
+    final sourceTokens = _relatedNameTokens(source.name);
+    final candidateTokens = _relatedNameTokens(candidate.name);
+    final sharedTokens = sourceTokens.intersection(candidateTokens).length;
+    score += (sharedTokens > 4 ? 4 : sharedTokens) * 18;
+
+    final contextCategory =
+        _normalizeRelatedText(widget.contextCategoryName ?? '');
+    if (contextCategory.isNotEmpty &&
+        candidate.categoryNames.any((name) {
+          final normalized = _normalizeRelatedText(name);
+          return normalized == contextCategory ||
+              normalized.contains(contextCategory) ||
+              contextCategory.contains(normalized);
+        })) {
+      score += 40;
+    }
+
+    // El precio solo desempata. Nunca decide por sí solo una recomendación.
+    final sourcePrice = _precioDouble(source);
+    final candidatePrice = _precioDouble(candidate);
+    if (sourcePrice > 0 && candidatePrice > 0) {
+      final difference =
+          (candidatePrice - sourcePrice).abs() / sourcePrice;
+
+      if (difference <= 0.20) {
+        score += 15;
+      } else if (difference <= 0.45) {
+        score += 8;
+      }
+    }
+
+    return score;
+  }
+
+  Set<int> _meaningfulRelatedCategoryIds(Product product) {
+    final result = <int>{};
+
+    for (var i = 0; i < product.categoryIds.length; i++) {
+      final id = product.categoryIds[i];
+      if (id <= 0) continue;
+
+      final name = i < product.categoryNames.length
+          ? product.categoryNames[i]
+          : '';
+
+      // Si el API no trae nombre, conservamos el ID: no descartamos una
+      // categoría real solo por falta de etiqueta.
+      if (name.trim().isEmpty || !_isGenericRelatedCategory(name)) {
+        result.add(id);
+      }
+    }
+
+    return result.isNotEmpty ? result : product.categoryIds.toSet();
+  }
+
+  bool _isGenericRelatedCategory(String value) {
+    final normalized = _normalizeRelatedText(value);
+
+    const generic = <String>{
+      '',
+      'producto',
+      'productos',
+      'catalogo',
+      'catalogo general',
+      'todos',
+      'destacados',
+      'novedades',
+      'ofertas',
+      'marcas',
+      'seguridad',
+      'sin categoria',
+      'uncategorized',
+    };
+
+    return generic.contains(normalized);
+  }
+
+  int _sharedRelatedAttributes(Product source, Product candidate) {
+    final sourceMap = _relatedAttributeMap(source);
+    final candidateMap = _relatedAttributeMap(candidate);
+
+    var matches = 0;
+
+    for (final entry in sourceMap.entries) {
+      final candidateValues = candidateMap[entry.key];
+      if (candidateValues == null || candidateValues.isEmpty) continue;
+
+      if (entry.value.intersection(candidateValues).isNotEmpty) {
+        matches++;
+      }
+
+      if (matches >= 4) break;
+    }
+
+    return matches;
+  }
+
+  Map<String, Set<String>> _relatedAttributeMap(Product product) {
+    final result = <String, Set<String>>{};
+
+    for (final attribute in product.attributes) {
+      final name = _normalizeRelatedText(attribute.name);
+      if (name.isEmpty ||
+          name.contains('marca') ||
+          name.contains('fabricante') ||
+          name.contains('brand')) {
+        continue;
+      }
+
+      final values = attribute.options
+          .map(_normalizeRelatedText)
+          .where((value) => value.isNotEmpty)
+          .toSet();
+
+      if (values.isNotEmpty) {
+        result[name] = values;
+      }
+    }
+
+    return result;
+  }
+
+  Set<String> _relatedNameTokens(String value) {
+    const stopWords = <String>{
+      'para',
+      'con',
+      'sin',
+      'del',
+      'las',
+      'los',
+      'una',
+      'uno',
+      'por',
+      'the',
+      'and',
+      'full',
+      'color',
+      'pro',
+      'camara',
+      'camera',
+      'sistema',
+      'kit',
+    };
+
+    return _normalizeRelatedText(value)
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((token) =>
+            token.length >= 3 &&
+            !stopWords.contains(token) &&
+            !RegExp(r'^\d+$').hasMatch(token))
+        .toSet();
+  }
+
+  String _normalizeRelatedText(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _relatedReason(Product candidate) {
+    final sourceMeaningful = _meaningfulRelatedCategoryIds(widget.product);
+
+    for (var i = 0; i < candidate.categoryIds.length; i++) {
+      final id = candidate.categoryIds[i];
+
+      if (!sourceMeaningful.contains(id)) continue;
+
+      if (i < candidate.categoryNames.length) {
+        final name = candidate.categoryNames[i].trim();
+        if (name.isNotEmpty && !_isGenericRelatedCategory(name)) {
+          return name;
+        }
+      }
+    }
+
+    final sourceBrand = widget.product.brandName?.trim() ?? '';
+    final candidateBrand = candidate.brandName?.trim() ?? '';
+
+    if (sourceBrand.isNotEmpty &&
+        candidateBrand.isNotEmpty &&
+        _normalizeRelatedText(sourceBrand) ==
+            _normalizeRelatedText(candidateBrand)) {
+      return 'Misma marca · $candidateBrand';
+    }
+
+    return 'Selección relacionada';
   }
 
   String _limpiarHtml(String t) {
@@ -1421,6 +1733,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       ),
     );
     if (mounted) setState(() => _isAddingToCart = false);
+
+    await showMundicamCrossSellSheet(
+      context: context,
+      ref: ref,
+      sourceProduct: widget.product,
+      onGoCart: widget.onGoCart,
+    );
   }
 
   Widget _buildSectionTitle(String title) {
@@ -1891,15 +2210,284 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
+  Widget _recommendedBrandLogo(Product product) {
+    final brand = product.brandName?.trim() ?? '';
+    if (brand.isEmpty) {
+      return const SizedBox(height: 30);
+    }
+
+    final assetPath = _recommendedBrandAssetPath(brand);
+    if (assetPath == null || assetPath.isEmpty) {
+      return SizedBox(
+        height: 30,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            brand.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              color: _dark,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 30,
+      width: 104,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Image.asset(
+          assetPath,
+          width: 96,
+          height: 28,
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, __, ___) => Text(
+            brand.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              color: _dark,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _recommendedBrandKey(String value) {
+    return value
+        .toLowerCase()
+        .trim()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  String _recommendedCanonicalBrandKey(String value) {
+    final key = _recommendedBrandKey(value);
+
+    if (key.contains('hiwatch')) return 'hiwatch';
+    if (key == 'hickvision') return 'hikvision';
+    if (key == 'ajaxsystem') return 'ajax';
+    if (key == 'tplinksystems') return 'tplink';
+    if (key == 'dmtechsecurity') return 'dmtech';
+    if (key == 'centuryc') return 'century';
+    if (key == 'visionic') return 'visonic';
+    if (key == 'secury360') return 'security360';
+    if (key == 'zkteko') return 'zkteco';
+    if (key == 'mci' || key == 'mcipro') return 'mci';
+    if (key == 'evolveextended' ||
+        key == 'evolve' ||
+        key == 'evolvextender' ||
+        key == 'evolvextendermobilesecuritybox') {
+      return 'evolve';
+    }
+    if (key == 'assaabloy' || key == 'tesaassaabloy') {
+      return 'tesaassaabloy';
+    }
+    if (key == 'uniview') return 'unv';
+    return key;
+  }
+
+  String? _recommendedBrandAssetPath(String brandName) {
+    final key = _recommendedCanonicalBrandKey(brandName);
+
+    const exact = <String, String>{
+      'ajax': 'assets/brands/Ajax_system.png',
+      'anviz': 'assets/brands/Anviz.png',
+      'aiscan': 'assets/brands/AISCAN.png',
+      'amc': 'assets/brands/AMC.png',
+      'assaabloy': 'assets/brands/Tesa-assa-abloy.webp',
+      'tesaassaabloy': 'assets/brands/Tesa-assa-abloy.webp',
+      'bewave': 'assets/brands/BEWAVE.png',
+      'byfog': 'assets/brands/BYFOG.png',
+      'century': 'assets/brands/CENTURY.png',
+      'dahua': 'assets/brands/Dahua.png',
+      'defendertech': 'assets/brands/defendertech.png',
+      'dji': 'assets/brands/DJI.png',
+      'dmtech': 'assets/brands/DMTECH.png',
+      'evolve': 'assets/brands/Evolve.png',
+      'evolveextended': 'assets/brands/Evolve.png',
+      'evolvextender': 'assets/brands/Evolve.png',
+      'ezviz': 'assets/brands/Ezviz.png',
+      'hectronica': 'assets/brands/HECTRONICA.png',
+      'hikvision': 'assets/brands/HIKVISION.png',
+      'hiwatch': 'assets/brands/HIWATCH.png',
+      'hysoon': 'assets/brands/HYSOON.png',
+      'imou': 'assets/brands/IMOU.png',
+      'ipcom': 'assets/brands/IPCOM.png',
+      'jadebird': 'assets/brands/Jade-bird.webp',
+      'johnsoncontrols': 'assets/brands/Johnson-Controls.png',
+      'ksenia': 'assets/brands/Ksenia.png',
+      'llenari': 'assets/brands/LLenari.png',
+      'mci': 'assets/brands/MCI.png',
+      'mcipro': 'assets/brands/MCI.png',
+      'mobotix': 'assets/brands/MOBOTIX.png',
+      'optex': 'assets/brands/optex.png',
+      'paradox': 'assets/brands/Paradox.png',
+      'powersafe': 'assets/brands/POWER-SAFE.png',
+      'pyronix': 'assets/brands/pyronix.png',
+      'qolsys': 'assets/brands/Qolsys.png',
+      'rbtec': 'assets/brands/rbtec.png',
+      'satel': 'assets/brands/Satel.png',
+      'seagate': 'assets/brands/seagate.png',
+      'security360': 'assets/brands/SECURITY360.png',
+      'secury360': 'assets/brands/SECURITY360.png',
+      'softguard': 'assets/brands/SoftGuard.png',
+      'teletek': 'assets/brands/TELETEK.png',
+      'tenda': 'assets/brands/Tenda.png',
+      'toa': 'assets/brands/TOA.png',
+      'tplink': 'assets/brands/TPLINK.png',
+      'trikdis': 'assets/brands/trikdis.png',
+      'tvt': 'assets/brands/TVT.png',
+      'ubiquiti': 'assets/brands/Ubiquiti.png',
+      'uniarch': 'assets/brands/Uniarch.png',
+      'unv': 'assets/brands/UNV.png',
+      'urfog': 'assets/brands/Ur-Fog.png',
+      'vaelsys': 'assets/brands/vaelsys.png',
+      'videofied': 'assets/brands/videofied.png',
+      'visionaprotect': 'assets/brands/VISIONA_PROTECT.png',
+      'visonic': 'assets/brands/Visionic.png',
+      'westerndigital': 'assets/brands/western-digital.png',
+      'wisim': 'assets/brands/WISIM.png',
+      'yale': 'assets/brands/Yale.png',
+      'zkteco': 'assets/brands/Zkteco.png',
+      'zte': 'assets/brands/zte.png',
+    };
+
+    if (exact.containsKey(key)) return exact[key];
+
+    for (final entry in exact.entries) {
+      if (key.contains(entry.key) || entry.key.contains(key)) {
+        return entry.value;
+      }
+    }
+
+    return null;
+  }
+
+  Widget _recommendedStockChip(Product product) {
+    final bajoConsulta = product.isUnderConsultation;
+    final tieneStock = product.hasStock;
+    final bgColor = bajoConsulta
+        ? const Color(0xFFFFF7ED)
+        : tieneStock
+            ? const Color(0xFFEAF7EE)
+            : const Color(0xFFFDECEC);
+    final textColor = bajoConsulta
+        ? const Color(0xFFC2410C)
+        : tieneStock
+            ? const Color(0xFF218047)
+            : const Color(0xFFC62828);
+    final label = bajoConsulta
+        ? 'Bajo consulta'
+        : tieneStock
+            ? 'Disponible'
+            : 'Sin existencias';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: textColor.withOpacity(0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: textColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 9.3,
+              color: textColor,
+              fontWeight: FontWeight.w800,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _recommendedShippingChip() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FB),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFD9DEE7)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.local_shipping_outlined,
+            size: 11,
+            color: _dark,
+          ),
+          SizedBox(width: 4),
+          Text(
+            'Envío 24-48h',
+            style: TextStyle(
+              fontSize: 9.1,
+              color: _dark,
+              fontWeight: FontWeight.w800,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRecommendedSection(String? marca) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
               width: 4,
-              height: 20,
+              height: 22,
               decoration: BoxDecoration(
                 color: AppColors.primary,
                 borderRadius: BorderRadius.circular(999),
@@ -1911,44 +2499,59 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 'Productos relacionados',
                 style: TextStyle(
                   fontWeight: FontWeight.w900,
-                  fontSize: 15,
+                  fontSize: 16,
                   color: _dark,
                 ),
               ),
             ),
             Text(
-              '${_recomendados.length} productos',
+              '${_recomendados.length} recomendados',
               style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
                 color: _muted,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 5),
+        const Padding(
+          padding: EdgeInsets.only(left: 14),
+          child: Text(
+            'Seleccionados por categoría, marca y características',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.25,
+              color: _muted,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
         SizedBox(
-          height: 240,
+          height: 360,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 2),
             itemCount: _recomendados.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 10),
+            separatorBuilder: (context, index) => const SizedBox(width: 12),
             itemBuilder: (context, i) {
-              final rp = _recomendados[i];
-              final precioRp = _precioDouble(rp);
+              final product = _recomendados[i];
+              final price = _precioDouble(product);
+
               return SizedBox(
-                width: 160,
+                width: 204,
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(18),
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => ProductDetailScreen(
-                            product: rp,
+                            product: product,
                             onGoCart: widget.onGoCart,
                             onGoQuotes: widget.onGoQuotes,
                             contextCategoryName: widget.contextCategoryName,
@@ -1957,108 +2560,179 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       );
                     },
                     child: Container(
+                      clipBehavior: Clip.antiAlias,
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(18),
                         border: Border.all(color: _border),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x0D111827),
+                            blurRadius: 10,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          ClipRRect(
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(16),
-                            ),
-                            child: SizedBox(
-                              height: 100,
-                              width: double.infinity,
-                              child: CachedNetworkImage(
-                                imageUrl: rp.imageUrl,
-                                fit: BoxFit.contain,
-                                memCacheWidth: 500,
-                                maxWidthDiskCache: 800,
-                                fadeInDuration: const Duration(milliseconds: 120),
-                                placeholder: (context, url) => Center(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppColors.primary.withOpacity(0.3),
-                                  ),
+                          Container(
+                            height: 112,
+                            width: double.infinity,
+                            color: Colors.white,
+                            padding: const EdgeInsets.all(10),
+                            child: CachedNetworkImage(
+                              imageUrl: product.imageUrl,
+                              fit: BoxFit.contain,
+                              memCacheWidth: 520,
+                              maxWidthDiskCache: 900,
+                              fadeInDuration: const Duration(milliseconds: 120),
+                              placeholder: (context, url) => Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.primary.withOpacity(0.25),
                                 ),
-                                errorWidget: (context, url, error) => const Icon(
-                                  Icons.broken_image,
-                                  size: 40,
-                                  color: _border,
+                              ),
+                              errorWidget: (context, url, error) => const Center(
+                                child: Icon(
+                                  Icons.image_not_supported_outlined,
+                                  size: 34,
+                                  color: _muted,
                                 ),
                               ),
                             ),
                           ),
-                          Padding(
-                            padding: const EdgeInsets.all(10),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  rp.name,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    height: 1.2,
-                                    fontWeight: FontWeight.w800,
-                                    color: _dark,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  _formatearPrecio(precioRp),
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w900,
-                                    color: AppColors.primary,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: 32,
-                                  child: ElevatedButton(
-                                    onPressed: rp.canAddToCart
-                                        ? () {
-                                      ref
-                                          .read(cartProvider.notifier)
-                                          .addProduct(rp, 1);
-                                      HapticFeedback.mediumImpact();
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text('${rp.name} añadido'),
-                                          backgroundColor: AppColors.primary,
-                                          behavior: SnackBarBehavior.floating,
-                                          duration: const Duration(seconds: 1),
-                                        ),
-                                      );
-                                    }
-                                        : null,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: rp.canAddToCart
-                                          ? AppColors.primary
-                                          : Colors.grey.shade300,
-                                      foregroundColor: Colors.white,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      disabledBackgroundColor: Colors.grey.shade300,
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(11, 8, 11, 10),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _recommendedBrandLogo(product),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    product.name,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12.4,
+                                      height: 1.16,
+                                      fontWeight: FontWeight.w900,
+                                      color: _dark,
                                     ),
-                                    child: Text(
-                                      rp.canAddToCart ? 'Añadir' : (rp.isUnderConsultation ? 'Consulta' : 'Sin Existencias'),
+                                  ),
+                                  if (product.sku.trim().isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'REF: ${product.sku.trim()}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w800,
+                                        fontSize: 9.4,
+                                        color: _muted,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                  const Spacer(),
+                                  Text(
+                                    _formatearPrecio(price),
+                                    maxLines: 1,
+                                    style: TextStyle(
+                                      fontSize: price > 0 ? 22 : 16,
+                                      fontWeight: FontWeight.w900,
+                                      color: AppColors.primary,
+                                      fontFamily: 'Oswald',
+                                      height: 1,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 5,
+                                    runSpacing: 5,
+                                    children: [
+                                      _recommendedStockChip(product),
+                                      if (product.hasStock &&
+                                          !product.isUnderConsultation)
+                                        _recommendedShippingChip(),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 9),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    height: 36,
+                                    child: ElevatedButton.icon(
+                                      onPressed: product.canAddToCart
+                                          ? () async {
+                                              ref
+                                                  .read(cartProvider.notifier)
+                                                  .addProduct(product, 1);
+                                              HapticFeedback.mediumImpact();
+
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    '${product.name} añadido',
+                                                  ),
+                                                  backgroundColor:
+                                                      AppColors.primary,
+                                                  behavior:
+                                                      SnackBarBehavior.floating,
+                                                  duration: const Duration(
+                                                    seconds: 1,
+                                                  ),
+                                                ),
+                                              );
+
+                                              await showMundicamCrossSellSheet(
+                                                context: context,
+                                                ref: ref,
+                                                sourceProduct: product,
+                                                onGoCart: widget.onGoCart,
+                                              );
+                                            }
+                                          : null,
+                                      icon: Icon(
+                                        product.canAddToCart
+                                            ? Icons.shopping_cart_outlined
+                                            : Icons.block_rounded,
+                                        size: 15,
+                                        color: Colors.white,
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: product.canAddToCart
+                                            ? AppColors.primary
+                                            : Colors.grey.shade300,
+                                        foregroundColor: Colors.white,
+                                        elevation: 0,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        disabledBackgroundColor:
+                                            Colors.grey.shade300,
+                                      ),
+                                      label: Text(
+                                        product.canAddToCart
+                                            ? 'AÑADIR CARRITO'
+                                            : (product.isUnderConsultation
+                                                ? 'BAJO CONSULTA'
+                                                : 'SIN EXISTENCIAS'),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w900,
+                                          fontFamily: 'Oswald',
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ],

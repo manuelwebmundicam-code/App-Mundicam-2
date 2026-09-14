@@ -1,4 +1,5 @@
 // pages/quotes_page.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/network/api_service.dart';
 import '../../../../core/analytics/mundicam_analytics_service.dart';
+import '../../../../core/reviews/mundicam_review_service.dart';
 import '../../../../shared/theme/app_theme.dart';
 import '../../../../shared/widgets/professional_page_app_bar.dart';
 import '../../../cart/presentation/pages/cart_page.dart';
@@ -803,6 +805,7 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
     );
     if (confirmar != true || !mounted) return;
     setState(() { _isLoadingAction = true; _processingQuoteId = 'local_save_${localQuote.orderId}'; });
+    var quoteSaved = false;
     try {
       final email = await ref.read(currentQuoteEmailProvider.future);
       if (email == null || email.trim().isEmpty) {
@@ -817,11 +820,23 @@ class _QuotesPageState extends ConsumerState<QuotesPage> {
       ref.invalidate(quotesProvider);
       ref.invalidate(quoteBadgeProvider);
       ref.invalidate(cartBadgeProvider);
+      quoteSaved = true;
       _showSnackBar('✅ "${localQuote.nombre}" guardado en la nube.', const Color(0xFF1565C0));
     } catch (e) {
       _showSnackBar('Error: $e', Colors.red);
     } finally {
       if (mounted) setState(() { _isLoadingAction = false; _processingQuoteId = null; });
+    }
+
+    if (quoteSaved && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(
+          MundicamReviewService.instance.requestIfEligible(
+            trigger: MundicamReviewTrigger.quoteCompleted,
+          ),
+        );
+      });
     }
   }
 

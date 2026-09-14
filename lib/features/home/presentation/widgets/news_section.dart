@@ -1,10 +1,10 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import 'package:mundicam/features/home/presentation/pages/noticias_page.dart';
 import 'package:mundicam/features/home/presentation/providers/noticias_provider.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
@@ -16,7 +16,9 @@ class NewsBanner extends ConsumerStatefulWidget {
 }
 
 class _NewsBannerState extends ConsumerState<NewsBanner> {
-  final PageController _pageController = PageController(viewportFraction: 0.92);
+  final PageController _pageController = PageController(
+    viewportFraction: 0.96,
+  );
 
   Timer? _autoTimer;
   int _currentIndex = 0;
@@ -40,7 +42,8 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
       if (_isUserDragging) return;
       if (_newsCount <= 1) return;
 
-      final nextIndex = _currentIndex >= _newsCount - 1 ? 0 : _currentIndex + 1;
+      final nextIndex =
+          _currentIndex >= _newsCount - 1 ? 0 : _currentIndex + 1;
 
       _pageController.animateToPage(
         nextIndex,
@@ -48,18 +51,6 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
         curve: Curves.easeOutCubic,
       );
     });
-  }
-
-  Future<void> _openUrl(String url) async {
-    if (url.trim().isEmpty) return;
-
-    final uri = Uri.parse(url);
-
-    try {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      debugPrint('No se pudo abrir la noticia: $url');
-    }
   }
 
   String _formatDate(String rawDate) {
@@ -76,26 +67,17 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
     }
   }
 
-  String _cleanTitle(String text) {
-    return text
-        .replaceAll(RegExp(r'<[^>]*>'), '')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#8211;', '–')
-        .replaceAll('&#8217;', '’')
-        .replaceAll('&nbsp;', ' ')
-        .trim();
-  }
-
   @override
   Widget build(BuildContext context) {
     final noticiasAsync = ref.watch(noticiasProvider);
 
     return SizedBox(
-      height: 228,
+      height: 286,
       child: noticiasAsync.when(
         loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
+          child: CircularProgressIndicator(
+            color: AppColors.primary,
+          ),
         ),
         error: (error, stack) => _buildEmptyState(
           'No se pudieron cargar las noticias',
@@ -109,13 +91,15 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
           }
 
           if (visibleNoticias.isEmpty) {
-            return _buildEmptyState('No hay noticias disponibles');
+            return _buildEmptyState(
+              'No hay noticias disponibles',
+            );
           }
 
           return Column(
             children: [
               SizedBox(
-                height: 190,
+                height: 248,
                 child: NotificationListener<ScrollNotification>(
                   onNotification: (notification) {
                     if (notification is ScrollStartNotification) {
@@ -141,10 +125,20 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
                       final item = visibleNoticias[index];
 
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                        ),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(20),
-                          onTap: () => _openUrl(item.link),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => NoticiaDetallePage(
+                                  noticia: item,
+                                ),
+                              ),
+                            );
+                          },
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(20),
                             child: Stack(
@@ -152,21 +146,31 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
                                 Positioned.fill(
                                   child: item.imagenUrl.isNotEmpty
                                       ? CachedNetworkImage(
-                                    imageUrl: item.imagenUrl,
-                                    fit: BoxFit.cover,
-                                    placeholder: (context, url) =>
-                                        Container(
-                                          color: Colors.grey.shade200,
-                                          child: const Center(
-                                            child: CircularProgressIndicator(
-                                              color: AppColors.primary,
-                                              strokeWidth: 2,
+                                          imageUrl: item.imagenUrl,
+                                          fit: BoxFit.cover,
+                                          placeholder: (
+                                            context,
+                                            url,
+                                          ) =>
+                                              Container(
+                                            color:
+                                                Colors.grey.shade200,
+                                            child: const Center(
+                                              child:
+                                                  CircularProgressIndicator(
+                                                color:
+                                                    AppColors.primary,
+                                                strokeWidth: 2,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                    errorWidget: (context, url, error) =>
-                                        _buildImageFallback(),
-                                  )
+                                          errorWidget: (
+                                            context,
+                                            url,
+                                            error,
+                                          ) =>
+                                              _buildImageFallback(),
+                                        )
                                       : _buildImageFallback(),
                                 ),
                                 Positioned.fill(
@@ -176,8 +180,12 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
                                         colors: [
-                                          Colors.black.withOpacity(0.03),
-                                          Colors.black.withOpacity(0.84),
+                                          Colors.black.withOpacity(
+                                            0.03,
+                                          ),
+                                          Colors.black.withOpacity(
+                                            0.84,
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -186,30 +194,33 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
                                 Positioned(
                                   left: 16,
                                   right: 16,
-                                  bottom: 18,
+                                  bottom: 20,
                                   child: Column(
                                     crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         _formatDate(item.fecha),
                                         style: const TextStyle(
                                           color: Colors.white70,
                                           fontSize: 11,
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight:
+                                              FontWeight.w600,
                                         ),
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
-                                        _cleanTitle(item.titulo),
+                                        item.titulo,
                                         maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
+                                        overflow:
+                                            TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontFamily: 'Oswald',
-                                          fontSize: 16,
+                                          fontSize: 17,
                                           height: 1.16,
-                                          fontWeight: FontWeight.w900,
+                                          fontWeight:
+                                              FontWeight.w800,
                                         ),
                                       ),
                                     ],
@@ -245,7 +256,9 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
           height: 7,
           margin: const EdgeInsets.symmetric(horizontal: 3),
           decoration: BoxDecoration(
-            color: selected ? AppColors.primary : const Color(0xFFD1D5DB),
+            color: selected
+                ? AppColors.primary
+                : const Color(0xFFD1D5DB),
             borderRadius: BorderRadius.circular(20),
           ),
         );
@@ -273,7 +286,9 @@ class _NewsBannerState extends ConsumerState<NewsBanner> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE1E7EF)),
+        border: Border.all(
+          color: const Color(0xFFE1E7EF),
+        ),
       ),
       child: Center(
         child: Text(
