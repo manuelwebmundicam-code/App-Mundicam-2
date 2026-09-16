@@ -3,7 +3,7 @@ description: "App oficial de Mundicam"
 publish_to: "none"
 
 # Versión comercial MundiCam
-version: 1.6.7+33
+version: 1.6.7+34
 
 environment:
   sdk: ">=3.9.2 <4.0.0"
