@@ -57,5 +57,11 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+
+	<key>UIDesignRequiresCompatibility</key>
+	<true/>
+
+	<key>UIPrerenderedIcon</key>
+	<true/>
 </dict>
 </plist>
