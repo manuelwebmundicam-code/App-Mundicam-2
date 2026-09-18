@@ -64,27 +64,41 @@ class _ProductosPageState extends ConsumerState<ProductosPage> {
             onRefresh: () async {
               ref.invalidate(categoriesProvider);
             },
-            child: GridView.builder(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              padding: const EdgeInsets.fromLTRB(14, 16, 14, 22),
-              itemCount: categoriasOrdenadas.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.03,
-              ),
-              itemBuilder: (context, index) {
-                final cat = categoriasOrdenadas[index];
-                return _CategoryTile(
-                  cat: cat,
-                  icon: _getIconForCategory(cat.name),
-                  iconAssetPath: _getIconAssetForCategory(cat.name),
-                  subtitle: _getSubtitleForCategory(cat.name),
-                  onGoCart: widget.onGoCart,
-                  onGoQuotes: widget.onGoQuotes,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Responsive para móviles antiguos/estrechos y escalas de texto
+                // mayores. Evita el Bottom overflow de las tarjetas sin reducir
+                // contenido ni tocar la navegación del catálogo.
+                final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+                final availableWidth = constraints.maxWidth - 40; // padding + gap
+                final tileWidth = availableWidth > 0 ? availableWidth / 2 : 150.0;
+                final scaleExtra = (textScale - 1.0).clamp(0.0, 0.6).toDouble() * 24.0;
+                final compactExtra = tileWidth < 165 ? 8.0 : 0.0;
+                final tileHeight = 178.0 + scaleExtra + compactExtra;
+
+                return GridView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(14, 16, 14, 22),
+                  itemCount: categoriasOrdenadas.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    mainAxisExtent: tileHeight,
+                  ),
+                  itemBuilder: (context, index) {
+                    final cat = categoriasOrdenadas[index];
+                    return _CategoryTile(
+                      cat: cat,
+                      icon: _getIconForCategory(cat.name),
+                      iconAssetPath: _getIconAssetForCategory(cat.name),
+                      subtitle: _getSubtitleForCategory(cat.name),
+                      onGoCart: widget.onGoCart,
+                      onGoQuotes: widget.onGoQuotes,
+                    );
+                  },
                 );
               },
             ),

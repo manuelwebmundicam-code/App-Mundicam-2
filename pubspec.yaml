@@ -1,10 +1,10 @@
-﻿name: mundicam
+name: mundicam
 description: "App oficial de Mundicam"
 publish_to: "none"
 
 # Nueva versiÃ³n para Android e iOS.
 # Se usa build 26 para superar las versiones/builds anteriores del proyecto.
-version: 1.5.5+28
+version: 1.6.8+37
 
 environment:
   sdk: ">=3.9.2 <4.0.0"
@@ -41,6 +41,10 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   intl: ^0.20.2
   flutter_cache_manager: ^3.4.1
+  package_info_plus: ^9.0.1
+
+  # Valoración nativa App Store / Google Play
+  in_app_review: ^2.0.12
 
 dev_dependencies:
   flutter_test:

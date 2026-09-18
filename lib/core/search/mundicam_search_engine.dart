@@ -122,28 +122,73 @@ class MundicamSearchEngine {
   };
 
   static const List<String> knownBrands = [
-    'ajax',
-    'dahua',
-    'hikvision',
+    // Las marcas compuestas/específicas van primero para impedir que una marca
+    // corta absorba a otra (MCI/MCI PRO, HIKVISION/HiWatch, etc.).
+    'MCI PRO',
+    'HIKVISION Hiwatch',
+    'Johnson Controls',
+    'EVOLVE Xtender',
+    'TESA ASSA ABLOY',
+    'VISIONA PROTECT',
+    'WESTERN DIGITAL',
+    'POWER-SAFE',
+    'BE WAVE',
+    'IP-COM',
+    'JADE BIRD',
+    'TP-LINK',
+    'AISCAN',
+    'AJAX',
+    'AMC',
+    'ANVIZ',
+    'BYFOG',
+    'CENTURY',
+    'DAHUA',
+    'DEFENDERTECH',
+    'DJI',
+    'DMTECH',
+    'EZVIZ',
+    'HECTRONICA',
+    'HIKVISION',
+    'HYSOON',
+    'IMOU',
+    'Ksenia',
+    'LLENARI',
+    'MCI',
+    'MOBOTIX',
+    'OPTEX',
+    'PARADOX',
+    'PYRONIX',
+    'QOLSYS',
+    'RBTEC',
+    'SATEL',
+    'SEAGATE',
+    'SECURY360',
+    'SOFTGUARD',
+    'TELETEK',
+    'TENDA',
+    'TOA',
+    'TRIKDIS',
+    'TVT',
+    'UBIQUITI',
+    'UNIARCH',
+    'UNIVIEW',
+    'URFOG',
+    'VAELSYS',
+    'VIDEOFIED',
+    'VISONIC',
+    'WISIM',
+    'YALE',
+    'ZKTECO',
+    'ZTE',
+    // Alias de entrada. No crean marcas adicionales en la UI.
     'hiwatch',
-    'hiluxtel',
-    'ksenia',
-    'teletek',
-    'tp-link',
     'tplink',
-    'vigi',
-    'omada',
-    'mobotix',
-    'secury360',
-    'evolve',
-    'wisim',
-    'softguard',
-    'mci',
-    'powersafe',
+    'unv',
+    'security360',
+    'visionic',
     'power safe',
-    'zkteco',
-    'ubiquiti',
-    'ruijie',
+    'assa abloy',
+    'mci pro',
   ];
 
   static String cleanQuery(String value) {
@@ -416,18 +461,48 @@ class MundicamSearchEngine {
 
   static List<String> detectedBrands(String query) {
     final normalized = normalize(query);
-    final result = <String>[];
+    final compactQuery = compact(normalized);
+    final matches = <String>[];
+
     for (final brand in knownBrands) {
       final normalizedBrand = normalize(brand);
       if (normalizedBrand.isEmpty) continue;
-      if (normalized == normalizedBrand ||
+      final compactBrand = compact(normalizedBrand);
+
+      final matchesWords = normalized == normalizedBrand ||
           normalized.contains(' $normalizedBrand ') ||
           normalized.startsWith('$normalizedBrand ') ||
-          normalized.endsWith(' $normalizedBrand') ||
-          normalized.contains(normalizedBrand.replaceAll(' ', ''))) {
-        if (!result.any((item) => normalize(item) == normalizedBrand)) {
-          result.add(brandLabel(brand));
-        }
+          normalized.endsWith(' $normalizedBrand');
+      final matchesCompact = compactBrand.isNotEmpty &&
+          (compactQuery == compactBrand ||
+              compactQuery.startsWith(compactBrand) ||
+              compactQuery.endsWith(compactBrand));
+
+      if (matchesWords || matchesCompact) {
+        matches.add(brand);
+      }
+    }
+
+    // Primero la coincidencia más específica. Así "HIKVISION Hiwatch"
+    // no termina detectándose también como HIKVISION normal.
+    matches.sort(
+      (a, b) => compact(b).length.compareTo(compact(a).length),
+    );
+
+    final result = <String>[];
+    final acceptedCompacts = <String>[];
+    for (final brand in matches) {
+      final candidateCompact = compact(brand);
+      final shadowedBySpecific = acceptedCompacts.any(
+        (accepted) => accepted != candidateCompact &&
+            accepted.contains(candidateCompact),
+      );
+      if (shadowedBySpecific) continue;
+
+      final label = brandLabel(brand);
+      if (!result.any((item) => normalize(item) == normalize(label))) {
+        result.add(label);
+        acceptedCompacts.add(candidateCompact);
       }
     }
     return result;
@@ -554,21 +629,44 @@ class MundicamSearchEngine {
       case 'hikvision':
         return 'Hikvision';
       case 'hiwatch':
-        return 'HiWatch';
+      case 'hikvision hiwatch':
+        return 'HIKVISION Hiwatch';
       case 'ksenia':
         return 'Ksenia';
       case 'teletek':
         return 'Teletek';
       case 'mobotix':
         return 'Mobotix';
-      case 'secury360':
-        return 'Secury360';
       case 'evolve':
         return 'Evolve Xtender';
       case 'wisim':
         return 'WiSIM';
+      case 'mci':
+        return 'MCI';
+      case 'mci pro':
+      case 'mcipro':
+        return 'MCI PRO';
+      case 'johnson controls':
+        return 'Johnson Controls';
+      case 'qolsys':
+        return 'Qolsys';
+      case 'softguard':
+      case 'soft guard':
+        return 'SoftGuard';
       case 'zkteco':
         return 'ZKTeco';
+      case 'unv':
+      case 'uniview':
+        return 'UNIVIEW';
+      case 'security360':
+      case 'secury360':
+        return 'SECURY360';
+      case 'visionic':
+      case 'visonic':
+        return 'VISONIC';
+      case 'power safe':
+      case 'powersafe':
+        return 'POWERSAFE';
       default:
         return brand.trim().isEmpty ? brand : brand.trim();
     }

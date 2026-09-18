@@ -25,6 +25,13 @@ class OrderMundicam {
   final int sourceQuoteId;
   final String sourceLocalQuoteUuid;
 
+  // Campos opcionales añadidos por MundiCam App Extensions 1.0.1.
+  // No alteran el flujo de pedido: solo conservan la identificación de origen
+  // que ya calcula el servidor.
+  final bool isAppOrder;
+  final String createdVia;
+  final String originLabel;
+
   final OrderAddress billing;
   final OrderAddress shipping;
   final List<OrderItem> items;
@@ -55,6 +62,9 @@ class OrderMundicam {
     this.customerNote = '',
     this.sourceQuoteId = 0,
     this.sourceLocalQuoteUuid = '',
+    this.isAppOrder = false,
+    this.createdVia = '',
+    this.originLabel = '',
     OrderAddress? billing,
     OrderAddress? shipping,
     OrderActions? actions,
@@ -113,6 +123,12 @@ class OrderMundicam {
     }
   }
 
+  String get effectiveOriginLabel {
+    final clean = originLabel.trim();
+    if (clean.isNotEmpty) return clean;
+    return isAppOrder ? 'App MundiCam' : '';
+  }
+
   bool get hasPaymentOrShippingInfo => true;
 
   bool get hasCustomerInfo => billing.hasAnyVisibleValue || shipping.hasAnyVisibleValue;
@@ -159,6 +175,9 @@ class OrderMundicam {
       sourceLocalQuoteUuid: _safeString(
         json['source_local_quote_uuid'] ?? json['sourceLocalQuoteUuid'],
       ),
+      isAppOrder: _parseBool(json['is_app_order'] ?? json['isAppOrder']),
+      createdVia: _safeString(json['created_via'] ?? json['createdVia']),
+      originLabel: _safeString(json['origin_label'] ?? json['originLabel']),
       billing: OrderAddress.fromJson(json['billing']),
       shipping: OrderAddress.fromJson(json['shipping']),
       actions: OrderActions.fromJson(json['actions']),
@@ -364,6 +383,7 @@ class OrderItem {
   final double total;
   final double taxTotal;
   final String sku;
+  final List<String> serialNumbers;
   final String imageUrl;
   final String permalink;
 
@@ -378,6 +398,7 @@ class OrderItem {
     this.subtotal = 0,
     this.taxTotal = 0,
     this.sku = '',
+    this.serialNumbers = const <String>[],
     this.imageUrl = '',
     this.permalink = '',
   });
@@ -428,6 +449,7 @@ class OrderItem {
             json['ref'] ??
             json['reference'],
       ),
+      serialNumbers: _extractSerialNumbers(json),
       imageUrl: _extractImageUrl(json),
       permalink: _parseString(json['permalink'] ?? json['product_url']),
     );
@@ -477,6 +499,102 @@ class OrderItem {
 
   static String _cleanText(String value) {
     return value.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+  }
+
+  /// Extrae exclusivamente números de serie (SN) de la línea del pedido.
+  ///
+  /// Preparado para el PHP de MundiCam de dos formas:
+  /// 1) campo directo: `sn`, `SN`, `serial_numbers`, `serialNumbers`, etc.;
+  /// 2) metadata WooCommerce cuya etiqueta visible sea `SN`, `N/S`,
+  ///    `número de serie`, `serie` o `serial`.
+  ///
+  /// EAN, SKU y referencias comerciales NO se consideran números de serie.
+  static List<String> _extractSerialNumbers(Map<dynamic, dynamic> map) {
+    final serials = <String>[];
+
+    void addValue(dynamic value) {
+      if (value == null) return;
+
+      if (value is List) {
+        for (final item in value) {
+          addValue(item);
+        }
+        return;
+      }
+
+      if (value is Map) {
+        // Si el backend entrega una estructura por unidad, priorizamos sus
+        // campos de valor y evitamos incorporar IDs u otros metadatos.
+        final structuredValue =
+            value['display_value'] ?? value['value'] ?? value['sn'] ?? value['SN'];
+        if (structuredValue != null) {
+          addValue(structuredValue);
+        }
+        return;
+      }
+
+      final raw = _parseString(value);
+      if (raw.isEmpty) return;
+
+      final parts = raw
+          .split(RegExp(r'[\n,;|]+'))
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty);
+
+      for (final item in parts) {
+        if (!serials.contains(item)) serials.add(item);
+      }
+    }
+
+    // Contrato preparado para el PHP que añadiremos después. Se aceptan
+    // variantes razonables del mismo dato, pero nunca EAN/SKU/referencia.
+    for (final directValue in <dynamic>[
+      map['sn'],
+      map['SN'],
+      map['serial_numbers'],
+      map['serialNumbers'],
+      map['serials'],
+      map['serial_number'],
+      map['serialNumber'],
+    ]) {
+      addValue(directValue);
+    }
+
+    final rawMeta = map['meta_data'] ?? map['metaData'] ?? map['metadata'];
+    if (rawMeta is List) {
+      for (final rawEntry in rawMeta) {
+        if (rawEntry is! Map) continue;
+
+        final label = _parseString(
+          rawEntry['display_key'] ?? rawEntry['key'] ?? rawEntry['name'],
+        );
+
+        if (!_looksLikeSerialLabel(label)) continue;
+
+        addValue(rawEntry['display_value'] ?? rawEntry['value']);
+      }
+    }
+
+    return List<String>.unmodifiable(serials);
+  }
+
+  static bool _looksLikeSerialLabel(String raw) {
+    final value = raw
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .trim();
+    final compact = value.replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+    return compact == 'sn' ||
+        compact == 'ns' ||
+        value.contains('numero de serie') ||
+        value.contains('serial') ||
+        value.contains('serie');
   }
 
   static String _extractImageUrl(Map<dynamic, dynamic> map) {

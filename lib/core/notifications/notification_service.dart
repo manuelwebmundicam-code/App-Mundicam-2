@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show Directory, File, HttpClient, Platform;
 import 'dart:ui' show Color;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -42,19 +42,67 @@ class MundiCamOrderNotification {
   bool get isOrderCreated => event == 'order_created';
   bool get isStatusChanged => event == 'order_status_changed';
 
-  bool get isGeneralNotification {
+  bool get isPromotionNotification {
     final type = data['type']?.toString().trim().toLowerCase() ?? '';
+    final tipo = data['tipo']?.toString().trim().toLowerCase() ?? '';
+    final screen = data['screen']?.toString().trim().toLowerCase() ?? '';
+    final route = data['route']?.toString().trim().toLowerCase() ?? '';
+
+    return event == 'promotion' ||
+        event == 'promotion_synced' ||
+        type == 'promotion' ||
+        tipo == 'promocion' ||
+        tipo == 'promoción' ||
+        screen == 'promotions' ||
+        route == 'promotions';
+  }
+
+  bool get isGeneralNotification {
+    if (isPromotionNotification) return false;
+
+    final type = data['type']?.toString().trim().toLowerCase() ?? '';
+    final tipo = data['tipo']?.toString().trim().toLowerCase() ?? '';
 
     return event == 'general' ||
+        event == 'notice' ||
+        event == 'aviso' ||
         type == 'general' ||
         type == 'info' ||
         type == 'aviso' ||
         type == 'notice' ||
         type == 'notification' ||
-        type == 'notificacion';
+        type == 'notificacion' ||
+        type == 'communication' ||
+        tipo == 'aviso' ||
+        tipo == 'notice';
   }
 
-  bool get isOrderNotification => !isGeneralNotification;
+  String? get imageUrl => _firstNonEmptyString([
+        data['notification_image_url'],
+        data['image_url'],
+        data['imageUrl'],
+        data['image'],
+      ]);
+
+  bool get wantsInAppPopup {
+    final raw = data['in_app_popup'];
+    if (raw != null) {
+      final value = raw.toString().trim().toLowerCase();
+      if (const ['0', 'false', 'no', 'off'].contains(value)) return false;
+      if (const ['1', 'true', 'yes', 'on'].contains(value)) return true;
+    }
+
+    final presentation =
+        data['presentation']?.toString().trim().toLowerCase() ?? '';
+    if (presentation == 'notification_only') return false;
+
+    // Compatibilidad con pedidos/notificaciones antiguas que no enviaban
+    // estas banderas y sí mostraban el aviso interno de MundiCam.
+    return true;
+  }
+
+  bool get isOrderNotification =>
+      !isGeneralNotification && !isPromotionNotification;
 
   MundiCamOrderNotification copyWith({
     bool? showPopup,
@@ -174,6 +222,29 @@ class MundiCamOrderNotification {
     final data = Map<String, dynamic>.from(message.data);
     final type = data['type']?.toString().trim().toLowerCase() ?? '';
     final event = data['event']?.toString().trim().toLowerCase() ?? '';
+    final tipo = data['tipo']?.toString().trim().toLowerCase() ?? '';
+    final screen = data['screen']?.toString().trim().toLowerCase() ?? '';
+    final route = data['route']?.toString().trim().toLowerCase() ?? '';
+
+    final isPromotionNotification = event == 'promotion' ||
+        event == 'promotion_synced' ||
+        type == 'promotion' ||
+        tipo == 'promocion' ||
+        tipo == 'promoción' ||
+        screen == 'promotions' ||
+        route == 'promotions';
+
+    // El PHP de Promociones 2.1.0 puede usar type=general, pero tipo/event/route
+    // identifican la promoción. Se prioriza antes de heurísticas de pedido.
+    if (isPromotionNotification) {
+      return _fromGeneralMessage(
+        message,
+        data: data,
+        event: event,
+        showPopup: showPopup,
+        openedByUser: openedByUser,
+      );
+    }
 
     final titleHint = _firstNonEmptyString([
           data['title'],
@@ -218,12 +289,17 @@ class MundiCamOrderNotification {
       );
     }
 
-    final isGeneralNotification = type == 'general' ||
+    final isGeneralNotification = event == 'notice' ||
+        event == 'aviso' ||
+        type == 'general' ||
         type == 'info' ||
         type == 'aviso' ||
         type == 'notice' ||
         type == 'notification' ||
-        type == 'notificacion';
+        type == 'notificacion' ||
+        type == 'communication' ||
+        tipo == 'aviso' ||
+        tipo == 'notice';
 
     if (isGeneralNotification || message.notification != null) {
       return _fromGeneralMessage(
@@ -382,6 +458,13 @@ class NotificationService {
   static const int _maxProcessedMessageKeys = 100;
   static const int _maxPendingNotifications = 20;
 
+  // iOS puede tardar varios segundos en entregar el token APNs después de
+  // arrancar la app o volver de login. No debemos abandonar el registro FCM
+  // definitivamente si APNs aún no está listo. Reintentamos de forma acotada
+  // sin bloquear la interfaz ni afectar a Android.
+  static const Duration _iosTokenRetryDelay = Duration(seconds: 5);
+  static const int _maxIosTokenRetryAttempts = 12;
+
   static final NotificationService _instance = NotificationService._();
   factory NotificationService() => _instance;
   NotificationService._();
@@ -399,6 +482,10 @@ class NotificationService {
   bool _initialized = false;
   bool _localNotificationsInitialized = false;
   Future<void>? _initializationFuture;
+
+  Timer? _iosTokenRetryTimer;
+  int _iosTokenRetryAttempt = 0;
+  bool _tokenSyncInProgress = false;
 
   Stream<MundiCamOrderNotification> get orderNotifications =>
       _orderController.stream;
@@ -454,7 +541,19 @@ class NotificationService {
 
     _messaging.onTokenRefresh.listen((token) async {
       final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
+
+      // Si Firebase ya nos entrega un token FCM, lo registramos aunque APNs
+      // todavía no pueda leerse en ese instante. La plataforma sigue siendo
+      // 'ios' y el backend podrá incluir este dispositivo en los envíos.
       await _saveToken(token, apnsToken: apnsToken);
+
+      if (Platform.isIOS) {
+        if ((apnsToken ?? '').isNotEmpty) {
+          _cancelIosTokenRetry();
+        } else {
+          _scheduleIosTokenRetry();
+        }
+      }
     });
 
     final initialMessage = await _messaging.getInitialMessage();
@@ -570,11 +669,12 @@ class NotificationService {
       }
     }
 
-    // En primer plano mostramos también el aviso interno MundiCam.
-    // De este modo el usuario ve el mensaje dentro de la app y, además,
-    // conserva la notificación del sistema en la bandeja de Android.
+    // El PHP puede pedir "notification_only" / in_app_popup=0.
+    // En ese caso conservamos la notificación del sistema, pero NO abrimos
+    // el diálogo interno dentro de MundiCam. Los pedidos antiguos que no
+    // envían estas banderas mantienen su comportamiento anterior.
     _emitNotification(
-      notification.copyWith(showPopup: true),
+      notification.copyWith(showPopup: notification.wantsInAppPopup),
     );
   }
 
@@ -628,6 +728,12 @@ class NotificationService {
   ) async {
     await _initializeLocalNotifications();
 
+    // En primer plano Firebase entrega el mensaje a onMessage y la notificación
+    // la construimos nosotros. Si el PHP manda image_url, descargamos esa misma
+    // imagen y usamos BigPicture en Android. Si la descarga falla, el aviso
+    // sigue saliendo con título + texto como antes.
+    final imagePath = await _downloadNotificationImage(notification);
+
     final androidDetails = AndroidNotificationDetails(
       androidChannelId,
       androidChannelName,
@@ -640,7 +746,13 @@ class NotificationService {
       enableVibration: true,
       category: AndroidNotificationCategory.status,
       visibility: NotificationVisibility.public,
-      styleInformation: BigTextStyleInformation(notification.body),
+      styleInformation: imagePath == null
+          ? BigTextStyleInformation(notification.body)
+          : BigPictureStyleInformation(
+              FilePathAndroidBitmap(imagePath),
+              contentTitle: notification.title,
+              summaryText: notification.body,
+            ),
       tag: notification.orderId == null
           ? 'mundicam_general'
           : 'mundicam_order_${notification.orderId}',
@@ -657,6 +769,11 @@ class NotificationService {
       threadIdentifier: notification.orderId == null
           ? 'mundicam_general'
           : 'mundicam_order_${notification.orderId}',
+      attachments: imagePath == null
+          ? null
+          : <DarwinNotificationAttachment>[
+              DarwinNotificationAttachment(imagePath),
+            ],
     );
 
     await _localNotifications.show(
@@ -672,6 +789,103 @@ class NotificationService {
     );
   }
 
+  Future<String?> _downloadNotificationImage(
+    MundiCamOrderNotification notification,
+  ) async {
+    final rawUrl = notification.imageUrl?.trim() ?? '';
+    if (rawUrl.isEmpty) return null;
+
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null ||
+        (uri.scheme != 'https' && uri.scheme != 'http') ||
+        uri.host.isEmpty) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Imagen de notificación inválida: $rawUrl');
+      }
+      return null;
+    }
+
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 5);
+
+    try {
+      final request = await client.getUrl(uri).timeout(
+            const Duration(seconds: 7),
+          );
+      request.headers.set('User-Agent', 'MundiCam-App/notification-image');
+
+      final response = await request.close().timeout(
+            const Duration(seconds: 7),
+          );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (kDebugMode) {
+          debugPrint(
+            '⚠️ Imagen push HTTP ${response.statusCode}: $rawUrl',
+          );
+        }
+        return null;
+      }
+
+      const maxImageBytes = 8 * 1024 * 1024;
+      if (response.contentLength > maxImageBytes) {
+        if (kDebugMode) {
+          debugPrint('⚠️ Imagen push demasiado grande: $rawUrl');
+        }
+        return null;
+      }
+
+      final bytes = <int>[];
+      await for (final chunk
+          in response.timeout(const Duration(seconds: 10))) {
+        bytes.addAll(chunk);
+        if (bytes.length > maxImageBytes) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Imagen push supera 8 MB: $rawUrl');
+          }
+          return null;
+        }
+      }
+
+      if (bytes.isEmpty) return null;
+
+      var extension = 'jpg';
+      final mime = response.headers.contentType?.mimeType.toLowerCase() ?? '';
+      final path = uri.path.toLowerCase();
+
+      if (mime == 'image/png' || path.endsWith('.png')) {
+        extension = 'png';
+      } else if (mime == 'image/gif' || path.endsWith('.gif')) {
+        extension = 'gif';
+      } else if (mime == 'image/webp' || path.endsWith('.webp')) {
+        extension = 'webp';
+      }
+
+      final directory = Directory(
+        '${Directory.systemTemp.path}/mundicam_push_images',
+      );
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+
+      final file = File(
+        '${directory.path}/push_${_notificationId(notification)}.$extension',
+      );
+      await file.writeAsBytes(bytes, flush: true);
+
+      if (kDebugMode) {
+        debugPrint('🖼️ Imagen push preparada: ${file.path}');
+      }
+      return file.path;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo descargar imagen push: $e');
+      }
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   int _notificationId(MundiCamOrderNotification notification) {
     final orderId = notification.orderId;
@@ -693,9 +907,11 @@ class NotificationService {
   void _emitNotification(MundiCamOrderNotification notification) {
     if (kDebugMode) {
       debugPrint(
-        notification.isGeneralNotification
-            ? '📩 Notificación general: ${notification.title}'
-            : '📩 Notificación pedido: ${notification.title}',
+        notification.isPromotionNotification
+            ? '📩 Notificación promoción: ${notification.title}'
+            : notification.isGeneralNotification
+                ? '📩 Notificación general: ${notification.title}'
+                : '📩 Notificación pedido: ${notification.title}',
       );
       debugPrint('   Body: ${notification.body}');
       debugPrint('   Opened by user: ${notification.openedByUser}');
@@ -785,6 +1001,15 @@ class NotificationService {
   }
 
   Future<void> syncCurrentTokenWithBackend() async {
+    if (_tokenSyncInProgress) {
+      if (Platform.isIOS) {
+        _scheduleIosTokenRetry();
+      }
+      return;
+    }
+
+    _tokenSyncInProgress = true;
+
     try {
       String? apnsToken;
 
@@ -793,19 +1018,70 @@ class NotificationService {
         if ((apnsToken ?? '').isEmpty) {
           if (kDebugMode) {
             debugPrint(
-              '⚠️ APNs token no disponible todavía. FCM se reintentará al refrescar token.',
+              '⚠️ APNs token no disponible todavía. Se programará un nuevo intento de registro iOS.',
             );
           }
+          _scheduleIosTokenRetry();
           return;
         }
       }
 
       final token = await _messaging.getToken();
       if (kDebugMode) debugPrint('📱 FCM Token $_platform: $token');
+
+      if ((token ?? '').trim().isEmpty) {
+        if (Platform.isIOS) {
+          _scheduleIosTokenRetry();
+        }
+        return;
+      }
+
       await _saveToken(token, apnsToken: apnsToken);
+
+      if (Platform.isIOS) {
+        _cancelIosTokenRetry();
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ No se pudo obtener/guardar token FCM: $e');
+      if (Platform.isIOS) {
+        _scheduleIosTokenRetry();
+      }
+    } finally {
+      _tokenSyncInProgress = false;
     }
+  }
+
+  void _scheduleIosTokenRetry() {
+    if (!Platform.isIOS) return;
+    if (_iosTokenRetryTimer?.isActive ?? false) return;
+    if (_iosTokenRetryAttempt >= _maxIosTokenRetryAttempts) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ Registro FCM iOS pendiente tras $_maxIosTokenRetryAttempts reintentos. Se volverá a intentar en el próximo inicio/login.',
+        );
+      }
+      return;
+    }
+
+    _iosTokenRetryAttempt++;
+    final attempt = _iosTokenRetryAttempt;
+
+    if (kDebugMode) {
+      debugPrint(
+        '🍎 Programando reintento FCM iOS $attempt/$_maxIosTokenRetryAttempts en ${_iosTokenRetryDelay.inSeconds}s.',
+      );
+    }
+
+    _iosTokenRetryTimer = Timer(_iosTokenRetryDelay, () {
+      _iosTokenRetryTimer = null;
+      unawaited(syncCurrentTokenWithBackend());
+    });
+  }
+
+  void _cancelIosTokenRetry() {
+    _iosTokenRetryTimer?.cancel();
+    _iosTokenRetryTimer = null;
+    _iosTokenRetryAttempt = 0;
   }
 
   Future<String?> _waitForApnsToken() async {
@@ -876,6 +1152,9 @@ class NotificationService {
   }
 
   Future<void> clearDeviceRegistration() async {
+    _cancelIosTokenRetry();
+    _tokenSyncInProgress = false;
+
     final prefs = await SharedPreferences.getInstance();
     final storedToken = prefs.getString(_lastFcmTokenPrefsKey)?.trim() ?? '';
 

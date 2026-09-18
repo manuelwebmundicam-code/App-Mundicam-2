@@ -24,6 +24,7 @@ import 'package:mundicam/features/catalog/presentation/providers/category_provid
 import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/features/catalog/presentation/providers/products_paginated_provider.dart';
 import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.dart';
+import 'package:mundicam/features/catalog/presentation/widgets/cross_sell_widgets.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 
@@ -274,6 +275,13 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       } else {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
+
+          // Aunque el filtro de marca ya venga preparado desde Marcas ->
+          // Categorías, el provider está cacheado por categoryId y puede contener
+          // la última marca que abrió esa misma categoría. Vaciamos el estado y
+          // recargamos SIEMPRE con la marca actual para impedir cruces Dahua /
+          // Hikvision / HiWatch / cualquier otra marca.
+          _reloadCurrentCategory(scrollTop: false);
           _prewarmCategorySearchCache();
         });
       }
@@ -531,7 +539,15 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   String _suggestionsCacheKey(String query) {
-    return 'search_suggestions|cat:${_activeCatalogCategoryId}|name:${_activeCatalogCategoryName.toLowerCase().trim()}|q:${query.toLowerCase().trim()}';
+    final filters = ref.read(productFilterProvider);
+    final effectiveBrandId = _isBrandContext
+        ? (_brandContextId ?? 0)
+        : (filters.brandId ?? 0);
+    final effectiveBrandName = _isBrandContext
+        ? _brandContextName
+        : filters.brand.trim();
+
+    return 'search_suggestions|cat:${_activeCatalogCategoryId}|name:${_activeCatalogCategoryName.toLowerCase().trim()}|brandId:$effectiveBrandId|brand:${effectiveBrandName.toLowerCase().trim()}|q:${query.toLowerCase().trim()}';
   }
 
   List<_CatalogSearchSuggestion>? _readSuggestionsCache(String key) {
@@ -651,9 +667,22 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
           ? const Duration(milliseconds: 900)
           : const Duration(milliseconds: 1400);
 
+      final activeFilters = ref.read(productFilterProvider);
+      final lockedBrandId = _isBrandContext
+          ? _brandContextId
+          : activeFilters.brandId;
+      final lockedBrandName = _isBrandContext
+          ? _brandContextName
+          : activeFilters.brand.trim();
+      final hasLockedBrand = (lockedBrandId ?? 0) > 0 ||
+          lockedBrandName.isNotEmpty;
+
       for (final term in searchTerms.take(3)) {
         try {
-          if (categoryId == null) {
+          // Si hay una marca activa (por navegación desde MARCAS o por filtro
+          // manual), no usamos buscarProductos(): es global y podría sugerir
+          // productos de otra marca. Sin marca activa conservamos el fallback.
+          if (categoryId == null && !hasLockedBrand) {
             final products = await ApiService()
                 .buscarProductos(term)
                 .timeout(const Duration(seconds: 5));
@@ -665,6 +694,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
           final result = await ApiService().getProductosCatalogoFiltrado(
             categoryId: categoryId,
+            brandId: lockedBrandId,
+            brandName: lockedBrandName.isEmpty ? null : lockedBrandName,
             search: term,
             page: 1,
             perPage: perPage,
@@ -2268,55 +2299,77 @@ class _CatalogControls extends StatelessWidget {
       ),
       child: Column(
         children: [
-          TextField(
-            controller: controller,
-            textInputAction: TextInputAction.search,
-            onChanged: onChanged,
-            onSubmitted: (_) => onSubmitted(),
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
+          Container(
+            height: 50,
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(17),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.16),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
             ),
-            decoration: InputDecoration(
-              hintText: 'Buscar SKU, producto o característica',
-              hintStyle: const TextStyle(
-                color: Color(0xFF8A94A6),
-                fontSize: 13,
+            child: TextField(
+              controller: controller,
+              textInputAction: TextInputAction.search,
+              onChanged: onChanged,
+              onSubmitted: (_) => onSubmitted(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontFamily: 'Oswald',
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(
-                Icons.search_rounded,
-                color: AppColors.primary,
-              ),
-              suffixIcon: controller.text.trim().isNotEmpty
-                  ? IconButton(
-                icon: const Icon(Icons.close_rounded),
-                onPressed: onClearSearch,
-              )
-                  : IconButton(
-                icon: const Icon(Icons.arrow_forward_rounded),
-                onPressed: onSubmitted,
-              ),
-              filled: true,
-              fillColor: const Color(0xFFF8F9FB),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: Color(0xFFE1E4EA)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: Color(0xFFE1E4EA)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(
-                  color: AppColors.primary,
-                  width: 1.4,
+              decoration: InputDecoration(
+                hintText: 'Buscar SKU, producto o característica',
+                hintStyle: TextStyle(
+                  color: Colors.white.withOpacity(0.78),
+                  fontFamily: 'Oswald',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+                suffixIcon: controller.text.trim().isNotEmpty
+                    ? IconButton(
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
+                  onPressed: onClearSearch,
+                )
+                    : IconButton(
+                  icon: const Icon(
+                    Icons.arrow_forward_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                  onPressed: onSubmitted,
+                ),
+                filled: true,
+                fillColor: Colors.transparent,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(17),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(17),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(17),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 4,
                 ),
               ),
             ),
@@ -3687,6 +3740,20 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                               height: 1.17,
                             ),
                           ),
+                          if (widget.p.sku.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'REF: ${widget.p.sku.trim()}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 10.6,
+                                color: Color(0xFF667085),
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.15,
+                              ),
+                            ),
+                          ],
                           if (canViewStockDetails) ...[
                             const SizedBox(height: 6),
                             _StockDetailsText(
@@ -3763,26 +3830,73 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                             ),
                           ],
                           const SizedBox(height: 10),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Text(
-                                _formatearPrecioCompleto(precio),
-                                style: TextStyle(
-                                  fontSize: precio > 0 ? 22 : 18,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.primary,
-                                  fontFamily: 'Oswald',
-                                  height: 1,
+                          LayoutBuilder(
+                            builder: (context, priceConstraints) {
+                              final compactPriceRow =
+                                  priceConstraints.maxWidth < 300;
+
+                              final priceWidget = FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  _formatearPrecioCompleto(precio),
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    fontSize: precio > 0 ? 22 : 18,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.primary,
+                                    fontFamily: 'Oswald',
+                                    height: 1,
+                                  ),
                                 ),
-                              ),
-                              const Spacer(),
-                              _stockChip(),
-                              if (_tieneStock && !_bajoConsulta) ...[
-                                const SizedBox(width: 6),
-                                _shippingChip(),
-                              ],
-                            ],
+                              );
+
+                              final chips = <Widget>[
+                                _stockChip(),
+                                if (_tieneStock && !_bajoConsulta)
+                                  _shippingChip(),
+                              ];
+
+                              if (compactPriceRow) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: priceWidget,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 7),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 5,
+                                      children: chips,
+                                    ),
+                                  ],
+                                );
+                              }
+
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: priceWidget,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 5,
+                                    children: chips,
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ],
                       ),
@@ -3800,7 +3914,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                       height: 44,
                       child: ElevatedButton.icon(
                         onPressed: _puedeComprar
-                            ? () {
+                            ? () async {
                           final qty = _cantidadSegura;
                           ref
                               .read(cartProvider.notifier)
@@ -3815,6 +3929,13 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                               duration: const Duration(seconds: 1),
                               behavior: SnackBarBehavior.floating,
                             ),
+                          );
+
+                          await showMundicamCrossSellSheet(
+                            context: context,
+                            ref: ref,
+                            sourceProduct: widget.p,
+                            onGoCart: widget.onGoCart,
                           );
                         }
                             : null,
@@ -4246,6 +4367,170 @@ class _StockDetailsText extends StatelessWidget {
   }
 }
 
+
+class _ProductBrandLogo extends StatelessWidget {
+  final Product product;
+
+  const _ProductBrandLogo({
+    required this.product,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final brand = product.brandName?.trim() ?? '';
+    final assetPath = _productBrandAssetPath(brand);
+
+    if (brand.isEmpty || assetPath == null || assetPath.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      width: 100,
+      height: 30,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: 100,
+            maxHeight: 30,
+            minHeight: 28,
+          ),
+          child: Image.asset(
+            assetPath,
+            fit: BoxFit.contain,
+            alignment: Alignment.center,
+            filterQuality: FilterQuality.high,
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _productBrandKey(String value) {
+  return value
+      .toLowerCase()
+      .trim()
+      .replaceAll('á', 'a')
+      .replaceAll('à', 'a')
+      .replaceAll('ä', 'a')
+      .replaceAll('â', 'a')
+      .replaceAll('é', 'e')
+      .replaceAll('è', 'e')
+      .replaceAll('ë', 'e')
+      .replaceAll('ê', 'e')
+      .replaceAll('í', 'i')
+      .replaceAll('ì', 'i')
+      .replaceAll('ï', 'i')
+      .replaceAll('î', 'i')
+      .replaceAll('ó', 'o')
+      .replaceAll('ò', 'o')
+      .replaceAll('ö', 'o')
+      .replaceAll('ô', 'o')
+      .replaceAll('ú', 'u')
+      .replaceAll('ù', 'u')
+      .replaceAll('ü', 'u')
+      .replaceAll('û', 'u')
+      .replaceAll('ñ', 'n')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+}
+
+String _productCanonicalBrandKey(String value) {
+  final key = _productBrandKey(value);
+
+  if (key.contains('hiwatch')) return 'hiwatch';
+  if (key == 'hickvision') return 'hikvision';
+  if (key == 'ajaxsystem') return 'ajax';
+  if (key == 'tplinksystems') return 'tplink';
+  if (key == 'dmtechsecurity') return 'dmtech';
+  if (key == 'centuryc') return 'century';
+  if (key == 'visionic') return 'visonic';
+  if (key == 'secury360') return 'security360';
+  if (key == 'zkteko') return 'zkteco';
+  if (key == 'mci') return 'mci';
+  if (key == 'mcipro') return 'mcipro';
+  if (key == 'evolveextended' || key == 'evolve' || key == 'evolvextender' || key == 'evolvextendermobilesecuritybox') return 'evolveextended';
+  if (key == 'assaabloy' || key == 'tesaassaabloy') return 'tesaassaabloy';
+  if (key == 'uniview') return 'unv';
+  return key;
+}
+
+String? _productBrandAssetPath(String brandName) {
+  final key = _productCanonicalBrandKey(brandName);
+
+  const exact = <String, String>{
+    'ajax': 'assets/brands/Ajax_system.png',
+    'anviz': 'assets/brands/Anviz.png',
+    'aiscan': 'assets/brands/AISCAN.png',
+    'amc': 'assets/brands/AMC.png',
+    'assaabloy': 'assets/brands/Tesa-assa-abloy.webp',
+    'tesaassaabloy': 'assets/brands/Tesa-assa-abloy.webp',
+    'bewave': 'assets/brands/BEWAVE.png',
+    'byfog': 'assets/brands/BYFOG.png',
+    'century': 'assets/brands/CENTURY.png',
+    'dahua': 'assets/brands/Dahua.png',
+    'defendertech': 'assets/brands/defendertech.png',
+    'dji': 'assets/brands/DJI.png',
+    'dmtech': 'assets/brands/DMTECH.png',
+    'evolve': 'assets/brands/Evolve.png',
+    'evolveextended': 'assets/brands/Evolve.png',
+    'evolvextender': 'assets/brands/Evolve.png',
+    'ezviz': 'assets/brands/Ezviz.png',
+    'hectronica': 'assets/brands/HECTRONICA.png',
+    'hikvision': 'assets/brands/HIKVISION.png',
+    'hiwatch': 'assets/brands/HIWATCH.png',
+    'hysoon': 'assets/brands/HYSOON.png',
+    'imou': 'assets/brands/IMOU.png',
+    'ipcom': 'assets/brands/IPCOM.png',
+    'jadebird': 'assets/brands/Jade-bird.webp',
+    'johnsoncontrols': 'assets/brands/Johnson-Controls.png',
+    'ksenia': 'assets/brands/Ksenia.png',
+    'llenari': 'assets/brands/LLenari.png',
+    'mci': 'assets/brands/MCI.png',
+    'mcipro': 'assets/brands/MCI_pro.png',
+    'mobotix': 'assets/brands/MOBOTIX.png',
+    'optex': 'assets/brands/optex.png',
+    'paradox': 'assets/brands/Paradox.png',
+    'powersafe': 'assets/brands/POWER-SAFE.png',
+    'pyronix': 'assets/brands/pyronix.png',
+    'qolsys': 'assets/brands/Qolsys.png',
+    'rbtec': 'assets/brands/rbtec.png',
+    'satel': 'assets/brands/Satel.png',
+    'seagate': 'assets/brands/seagate.png',
+    'security360': 'assets/brands/SECURITY360.png',
+    'secury360': 'assets/brands/SECURITY360.png',
+    'softguard': 'assets/brands/SoftGuard.png',
+    'teletek': 'assets/brands/TELETEK.png',
+    'tenda': 'assets/brands/Tenda.png',
+    'toa': 'assets/brands/TOA.png',
+    'tplink': 'assets/brands/TPLINK.png',
+    'trikdis': 'assets/brands/trikdis.png',
+    'tvt': 'assets/brands/TVT.png',
+    'ubiquiti': 'assets/brands/Ubiquiti.png',
+    'uniarch': 'assets/brands/Uniarch.png',
+    'unv': 'assets/brands/UNV.png',
+    'urfog': 'assets/brands/Ur-Fog.png',
+    'vaelsys': 'assets/brands/vaelsys.png',
+    'videofied': 'assets/brands/videofied.png',
+    'visionaprotect': 'assets/brands/VISIONA_PROTECT.png',
+    'visonic': 'assets/brands/Visionic.png',
+    'westerndigital': 'assets/brands/western-digital.png',
+    'wisim': 'assets/brands/WISIM.png',
+    'yale': 'assets/brands/Yale.png',
+    'zkteco': 'assets/brands/Zkteco.png',
+    'zte': 'assets/brands/zte.png',
+  };
+
+  if (exact.containsKey(key)) return exact[key];
+
+  for (final entry in exact.entries) {
+    if (key.contains(entry.key) || entry.key.contains(key)) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
 class ProductImage extends StatelessWidget {
   final Product p;
   final FirebaseService firebase;
@@ -4258,37 +4543,51 @@ class ProductImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 96,
-      height: 96,
-      padding: const EdgeInsets.all(7),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: ColoredBox(
-          color: Colors.white,
-          child: CachedNetworkImage(
-            imageUrl: p.imageUrl,
-            fit: BoxFit.contain,
-            cacheManager: ImageCacheService.cacheManager,
-            memCacheWidth: 192,
-            memCacheHeight: 192,
-            cacheKey: p.imageUrl,
-            placeholder: (_, _) => const ColoredBox(color: Colors.white),
-            errorWidget: (_, _, _) => const Icon(
-              Icons.broken_image,
-              color: Colors.grey,
-              size: 30,
+    final hasBrand = (p.brandName?.trim() ?? '').isNotEmpty;
+
+    return SizedBox(
+      width: 100,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
             ),
-            fadeOutDuration: const Duration(milliseconds: 150),
-            fadeInDuration: const Duration(milliseconds: 150),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: ColoredBox(
+                color: Colors.white,
+                child: CachedNetworkImage(
+                  imageUrl: p.imageUrl,
+                  fit: BoxFit.contain,
+                  cacheManager: ImageCacheService.cacheManager,
+                  memCacheWidth: 192,
+                  memCacheHeight: 192,
+                  cacheKey: p.imageUrl,
+                  placeholder: (_, _) =>
+                      const ColoredBox(color: Colors.white),
+                  errorWidget: (_, _, _) => const Icon(
+                    Icons.broken_image,
+                    color: Colors.grey,
+                    size: 30,
+                  ),
+                  fadeOutDuration: const Duration(milliseconds: 150),
+                  fadeInDuration: const Duration(milliseconds: 150),
+                ),
+              ),
+            ),
           ),
-        ),
+          if (hasBrand) ...[
+            const SizedBox(height: 2),
+            _ProductBrandLogo(product: p),
+          ],
+        ],
       ),
     );
   }
 }
-

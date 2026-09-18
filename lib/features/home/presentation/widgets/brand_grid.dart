@@ -84,9 +84,28 @@ FutureProvider<Map<String, String>>((ref) async {
       continue;
     }
 
+    // UNV tiene varias imágenes históricas que canonicalizan a la misma clave.
+    // Priorizamos siempre el fichero exacto UNV.png para que el orden del
+    // AssetManifest no seleccione una variante antigua.
+    if (canonical == 'unv') {
+      final rawKey = _brandKey(baseName);
+
+      if (rawKey == 'unv' || !assets.containsKey('unv')) {
+        assets['unv'] = path;
+      }
+
+      continue;
+    }
+
+    if (canonical == 'vaelsys') {
+      // Conservamos siempre la ruta real que Flutter ha empaquetado.
+      assets['vaelsys'] = path;
+      continue;
+    }
+
     assets.putIfAbsent(
       canonical,
-          () => path,
+      () => path,
     );
   }
 
@@ -234,7 +253,11 @@ class _BrandCard extends StatelessWidget {
         brand['name']?.toString().trim() ?? '';
 
     final imageUrl =
-        brand['image']?.toString().trim() ?? '';
+        brand['image_full']?.toString().trim().isNotEmpty == true
+            ? brand['image_full']!.toString().trim()
+            : (brand['image']?.toString().trim().isNotEmpty == true
+                ? brand['image']!.toString().trim()
+                : (brand['image_thumbnail']?.toString().trim() ?? ''));
 
     final assetPath =
     _brandAssetPath(
@@ -401,8 +424,9 @@ Size _brandVisualSize(String brandName) {
       key == 'paradox' ||
       key == 'mobotix' ||
       key == 'visonic' ||
-      key == 'zkteco') {
-    return const Size(0.84, 0.68);
+      key == 'zkteco' ||
+      key == 'hiwatch') {
+    return const Size(0.86, 0.70);
   }
 
   // Tamaño estándar para el resto.
@@ -461,6 +485,19 @@ String _canonicalBrandKey(
   final key =
   _brandKey(value);
 
+  // Hikvision y HiWatch son familias distintas en MundiCam.
+  // Si WooCommerce/API devuelve variantes como "HiWatch by Hikvision" o
+  // "Hikvision HiWatch", deben usar siempre el asset HIWATCH.png y NO
+  // canonicalizarse como Hikvision normal.
+  if (key == 'hiwatch' ||
+      key == 'hiwatchseries' ||
+      key == 'hiwatchbyhikvision' ||
+      key == 'hikvisionhiwatch' ||
+      key == 'hikvisionhiwatchseries' ||
+      key.contains('hiwatch')) {
+    return 'hiwatch';
+  }
+
   if (key == 'hickvision') {
     return 'hikvision';
   }
@@ -501,8 +538,11 @@ String _canonicalBrandKey(
     return 'zkteco';
   }
 
-  if (key == 'mci' ||
-      key == 'mcipro') {
+  if (key == 'mci') {
+    return 'mci';
+  }
+
+  if (key == 'mcipro') {
     return 'mcipro';
   }
 
@@ -560,10 +600,8 @@ int _brandPriority(
       'evolveextended',
       'evolve'
     ],
-    [
-      'mcipro',
-      'mci'
-    ],
+    ['mcipro'],
+    ['mci'],
   ];
 
   for (var index = 0;
@@ -590,13 +628,37 @@ String? _brandAssetPath(
     ) {
   final rawKey = _brandKey(name);
 
-  // UNV se fuerza a un nombre de asset NUEVO y único.
-  // Evita cualquier colisión con el antiguo assets/brands/UNV.png,
-  // con el manifiesto o con la imagen remota de WooCommerce.
+  // UNV: usar primero el asset REAL descubierto en el AssetManifest.
+  // El paquete consolidado actual usa UNV.png.
   if (rawKey == 'unv' ||
       rawKey.startsWith('unv') ||
       rawKey.startsWith('uniview')) {
-    return 'assets/brands/UNV_TECHNOLOGY.png';
+    final discoveredUnv = discoveredAssets['unv'];
+    if (discoveredUnv != null && discoveredUnv.isNotEmpty) {
+      return discoveredUnv;
+    }
+    return 'assets/brands/UNV.png';
+  }
+
+  // HiWatch: es una marca/familia distinta de Hikvision normal.
+  // Evitamos que una imagen de WordPress de Hikvision normal pise el asset
+  // local correcto de HiWatch.
+  if (rawKey.contains('hiwatch')) {
+    final discoveredHiWatch = discoveredAssets['hiwatch'];
+    if (discoveredHiWatch != null && discoveredHiWatch.isNotEmpty) {
+      return discoveredHiWatch;
+    }
+    return 'assets/brands/HIWATCH.png';
+  }
+
+  // VAELSYS: misma protección. Usamos la ruta real descubierta para evitar
+  // problemas de mayúsculas/minúsculas o sustituciones de la imagen.
+  if (rawKey == 'vaelsys') {
+    final discoveredVaelsys = discoveredAssets['vaelsys'];
+    if (discoveredVaelsys != null && discoveredVaelsys.isNotEmpty) {
+      return discoveredVaelsys;
+    }
+    return 'assets/brands/vaelsys.png';
   }
 
   final canonical =
@@ -630,8 +692,13 @@ String? _brandAssetPath(
     'ezviz': 'assets/brands/Ezviz.png',
     'hikvision': 'assets/brands/HIKVISION.png',
     'hickvision': 'assets/brands/HIKVISION.png',
+    'hiwatch': 'assets/brands/HIWATCH.png',
+    'hiwatchseries': 'assets/brands/HIWATCH.png',
+    'hiwatchbyhikvision': 'assets/brands/HIWATCH.png',
+    'hikvisionhiwatch': 'assets/brands/HIWATCH.png',
+    'hikvisionhiwatchseries': 'assets/brands/HIWATCH.png',
     'mci': 'assets/brands/MCI.png',
-    'mcipro': 'assets/brands/MCI.png',
+    'mcipro': 'assets/brands/MCI_pro.png',
     'mobotix': 'assets/brands/MOBOTIX.png',
     'optex': 'assets/brands/optex.png',
     'paradox': 'assets/brands/Paradox.png',
@@ -641,7 +708,7 @@ String? _brandAssetPath(
     'security360': 'assets/brands/SECURITY360.png',
     'teletek': 'assets/brands/TELETEK.png',
     'tplink': 'assets/brands/TPLINK.png',
-    'trikdis': 'assets/brands/trikdis.webp',
+    'trikdis': 'assets/brands/trikdis.png',
     'yale': 'assets/brands/Yale.png',
     'zkteco': 'assets/brands/Zkteco.png',
     'zkteko': 'assets/brands/Zkteco.png',

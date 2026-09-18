@@ -7,25 +7,36 @@ class HomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final logoHeight = (screenWidth * 0.108).clamp(42.0, 58.0).toDouble();
+    final logoMaxWidth = (screenWidth * 0.52).clamp(160.0, 260.0).toDouble();
+    final headerHeight = (logoHeight + 28).clamp(78.0, 94.0).toDouble();
+
     return Container(
-      height: 78,
+      height: headerHeight,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       decoration: const BoxDecoration(
         color: Colors.white,
       ),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: () =>
-                Navigator.of(context).popUntil((route) => route.isFirst),
-            child: Image.asset(
-              'assets/logo.png',
-              height: 34,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => const Icon(
-                Icons.security_rounded,
-                size: 30,
-                color: AppColors.primary,
+          Flexible(
+            child: GestureDetector(
+              onTap: () =>
+                  Navigator.of(context).popUntil((route) => route.isFirst),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: logoMaxWidth),
+                child: Image.asset(
+                  'assets/logo.png',
+                  height: logoHeight,
+                  fit: BoxFit.contain,
+                  alignment: Alignment.centerLeft,
+                  errorBuilder: (context, error, stackTrace) => const Icon(
+                    Icons.security_rounded,
+                    size: 30,
+                    color: AppColors.primary,
+                  ),
+                ),
               ),
             ),
           ),

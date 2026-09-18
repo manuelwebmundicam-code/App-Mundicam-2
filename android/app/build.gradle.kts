@@ -16,6 +16,12 @@ if (keystorePropertiesFile.exists()) {
     }
 }
 
+// Solo exigimos la firma de producción cuando realmente
+// se está compilando una variante Release.
+val isReleaseBuild = gradle.startParameter.taskNames.any { taskName ->
+    taskName.contains("release", ignoreCase = true)
+}
+
 android {
     namespace = "com.mundicam.securitydistribution"
 
@@ -46,38 +52,43 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            val storeFilePath = keystoreProperties.getProperty("storeFile")
-                ?: throw GradleException(
-                    "Falta storeFile en android/key.properties"
-                )
+        if (isReleaseBuild) {
+            create("release") {
+                val storeFilePath = keystoreProperties.getProperty("storeFile")
+                    ?: throw GradleException(
+                        "Falta storeFile en android/key.properties"
+                    )
 
-            keyAlias = keystoreProperties.getProperty("keyAlias")
-                ?: throw GradleException(
-                    "Falta keyAlias en android/key.properties"
-                )
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                    ?: throw GradleException(
+                        "Falta keyAlias en android/key.properties"
+                    )
 
-            keyPassword = keystoreProperties.getProperty("keyPassword")
-                ?: throw GradleException(
-                    "Falta keyPassword en android/key.properties"
-                )
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                    ?: throw GradleException(
+                        "Falta keyPassword en android/key.properties"
+                    )
 
-            storePassword = keystoreProperties.getProperty("storePassword")
-                ?: throw GradleException(
-                    "Falta storePassword en android/key.properties"
-                )
+                storePassword = keystoreProperties.getProperty("storePassword")
+                    ?: throw GradleException(
+                        "Falta storePassword en android/key.properties"
+                    )
 
-            storeFile = file(storeFilePath)
+                storeFile = file(storeFilePath)
+            }
         }
     }
 
     buildTypes {
         getByName("debug") {
-            // La compilación debug mantiene la firma automática de Android.
+            // Debug utiliza la firma automática estándar de Android.
+            // No necesita android/key.properties.
         }
 
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            if (isReleaseBuild) {
+                signingConfig = signingConfigs.getByName("release")
+            }
 
             // Por ahora no activamos minificación para evitar romper
             // Firebase, notificaciones o clases utilizadas dinámicamente.

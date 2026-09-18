@@ -44,6 +44,34 @@ class CartItem {
   }
 }
 
+class CartCouponState {
+  final CouponValidationResult? result;
+  final String cartSignature;
+
+  const CartCouponState({
+    this.result,
+    this.cartSignature = '',
+  });
+
+  bool matches(List<CartItem> items) {
+    return result?.success == true &&
+        cartSignature.isNotEmpty &&
+        cartSignature == cartItemsSignature(items);
+  }
+}
+
+String cartItemsSignature(Iterable<CartItem> items) {
+  final rows = items
+      .map((item) => '${item.product.id}:${item.quantity}')
+      .toList()
+    ..sort();
+  return rows.join('|');
+}
+
+final cartCouponProvider = StateProvider<CartCouponState>(
+  (ref) => const CartCouponState(),
+);
+
 class CartNotifier extends StateNotifier<List<CartItem>> {
   static const String _sourceTypeKey = 'mundicam_cart_source_type';
   static const String _sourceQuoteIdKey = 'mundicam_cart_source_quote_id';
@@ -53,8 +81,19 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   int _sourceQuoteId = 0;
   String _sourceLocalQuoteUuid = '';
 
+  bool _remoteSyncInProgress = false;
+  bool _localStateLoaded = false;
+
   CartNotifier() : super([]) {
-    _loadCart();
+    unawaited(_initializeCart());
+  }
+
+  Future<void> _initializeCart() async {
+    await _loadCart();
+    _localStateLoaded = true;
+    if (!hasQuoteSource) {
+      await syncFromRemoteCart();
+    }
   }
 
   Future<void> _saveCart() async {
@@ -112,6 +151,58 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
       debugPrint('❌ Error cargando carrito: $e');
       state = [];
     }
+  }
+
+  /// Sincroniza el carrito persistente del usuario autenticado con Flutter.
+  ///
+  /// No se ejecuta sobre un carrito procedente de presupuesto para no perder
+  /// su origen ni los precios aprobados. Si el endpoint falla, se conserva el
+  /// carrito local actual y no se bloquea la compra.
+  Future<bool> syncFromRemoteCart() async {
+    if (!_localStateLoaded || _remoteSyncInProgress || hasQuoteSource) {
+      return false;
+    }
+
+    _remoteSyncInProgress = true;
+    try {
+      final rawItems = await ApiService().getRemoteCartItems();
+      if (rawItems == null) return false;
+
+      final remoteItems = <CartItem>[];
+      for (final raw in rawItems) {
+        final productId = _parseRemoteInt(
+          raw['product_id'] ?? raw['id'],
+        );
+        final quantity = _parseRemoteInt(raw['quantity'], fallback: 1);
+        if (productId <= 0 || quantity <= 0) continue;
+
+        final productJson = <String, dynamic>{
+          ...raw,
+          'id': productId,
+        };
+        final product = Product.fromJson(productJson);
+        if (product.id <= 0 || !product.canAddToCart) continue;
+
+        remoteItems.add(CartItem(product: product, quantity: quantity));
+      }
+
+      state = remoteItems;
+      await _saveCart();
+
+      if (kDebugMode) {
+        debugPrint('✅ Carrito Web ↔ App sincronizado: ${remoteItems.length} líneas');
+      }
+      return true;
+    } finally {
+      _remoteSyncInProgress = false;
+    }
+  }
+
+  static int _parseRemoteInt(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    final raw = value?.toString().trim() ?? '';
+    return int.tryParse(raw) ?? double.tryParse(raw)?.toInt() ?? fallback;
   }
 
   int get sourceQuoteId => _sourceType == 'web_quote' ? _sourceQuoteId : 0;
@@ -232,17 +323,19 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
       ),
     );
 
-    // Sincronización ligera con el carrito persistente del plugin nuevo.
-    // Si falla no bloquea el carrito local ni la experiencia de compra.
-    ApiService()
-        .addProductToRemoteCart(productId: product.id, quantity: safeQty)
-        .then((ok) {
-      if (kDebugMode) {
-        debugPrint(ok
-            ? '✅ Carrito remoto App API sincronizado'
-            : '⚠️ Carrito remoto App API no sincronizado');
-      }
-    });
+    // Un carrito recuperado desde presupuesto mantiene su flujo separado.
+    // No debe escribir en el carrito comercial normal compartido Web ↔ App.
+    if (!hasQuoteSource) {
+      ApiService()
+          .addProductToRemoteCart(productId: product.id, quantity: safeQty)
+          .then((ok) {
+        if (kDebugMode) {
+          debugPrint(ok
+              ? '✅ Carrito remoto App API sincronizado'
+              : '⚠️ Carrito remoto App API no sincronizado');
+        }
+      });
+    }
   }
 
   void removeProduct(int productId) {
@@ -258,6 +351,12 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     _saveCart();
 
     if (removedItem != null) {
+      if (!hasQuoteSource) {
+        unawaited(
+          ApiService().removeRemoteCartProduct(productId: productId),
+        );
+      }
+
       unawaited(
         MundicamAnalyticsService.instance.track(
           eventName: 'remove_from_cart',
@@ -303,6 +402,15 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
     _saveCart();
 
+    if (!hasQuoteSource) {
+      unawaited(
+        ApiService().updateRemoteCartProduct(
+          productId: productId,
+          quantity: newQty,
+        ),
+      );
+    }
+
     if (previousItem != null && previousItem.product.canAddToCart) {
       final delta = newQty - previousItem.quantity;
       if (delta != 0) {
@@ -325,17 +433,23 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
   }
 
   Future<void> clearCart() async {
+    // Capturamos el origen antes de borrarlo: vaciar un carrito de presupuesto
+    // no puede borrar el carrito comercial normal compartido con la web.
+    final shouldClearRemoteCart = !hasQuoteSource;
+
     state = [];
     await _saveCart();
     await clearQuoteSource();
 
-    ApiService().clearRemoteCart().then((ok) {
-      if (kDebugMode) {
-        debugPrint(ok
-            ? '✅ Carrito remoto App API vaciado'
-            : '⚠️ Carrito remoto App API no vaciado');
-      }
-    });
+    if (shouldClearRemoteCart) {
+      ApiService().clearRemoteCart().then((ok) {
+        if (kDebugMode) {
+          debugPrint(ok
+              ? '✅ Carrito remoto App API vaciado'
+              : '⚠️ Carrito remoto App API no vaciado');
+        }
+      });
+    }
   }
 
   /// Base imponible del carrito.

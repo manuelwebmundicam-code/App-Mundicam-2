@@ -12,6 +12,7 @@ import 'package:mundicam/firebase_options.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 import 'package:mundicam/core/cache/category_cache_service.dart';
 import 'package:mundicam/core/cache/storage_cache_service.dart';
+import 'package:mundicam/core/cache/home_warmup_state.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
@@ -71,6 +72,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 final _mundicamAnalyticsLifecycleObserver =
     _MundicamAnalyticsLifecycleObserver();
 
+StreamSubscription<dynamic>? _remoteConfigUpdateSubscription;
+
 class _MundicamAnalyticsLifecycleObserver with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -78,8 +81,9 @@ class _MundicamAnalyticsLifecycleObserver with WidgetsBindingObserver {
   }
 }
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await HomeWarmupState.initialize();
   WidgetsBinding.instance.addObserver(_mundicamAnalyticsLifecycleObserver);
   unawaited(MundicamAnalyticsService.instance.bootstrap());
 
@@ -189,6 +193,28 @@ Future<void> _postRunAppBootstrap() async {
       );
 
       await ForceUpdateService.instance.evaluate(remoteConfig);
+
+      // Observador en tiempo real: si se cambia la versión mínima o el
+      // interruptor de actualización en Firebase, la app vuelve a evaluar
+      // el bloqueo sin necesidad de reiniciarse. activate() aplica los
+      // valores recibidos y ForceUpdateGate reacciona vía ValueNotifier.
+      _remoteConfigUpdateSubscription ??= remoteConfig.onConfigUpdated.listen(
+        (_) async {
+          try {
+            await remoteConfig.activate();
+            await ForceUpdateService.instance.evaluate(remoteConfig);
+            debugPrint('✅ Remote Config actualizado y reevaluado');
+          } catch (e) {
+            // Fail-open: un problema de Remote Config nunca debe bloquear
+            // accidentalmente la aplicación.
+            debugPrint('⚠️ No se pudo reevaluar Remote Config en tiempo real: $e');
+          }
+        },
+        onError: (Object error) {
+          debugPrint('⚠️ Observador Remote Config no crítico: $error');
+        },
+      );
+
       debugPrint('✅ Remote Config inicializado correctamente');
     } catch (e) {
       debugPrint('⚠️ Remote Config no crítico: $e');
@@ -234,13 +260,15 @@ Future<void> _precargarDatos() async {
     if (cache.getCachedCategories() == null) {
       debugPrint('📦 Precargando categorías App API...');
 
-      final categorias = await apiService.getCategorias();
+      final categorias = await apiService.getCategorias(parentOnly: true);
+      final categoriasPrincipales =
+          categorias.where((c) => c.parent == 0).toList();
 
-      cache.cacheCategories(categorias);
+      cache.cacheCategories(categoriasPrincipales);
 
       await StorageCacheService.cacheData(
         'categorias',
-        categorias.map((c) {
+        categoriasPrincipales.map((c) {
           return {
             'id': c.id,
             'name': c.name,
@@ -251,7 +279,9 @@ Future<void> _precargarDatos() async {
         }).toList(),
       );
 
-      debugPrint('✅ Categorías precargadas: ${categorias.length}');
+      debugPrint(
+        '✅ Categorías principales precargadas: ${categoriasPrincipales.length}',
+      );
     } else {
       debugPrint('📦 Categorías ya en caché');
     }
@@ -349,7 +379,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
 
     try {
       ref.read(categoriesProvider.future);
-      ref.read(academyProvider.future);
+      ref.read(academyProvider.notifier);
     } catch (_) {}
 
     return true;

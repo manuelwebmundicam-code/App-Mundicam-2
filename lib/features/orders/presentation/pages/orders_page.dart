@@ -38,6 +38,15 @@ class OrdersPage extends ConsumerStatefulWidget {
 }
 
 class _OrdersPageState extends ConsumerState<OrdersPage> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _handleBack(BuildContext context) {
     if (widget.onGoHome != null) {
       widget.onGoHome!();
@@ -85,26 +94,184 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
         data: (orders) {
           if (orders.isEmpty) return _buildEmptyState(context);
 
+          final filteredOrders = _filterOrders(orders, _searchQuery);
+
           return Column(
             children: [
               _OrdersSummaryHeader(count: orders.length),
+              _buildSearchField(),
               Expanded(
                 child: RefreshIndicator(
                   color: AppColors.primary,
                   onRefresh: _refreshOrders,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: orders.length,
-                    itemBuilder: (context, index) =>
-                        _buildOrderCard(context, orders[index]),
-                  ),
+                  child: filteredOrders.isEmpty && _searchQuery.trim().isNotEmpty
+                      ? _buildNoSearchResults()
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemCount: filteredOrders.length,
+                          itemBuilder: (context, index) =>
+                              _buildOrderCard(context, filteredOrders[index]),
+                        ),
                 ),
               ),
             ],
           );
         },
       ),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Container(
+        height: 50,
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(17),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withOpacity(0.16),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: TextField(
+          controller: _searchController,
+          textInputAction: TextInputAction.search,
+          onChanged: (value) => setState(() => _searchQuery = value),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontFamily: 'Oswald',
+            fontWeight: FontWeight.w600,
+          ),
+          decoration: InputDecoration(
+            hintText: 'Buscar por nº de serie, SKU o pedido',
+            hintStyle: TextStyle(
+              color: Colors.white.withOpacity(0.78),
+              fontFamily: 'Oswald',
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+            prefixIcon: const Icon(
+              Icons.search_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+            suffixIcon: _searchQuery.trim().isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Limpiar búsqueda',
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() => _searchQuery = '');
+                    },
+                    icon: const Icon(
+                      Icons.clear_rounded,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                  ),
+            filled: true,
+            fillColor: Colors.transparent,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(17),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(17),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(17),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 14,
+              horizontal: 4,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<OrderMundicam> _filterOrders(
+    List<OrderMundicam> orders,
+    String rawQuery,
+  ) {
+    final query = rawQuery.trim().toLowerCase();
+    if (query.isEmpty) return orders;
+
+    final queryWithoutHash = query.replaceAll('#', '').trim();
+    final compactQuery = _compactSearchValue(queryWithoutHash);
+
+    bool contains(String value) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized.isEmpty) return false;
+      if (normalized.contains(query) || normalized.contains(queryWithoutHash)) {
+        return true;
+      }
+
+      if (compactQuery.isEmpty) return false;
+      return _compactSearchValue(normalized).contains(compactQuery);
+    }
+
+    return orders.where((order) {
+      if (contains(order.id.toString()) || contains(order.number)) {
+        return true;
+      }
+
+      for (final item in order.items) {
+        if (contains(item.sku) || contains(item.name)) return true;
+        for (final serial in item.serialNumbers) {
+          if (contains(serial)) return true;
+        }
+      }
+
+      return false;
+    }).toList();
+  }
+
+  String _compactSearchValue(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  Widget _buildNoSearchResults() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(24, 42, 24, 24),
+      children: [
+        Icon(
+          Icons.manage_search_rounded,
+          size: 52,
+          color: Colors.grey.shade400,
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'No encontramos ningún pedido',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Oswald',
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+            color: _dark,
+          ),
+        ),
+        const SizedBox(height: 7),
+        const Text(
+          'Prueba con el número de pedido, SKU, nombre del producto o número de serie.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: _muted,
+            fontSize: 12.5,
+            height: 1.4,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1554,6 +1721,27 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                             ),
                             const SizedBox(height: 5),
                           ],
+                          if (item.serialNumbers.isNotEmpty) ...[
+                            ...List.generate(item.serialNumbers.length, (serialIndex) {
+                              final serial = item.serialNumbers[serialIndex].trim();
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 3),
+                                child: Text(
+                                  item.serialNumbers.length == 1
+                                      ? 'SN: $serial'
+                                      : 'SN ${serialIndex + 1}: $serial',
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    color: Color(0xFF475467),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }),
+                            const SizedBox(height: 2),
+                          ],
                           Row(
                             children: [
                               Container(
@@ -1645,6 +1833,9 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                               lineItemId: item.lineItemId,
                               variationId: item.variationId,
                               maxQuantity: item.quantity > 0 ? item.quantity : 1,
+                              sku: sku.trim().isNotEmpty ? sku.trim() : item.sku,
+                              serialNumbers: item.serialNumbers,
+                              orderDate: currentOrder.dateCreated,
                               onGoRma: widget.onGoRma,
                             ),
                           ),
@@ -1728,6 +1919,7 @@ class _PedidoProducto {
   final double total;
   final double taxTotal;
   final String sku;
+  final List<String> serialNumbers;
   final String imageUrl;
   final String permalink;
 
@@ -1742,6 +1934,7 @@ class _PedidoProducto {
     this.subtotal = 0,
     this.taxTotal = 0,
     this.sku = '',
+    this.serialNumbers = const <String>[],
     this.imageUrl = '',
     this.permalink = '',
   });
@@ -1764,6 +1957,7 @@ class _PedidoProducto {
     double? total,
     double? taxTotal,
     String? sku,
+    List<String>? serialNumbers,
     String? imageUrl,
     String? permalink,
   }) {
@@ -1778,6 +1972,7 @@ class _PedidoProducto {
       total: total ?? this.total,
       taxTotal: taxTotal ?? this.taxTotal,
       sku: sku ?? this.sku,
+      serialNumbers: serialNumbers ?? this.serialNumbers,
       imageUrl: imageUrl ?? this.imageUrl,
       permalink: permalink ?? this.permalink,
     );
@@ -1795,6 +1990,7 @@ class _PedidoProducto {
       total: item.total,
       taxTotal: item.taxTotal,
       sku: item.sku,
+      serialNumbers: item.serialNumbers,
       imageUrl: item.imageUrl,
       permalink: item.permalink,
     );
@@ -1829,6 +2025,7 @@ class _PedidoProducto {
             json['ref'] ??
             json['reference'],
       ),
+      serialNumbers: OrderItem.fromJson(json).serialNumbers,
       imageUrl: _extractImageUrl(json),
       permalink: _parseString(json['permalink'] ?? json['product_url']),
     );

@@ -1,36 +1,50 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
 
 class MundiCamWebViewPage extends StatefulWidget {
-  final String title;
-  final Uri initialUri;
-
   const MundiCamWebViewPage({
     super.key,
     required this.title,
-    required this.initialUri,
-  });
+    this.initialUri,
+    this.url,
+    this.focusRegistration = false,
+    this.closeOnBack = false,
+  }) : assert(
+          initialUri != null || url != null,
+          'Debe indicarse initialUri o url.',
+        );
+
+  final String title;
+  final Uri? initialUri;
+  final String? url;
+
+  /// Cuando se abre desde Academy, mantiene toda la navegación dentro
+  /// de la app y, al cargar la ficha del evento, baja hasta el formulario
+  /// de inscripción real de mundicam.com si está presente.
+  final bool focusRegistration;
+
+  /// Si es true, la flecha de atrás y el botón físico/gesto de atrás
+  /// cierran esta WebView y vuelven directamente a la pantalla Flutter
+  /// que la abrió, sin recorrer el historial interno de la web.
+  final bool closeOnBack;
+
+  Uri get resolvedInitialUri => initialUri ?? Uri.parse(url!);
 
   @override
   State<MundiCamWebViewPage> createState() => _MundiCamWebViewPageState();
 }
 
+// Alias de compatibilidad con la primera versión del widget.
+// Evita romper cualquier referencia que ya use MundicamWebViewPage.
+typedef MundicamWebViewPage = MundiCamWebViewPage;
+
 class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
-  static const Duration _loadTimeout = Duration(seconds: 18);
-
   late final WebViewController _controller;
-  Timer? _timeoutTimer;
-
-  int _progress = 0;
-  bool _isLoading = true;
-  bool _hasError = false;
-  String _errorMessage = '';
-  int _loadGeneration = 0;
+  int _loadingProgress = 0;
 
   @override
   void initState() {
@@ -41,336 +55,167 @@ class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
       ..setBackgroundColor(Colors.white)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (_) {
-            _beginLoading();
-          },
           onProgress: (progress) {
             if (!mounted) return;
-            setState(() {
-              _progress = progress.clamp(0, 100).toInt();
-            });
+            setState(() => _loadingProgress = progress);
           },
           onPageFinished: (_) {
-            unawaited(_handlePageFinished());
+            final normalizedTitle = widget.title.toUpperCase();
+            final shouldFocusRegistration = widget.focusRegistration ||
+                normalizedTitle.contains('INSCRIPCIÓN') ||
+                normalizedTitle.contains('INSCRIPCION');
+            if (shouldFocusRegistration) {
+              _focusRegistrationForm();
+            }
           },
-          onWebResourceError: (error) {
-            if (error.isForMainFrame != true) return;
-            _showLoadError(
-              error.description.trim().isEmpty
-                  ? 'La web de registro no respondió correctamente.'
-                  : error.description.trim(),
-            );
-          },
-          onNavigationRequest: (request) async {
+          onNavigationRequest: (request) {
             final uri = Uri.tryParse(request.url);
-            final scheme = uri?.scheme.toLowerCase() ?? '';
+            if (uri == null) {
+              return NavigationDecision.prevent;
+            }
 
-            if (scheme == 'http' || scheme == 'https') {
+            if (uri.scheme == 'http' || uri.scheme == 'https') {
+              // Academy, formularios de inscripción, registro y Noticias
+              // permanecen dentro de la app.
               return NavigationDecision.navigate;
             }
 
-            if (uri != null && await canLaunchUrl(uri)) {
-              await launchUrl(uri, mode: LaunchMode.externalApplication);
-            }
-
+            _openExternalScheme(uri);
             return NavigationDecision.prevent;
           },
         ),
-      );
-
-    _beginLoading();
-    unawaited(_controller.loadRequest(widget.initialUri));
+      )
+      ..loadRequest(widget.resolvedInitialUri);
   }
 
-  @override
-  void dispose() {
-    _timeoutTimer?.cancel();
-    super.dispose();
-  }
+  Future<void> _focusRegistrationForm() async {
+    if (!widget.focusRegistration) return;
 
-  void _beginLoading() {
-    _timeoutTimer?.cancel();
-    final int generation = ++_loadGeneration;
+    // La ficha Academy sigue siendo la web real de MundiCam, por lo que
+    // el formulario, validaciones, RGPD y confirmaciones continúan siendo
+    // responsabilidad de WordPress. Aquí solo llevamos al usuario hasta él.
+    await Future<void>.delayed(const Duration(milliseconds: 350));
 
-    if (mounted) {
-      setState(() {
-        _progress = 0;
-        _isLoading = true;
-        _hasError = false;
-        _errorMessage = '';
-      });
+    const script = r'''
+      (function () {
+        var selectors = [
+          '.wpcf7',
+          '.wpforms-container',
+          '.gform_wrapper',
+          '[id*="inscri"]',
+          '[class*="inscri"]'
+        ];
+
+        var target = null;
+
+        for (var i = 0; i < selectors.length; i++) {
+          target = document.querySelector(selectors[i]);
+          if (target) break;
+        }
+
+        if (!target) {
+          var candidates = Array.prototype.slice.call(
+            document.querySelectorAll(
+              'h1,h2,h3,h4,h5,strong,a,button,p'
+            )
+          );
+
+          var marker = candidates.find(function (element) {
+            var text = (element.innerText || '').trim().toLowerCase();
+            return text.indexOf('inscríb') >= 0 ||
+                   text.indexOf('inscrib') >= 0 ||
+                   text.indexOf('preinscr') >= 0 ||
+                   text.indexOf('reserva tu plaza') >= 0;
+          });
+
+          if (marker) {
+            var parent = marker.closest('section,article,div');
+            target = parent && parent.querySelector('form')
+              ? parent.querySelector('form')
+              : marker;
+          }
+        }
+
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+          window.setTimeout(function () {
+            window.scrollBy(0, -12);
+          }, 250);
+          return true;
+        }
+
+        return false;
+      })();
+    ''';
+
+    try {
+      await _controller.runJavaScript(script);
+    } catch (_) {
+      // Si la web cambia de maquetador, simplemente se mantiene la ficha
+      // completa navegable; nunca se bloquea la inscripción.
     }
-
-    _timeoutTimer = Timer(_loadTimeout, () {
-      if (!mounted || generation != _loadGeneration || !_isLoading) return;
-      _showLoadError(
-        'La página de registro está tardando demasiado en responder.',
-      );
-    });
   }
 
-  Future<void> _handlePageFinished() async {
-    final int generation = _loadGeneration;
+  Future<void> _openExternalScheme(Uri uri) async {
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      debugPrint('No se pudo abrir el enlace externo: $uri');
+    }
+  }
 
-    // Algunas webs de WordPress notifican el fin de carga antes de terminar
-    // de construir el formulario mediante JavaScript.
-    await Future<void>.delayed(const Duration(milliseconds: 900));
+  Future<void> _handleBack() async {
+    if (!mounted) return;
 
-    if (!mounted || generation != _loadGeneration) return;
-
-    final bool hasUsableContent = await _hasUsablePageContent();
-    if (!mounted || generation != _loadGeneration) return;
-
-    if (!hasUsableContent) {
-      _showLoadError(
-        'La web se abrió, pero el formulario de registro no llegó a mostrarse.',
-      );
+    if (widget.closeOnBack) {
+      // En Academy no recorremos el historial de WordPress:
+      // cerramos esta ruta WebView y volvemos a la Academy nativa.
+      Navigator.of(context).pop();
       return;
     }
 
-    _timeoutTimer?.cancel();
-    setState(() {
-      _progress = 100;
-      _isLoading = false;
-      _hasError = false;
-      _errorMessage = '';
-    });
-  }
-
-  Future<bool> _hasUsablePageContent() async {
-    try {
-      final Object result = await _controller.runJavaScriptReturningResult(
-        '''
-        (() => {
-          const body = document.body;
-          if (!body) return 0;
-
-          const textLength = (body.innerText || '').trim().length;
-          const interactiveElements = document.querySelectorAll(
-            'form, input, select, textarea, button, a'
-          ).length;
-
-          return textLength + (interactiveElements * 100);
-        })();
-        ''',
-      );
-
-      final String raw = result.toString().replaceAll('"', '').trim();
-      final num? score = num.tryParse(raw);
-
-      // Si la plataforma devuelve un formato que no podemos interpretar,
-      // no bloqueamos una página que visualmente puede haberse cargado bien.
-      if (score == null) return true;
-
-      return score >= 120;
-    } catch (error) {
-      debugPrint('⚠️ No se pudo verificar el contenido del registro: $error');
-      return true;
+    if (await _controller.canGoBack()) {
+      await _controller.goBack();
+      return;
     }
-  }
-
-  void _showLoadError(String message) {
-    _timeoutTimer?.cancel();
 
     if (!mounted) return;
-
-    setState(() {
-      _isLoading = false;
-      _hasError = true;
-      _errorMessage = message;
-    });
-  }
-
-  Future<void> _reload() async {
-    _beginLoading();
-
-    try {
-      await _controller.loadRequest(
-        widget.initialUri.replace(
-          queryParameters: <String, String>{
-            ...widget.initialUri.queryParameters,
-            'app_retry': DateTime.now().millisecondsSinceEpoch.toString(),
-          },
-        ),
-      );
-    } catch (error) {
-      _showLoadError('No se pudo volver a cargar la página: $error');
-    }
-  }
-
-  Future<void> _openInBrowser() async {
-    try {
-      final bool opened = await launchUrl(
-        widget.initialUri,
-        mode: LaunchMode.inAppBrowserView,
-      );
-
-      if (!opened && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No se pudo abrir la web de registro.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('No se pudo abrir la web de registro: $error'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+    Navigator.of(context).maybePop();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(
-          widget.title,
-          style: const TextStyle(fontFamily: 'Oswald'),
+    return PopScope(
+      // Academy/Inscripción puede cerrar la ruta Flutter normalmente.
+      // El resto de WebViews mantiene canPop=false para poder consumir
+      // primero su historial interno de navegación.
+      canPop: widget.closeOnBack,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _handleBack();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        appBar: ProfessionalPageAppBar(
+          title: widget.title,
+          onBack: _handleBack,
         ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            tooltip: 'Recargar',
-            onPressed: _reload,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Stack(
+        body: Stack(
           children: [
-            Positioned.fill(
-              child: IgnorePointer(
-                ignoring: _hasError,
-                child: WebViewWidget(controller: _controller),
-              ),
-            ),
-            if (_isLoading)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: Colors.white,
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(28),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(
-                            color: AppColors.primary,
-                          ),
-                          const SizedBox(height: 18),
-                          const Text(
-                            'Cargando solicitud de registro…',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontFamily: 'Oswald',
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _progress > 0
-                                ? 'Progreso: $_progress %'
-                                : 'Conectando con MundiCam',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          TextButton.icon(
-                            onPressed: _openInBrowser,
-                            icon: const Icon(Icons.open_in_browser_rounded),
-                            label: const Text('ABRIR REGISTRO SEGURO'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_hasError)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: Colors.white,
-                  child: Center(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.language_rounded,
-                              color: AppColors.primary,
-                              size: 52,
-                            ),
-                            const SizedBox(height: 16),
-                            const Text(
-                              'No se pudo mostrar el formulario dentro de la app.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontFamily: 'Oswald',
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textPrimary,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              _errorMessage.isEmpty
-                                  ? 'Puedes volver a intentarlo o continuar directamente en la web segura de MundiCam.'
-                                  : _errorMessage,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 13.5,
-                                height: 1.4,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(height: 22),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _reload,
-                                icon: const Icon(Icons.refresh_rounded),
-                                label: const Text('REINTENTAR'),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: _openInBrowser,
-                                icon: const Icon(Icons.open_in_browser_rounded),
-                                label: const Text('ABRIR REGISTRO EN MUNDICAM'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (!_hasError && !_isLoading && _progress < 100)
+            WebViewWidget(controller: _controller),
+            if (_loadingProgress < 100)
               Align(
                 alignment: Alignment.topCenter,
                 child: LinearProgressIndicator(
-                  value: _progress <= 0 ? null : _progress / 100,
+                  value: _loadingProgress > 0
+                      ? _loadingProgress / 100
+                      : null,
+                  minHeight: 2,
                   color: AppColors.primary,
-                  minHeight: 3,
+                  backgroundColor: const Color(0xFFF1F3F5),
                 ),
               ),
           ],

@@ -18,6 +18,9 @@ import 'package:mundicam/features/quotes/presentation/pages/quotes_page.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
+import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
+import 'package:mundicam/features/promotions/presentation/pages/promotions_page.dart';
+import 'package:mundicam/features/promotions/presentation/providers/promotions_provider.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_page.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
@@ -117,15 +120,21 @@ class _MainScreenState extends ConsumerState<MainScreen>
       ) async {
     if (!mounted) return;
 
+    final bool isPromotionNotification =
+        notification.isPromotionNotification;
     final bool isGeneralNotification = notification.isGeneralNotification;
 
-    if (!isGeneralNotification) {
+    if (isPromotionNotification) {
+      ref.invalidate(promotionsProvider);
+    } else if (!isGeneralNotification) {
       ref.invalidate(ordersProvider);
       ref.read(newOrderBadgeProvider.notifier).state++;
     }
 
     if (notification.openedByUser) {
-      if (!isGeneralNotification) {
+      if (isPromotionNotification) {
+        _openPromotionsFromNotification();
+      } else if (!isGeneralNotification) {
         _openOrdersFromNotification();
       }
       return;
@@ -178,45 +187,45 @@ class _MainScreenState extends ConsumerState<MainScreen>
                 fontWeight: FontWeight.w500,
               ),
             ),
-            actions: isGeneralNotification
+            actions: (isPromotionNotification || isGeneralNotification)
                 ? [
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: const Text('Entendido'),
-              ),
-            ]
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Text('OK'),
+                    ),
+                  ]
                 : [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cerrar'),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  _openOrdersFromNotification();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                icon: const Icon(Icons.visibility_outlined, size: 17),
-                label: const Text('Ver pedidos'),
-              ),
-            ],
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Cerrar'),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                        _openOrdersFromNotification();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      icon: const Icon(Icons.visibility_outlined, size: 17),
+                      label: const Text('Ver pedidos'),
+                    ),
+                  ],
           );
         },
       );
@@ -229,6 +238,36 @@ class _MainScreenState extends ConsumerState<MainScreen>
     ref.read(newOrderBadgeProvider.notifier).state = 0;
     ref.invalidate(ordersProvider);
     _switchToTab(2, popToRoot: true);
+  }
+
+  void _openPromotionsFromNotification() {
+    ref.invalidate(promotionsProvider);
+
+    if (_selectedIndex != 0) {
+      setState(() {
+        _selectedIndex = 0;
+        _loadedTabs[0] = true;
+      });
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final navigator = _navigatorKeys[0].currentState;
+      if (navigator == null) return;
+      navigator.popUntil((route) => route.isFirst);
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const PromotionsPage(),
+        ),
+      );
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _selectedIndex == 4) {
+      unawaited(ref.read(cartProvider.notifier).syncFromRemoteCart());
+    }
   }
 
   Future<void> _loadConfirmedQuoteIdsFromPrefs() async {
@@ -323,6 +362,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
       _lastIndexBeforeCart = _selectedIndex;
     }
 
+    if (index == 4) {
+      unawaited(ref.read(cartProvider.notifier).syncFromRemoteCart());
+    }
+
     setState(() {
       _selectedIndex = index;
       _loadedTabs[index] = true;
@@ -365,6 +408,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
     }
 
     if (_selectedIndex == index) {
+      if (index == 4) {
+        unawaited(ref.read(cartProvider.notifier).syncFromRemoteCart());
+      }
+
       final navigator = _navigatorKeys[index].currentState;
 
       if (navigator != null && navigator.canPop()) {

@@ -377,6 +377,13 @@ class _RmaPageState extends ConsumerState<RmaPage> {
     final statusData = _statusData(status, _text(rma['status_label']));
     final productName = _text(rma['product_name'], fallback: 'Producto');
     final sku = _text(rma['product_sku'] ?? rma['sku']);
+    final serialNumber = _text(
+      rma['sn'] ??
+          rma['SN'] ??
+          rma['serial_number'] ??
+          rma['serialNumber'] ??
+          rma['serial'],
+    );
     final orderNumber =
         _text(rma['order_number'] ?? rma['order_id'], fallback: '—');
     final quantity = _int(rma['quantity'], fallback: 1);
@@ -464,6 +471,17 @@ class _RmaPageState extends ConsumerState<RmaPage> {
                             color: Color(0xFF98A2B3),
                             fontSize: 11.5,
                             fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      if (serialNumber.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          'SN: $serialNumber',
+                          style: const TextStyle(
+                            color: Color(0xFF667085),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ],
