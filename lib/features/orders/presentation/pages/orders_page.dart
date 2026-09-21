@@ -1654,9 +1654,21 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
     final currentOrder = _loadedOrder ?? widget.order;
     final status = currentOrder.normalizedStatus;
     final isCompleted = status == 'completed' || status == 'processing';
-    final canRequestRma = isCompleted &&
-        currentOrder.canRequestRma &&
+    final canShowRmaAction = isCompleted &&
+        !currentOrder.isQuote &&
         item.productId > 0;
+
+    final warrantyUntil =
+        currentOrder.dateCreated.add(const Duration(days: 730));
+    final warrantyEndOfDay = DateTime(
+      warrantyUntil.year,
+      warrantyUntil.month,
+      warrantyUntil.day,
+      23,
+      59,
+      59,
+    );
+    final warrantyExpired = DateTime.now().isAfter(warrantyEndOfDay);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1816,13 +1828,71 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                     ),
                   ],
                 ),
-                if (canRequestRma) ...[
+                if (canShowRmaAction) ...[
                   const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
                     height: 38,
                     child: OutlinedButton.icon(
-                      onPressed: () {
+                      onPressed: () async {
+                        if (warrantyExpired) {
+                          await showDialog<void>(
+                            context: context,
+                            builder: (dialogContext) => AlertDialog(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              title: const Row(
+                                children: [
+                                  Icon(
+                                    Icons.info_outline_rounded,
+                                    color: Colors.orange,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Expanded(child: Text('GARANTÍA EXCEDIDA')),
+                                ],
+                              ),
+                              content: const Text(
+                                'Este producto está fuera del periodo de garantía de 2 años y no puede tramitarse por RMA.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(dialogContext),
+                                  child: const Text('CERRAR'),
+                                ),
+                              ],
+                            ),
+                          );
+                          return;
+                        }
+
+                        // Conservamos cualquier restricción explícita que venga
+                        // del backend. La única diferencia es que un pedido
+                        // fuera de garantía ya no oculta el botón: informa al
+                        // usuario al intentar tramitarlo.
+                        if (!currentOrder.canRequestRma) {
+                          await showDialog<void>(
+                            context: context,
+                            builder: (dialogContext) => AlertDialog(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              title: const Text('RMA NO DISPONIBLE'),
+                              content: const Text(
+                                'Este pedido no está habilitado para solicitar RMA.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(dialogContext),
+                                  child: const Text('CERRAR'),
+                                ),
+                              ],
+                            ),
+                          );
+                          return;
+                        }
+
+                        if (!mounted) return;
                         Navigator.push(
                           context,
                           MaterialPageRoute(

@@ -170,6 +170,34 @@ class _RmaFormPageState extends ConsumerState<RmaFormPage> {
   }
 
   Future<void> _enviarRma() async {
+    if (_isInWarranty == false) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.info_outline_rounded, color: Colors.orange),
+              SizedBox(width: 10),
+              Expanded(child: Text('GARANTÍA EXCEDIDA')),
+            ],
+          ),
+          content: const Text(
+            'Este producto está fuera del periodo de garantía de 2 años y no puede tramitarse por RMA.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('CERRAR'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     // Si el endpoint de Extensions todavía está resolviendo el SN, esperamos
     // esa única consulta antes de validar el formulario. Un 404 de modo pruebas
     // devuelve [] y el RMA clásico continúa sin cambios.

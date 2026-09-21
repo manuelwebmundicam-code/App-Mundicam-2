@@ -34,6 +34,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
   List<Product> _productSuggestions = const <Product>[];
   List<CategoryModel>? _allSuggestionCategoriesCache;
   DateTime? _allSuggestionCategoriesCachedAt;
+  String _lastSuccessfulSuggestionQuery = '';
 
   @override
   void initState() {
@@ -86,6 +87,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
         setState(() {
           _categorySuggestions = const <CategoryModel>[];
           _productSuggestions = const <Product>[];
+          _lastSuccessfulSuggestionQuery = '';
           _loadingSuggestions = false;
         });
       }
@@ -115,11 +117,24 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
         if (!mounted || token != _suggestionsToken) return;
 
         setState(() {
-          // Senior rule: el panel predictivo no carga categorías. Las categorías
-          // eran ruido, ralentizaban la búsqueda y no ayudan cuando el usuario
-          // quiere ver productos con imagen. Los filtros/categorías se mantienen
-          // en las pantallas de catálogo, no aquí.
-          _productSuggestions = products.take(_looksLikeSku(query) ? 4 : 7).toList();
+          // Mantener el último resultado útil mientras el usuario sigue ampliando
+          // la misma búsqueda. Ejemplo: "wallsw" encuentra AJ-WALLSWITCH-B; si
+          // después escribe "wallswitch-b" y el endpoint no resuelve esa cadena
+          // completa, no hacemos desaparecer de golpe un producto ya relevante.
+          // Solo conservamos el resultado cuando la nueva consulta es una extensión
+          // de la última consulta que sí devolvió productos. Si cambia de búsqueda,
+          // el panel vuelve a comportarse de forma normal.
+          final nextProducts = products.take(_looksLikeSku(query) ? 4 : 7).toList();
+          final keepPrevious = nextProducts.isEmpty &&
+              _productSuggestions.isNotEmpty &&
+              _isExtensionOfSuccessfulSuggestionQuery(query);
+
+          if (!keepPrevious) {
+            _productSuggestions = nextProducts;
+            if (nextProducts.isNotEmpty) {
+              _lastSuccessfulSuggestionQuery = query;
+            }
+          }
           _categorySuggestions = const <CategoryModel>[];
           _loadingSuggestions = false;
         });
@@ -127,7 +142,11 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
         if (!mounted || token != _suggestionsToken) return;
         setState(() {
           _categorySuggestions = const <CategoryModel>[];
-          _productSuggestions = const <Product>[];
+          // Si el fallo ocurre mientras el usuario simplemente sigue completando
+          // la búsqueda que ya tenía resultados, conservamos esos resultados.
+          if (!_isExtensionOfSuccessfulSuggestionQuery(query)) {
+            _productSuggestions = const <Product>[];
+          }
           _loadingSuggestions = false;
         });
       }
@@ -139,6 +158,13 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     if (clean.isEmpty) return false;
     if (_looksLikeSku(clean)) return clean.length >= 2;
     return clean.length >= 3;
+  }
+
+  bool _isExtensionOfSuccessfulSuggestionQuery(String query) {
+    final previous = _compact(_lastSuccessfulSuggestionQuery);
+    final current = _compact(query);
+    if (previous.isEmpty || current.isEmpty) return false;
+    return current.length >= previous.length && current.startsWith(previous);
   }
 
   Future<List<Product>> _fetchSuggestionProducts(ApiService api, String query) async {
@@ -685,6 +711,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     setState(() {
       _categorySuggestions = const <CategoryModel>[];
       _productSuggestions = const <Product>[];
+      _lastSuccessfulSuggestionQuery = '';
       _loadingSuggestions = false;
     });
   }

@@ -181,6 +181,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   bool _showScrollTopButton = false;
   int _suggestionsToken = 0;
   List<_CatalogSearchSuggestion> _searchSuggestions = [];
+  String _lastSuccessfulSuggestionsQuery = '';
   late Future<List<CategoryModel>> _subcategoriesFuture;
   bool _subcategoriesExpanded = false;
   late int _activeCatalogCategoryId;
@@ -500,7 +501,12 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     }
 
     setState(() {
-      _searchSuggestions = [];
+      // No vaciamos el resultado anterior mientras se consulta una extensión de
+      // la misma referencia. Así no hay parpadeo ni desaparecen productos válidos
+      // si el backend deja de resolver los últimos caracteres escritos.
+      if (!_isExtensionOfSuccessfulSuggestionsQuery(clean)) {
+        _searchSuggestions = [];
+      }
       _isLoadingSuggestions = true;
     });
 
@@ -515,17 +521,34 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
         if (!mounted || token != _suggestionsToken) return;
         setState(() {
-          _searchSuggestions = suggestions;
+          final keepPrevious = suggestions.isEmpty &&
+              _searchSuggestions.isNotEmpty &&
+              _isExtensionOfSuccessfulSuggestionsQuery(clean);
+          if (!keepPrevious) {
+            _searchSuggestions = suggestions;
+            if (suggestions.isNotEmpty) {
+              _lastSuccessfulSuggestionsQuery = clean;
+            }
+          }
           _isLoadingSuggestions = false;
         });
       } catch (_) {
         if (!mounted || token != _suggestionsToken) return;
         setState(() {
-          _searchSuggestions = [];
+          if (!_isExtensionOfSuccessfulSuggestionsQuery(clean)) {
+            _searchSuggestions = [];
+          }
           _isLoadingSuggestions = false;
         });
       }
     });
+  }
+
+  bool _isExtensionOfSuccessfulSuggestionsQuery(String query) {
+    final previous = _compactForSearch(_lastSuccessfulSuggestionsQuery);
+    final current = _compactForSearch(query);
+    if (previous.isEmpty || current.isEmpty) return false;
+    return current.length >= previous.length && current.startsWith(previous);
   }
 
   void _hideSearchSuggestions() {
@@ -534,6 +557,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     if (_searchSuggestions.isEmpty && !_isLoadingSuggestions) return;
     setState(() {
       _searchSuggestions = [];
+      _lastSuccessfulSuggestionsQuery = '';
       _isLoadingSuggestions = false;
     });
   }
