@@ -17,6 +17,7 @@ import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/config/force_update_service.dart';
+import 'package:mundicam/core/config/update_announcement_service.dart';
 import 'package:mundicam/features/system/presentation/pages/force_update_page.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/app/main_screen.dart';
@@ -182,17 +183,31 @@ Future<void> _postRunAppBootstrap() async {
         ForceUpdateService.titleKey: '',
         ForceUpdateService.messageKey: '',
         ForceUpdateService.buttonLabelKey: '',
+
+        // Popup informativo de actualización en Home. Independiente del bloqueo.
+        UpdateAnnouncementService.enabledKey: false,
+        UpdateAnnouncementService.latestAndroidVersionKey: '',
+        UpdateAnnouncementService.latestIosVersionKey: '',
+        UpdateAnnouncementService.titleKey: '',
+        UpdateAnnouncementService.point1Key: '',
+        UpdateAnnouncementService.point2Key: '',
+        UpdateAnnouncementService.point3Key: '',
+        UpdateAnnouncementService.moreTextKey: 'Y mucho más…',
+        UpdateAnnouncementService.updateButtonLabelKey: 'Actualizar ahora',
+        UpdateAnnouncementService.laterButtonLabelKey: 'Más tarde',
       });
 
       // Evalúa primero los últimos valores activados que Firebase pudiera
       // tener guardados localmente y luego vuelve a evaluar tras el fetch.
       await ForceUpdateService.instance.evaluate(remoteConfig);
+      await UpdateAnnouncementService.instance.evaluate(remoteConfig);
 
       await remoteConfig.fetchAndActivate().timeout(
         const Duration(seconds: 12),
       );
 
       await ForceUpdateService.instance.evaluate(remoteConfig);
+      await UpdateAnnouncementService.instance.evaluate(remoteConfig);
 
       // Observador en tiempo real: si se cambia la versión mínima o el
       // interruptor de actualización en Firebase, la app vuelve a evaluar
@@ -203,6 +218,7 @@ Future<void> _postRunAppBootstrap() async {
           try {
             await remoteConfig.activate();
             await ForceUpdateService.instance.evaluate(remoteConfig);
+            await UpdateAnnouncementService.instance.evaluate(remoteConfig);
             debugPrint('✅ Remote Config actualizado y reevaluado');
           } catch (e) {
             // Fail-open: un problema de Remote Config nunca debe bloquear

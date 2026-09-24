@@ -486,6 +486,7 @@ class NotificationService {
   Timer? _iosTokenRetryTimer;
   int _iosTokenRetryAttempt = 0;
   bool _tokenSyncInProgress = false;
+  int _tokenLifecycleGeneration = 0;
 
   Stream<MundiCamOrderNotification> get orderNotifications =>
       _orderController.stream;
@@ -540,15 +541,23 @@ class NotificationService {
     });
 
     _messaging.onTokenRefresh.listen((token) async {
+      final lifecycleGeneration = _tokenLifecycleGeneration;
       final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
 
-      // Si Firebase ya nos entrega un token FCM, lo registramos aunque APNs
-      // todavía no pueda leerse en ese instante. La plataforma sigue siendo
-      // 'ios' y el backend podrá incluir este dispositivo en los envíos.
-      await _saveToken(token, apnsToken: apnsToken);
+      if (lifecycleGeneration != _tokenLifecycleGeneration) return;
+
+      // Si Firebase ya nos entrega un token FCM, lo intentamos registrar aunque
+      // APNs todavía no pueda leerse en ese instante. En iOS solo damos por
+      // cerrado el ciclo de reintentos cuando el backend MundiCam confirma que
+      // el dispositivo ha quedado vinculado a la sesión WordPress real.
+      final backendRegistered = await _saveToken(
+        token,
+        apnsToken: apnsToken,
+        lifecycleGeneration: lifecycleGeneration,
+      );
 
       if (Platform.isIOS) {
-        if ((apnsToken ?? '').isNotEmpty) {
+        if (backendRegistered) {
           _cancelIosTokenRetry();
         } else {
           _scheduleIosTokenRetry();
@@ -1000,6 +1009,17 @@ class NotificationService {
     ].map((value) => value?.toString() ?? '').join('|');
   }
 
+  /// Reinicia el presupuesto de reintentos iOS justo después de que
+  /// WordPress haya confirmado la sesión. Los intentos de arranque pueden haber
+  /// ocurrido antes del login y no deben impedir que el iPhone se registre una
+  /// vez que ya existe un app_token válido.
+  Future<void> syncAfterAuthentication() async {
+    if (Platform.isIOS) {
+      _cancelIosTokenRetry();
+    }
+    await syncCurrentTokenWithBackend();
+  }
+
   Future<void> syncCurrentTokenWithBackend() async {
     if (_tokenSyncInProgress) {
       if (Platform.isIOS) {
@@ -1009,6 +1029,7 @@ class NotificationService {
     }
 
     _tokenSyncInProgress = true;
+    final lifecycleGeneration = _tokenLifecycleGeneration;
 
     try {
       String? apnsToken;
@@ -1026,6 +1047,10 @@ class NotificationService {
         }
       }
 
+      // Si mientras esperábamos APNs se inició una limpieza/logout, este intento
+      // pertenece ya a una generación antigua y no debe recrear/registrar el token.
+      if (lifecycleGeneration != _tokenLifecycleGeneration) return;
+
       final token = await _messaging.getToken();
       if (kDebugMode) debugPrint('📱 FCM Token $_platform: $token');
 
@@ -1036,10 +1061,22 @@ class NotificationService {
         return;
       }
 
-      await _saveToken(token, apnsToken: apnsToken);
+      if (lifecycleGeneration != _tokenLifecycleGeneration) return;
+
+      final backendRegistered = await _saveToken(
+        token,
+        apnsToken: apnsToken,
+        lifecycleGeneration: lifecycleGeneration,
+      );
 
       if (Platform.isIOS) {
-        _cancelIosTokenRetry();
+        if (backendRegistered) {
+          _cancelIosTokenRetry();
+        } else {
+          // Tener APNs/FCM no basta: si el intento ocurrió antes del login o el
+          // endpoint no confirmó el alta, mantenemos un reintento acotado.
+          _scheduleIosTokenRetry();
+        }
       }
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ No se pudo obtener/guardar token FCM: $e');
@@ -1099,15 +1136,32 @@ class NotificationService {
     return apnsToken;
   }
 
-  Future<void> _saveToken(String? token, {String? apnsToken}) async {
+  Future<bool> _saveToken(
+    String? token, {
+    String? apnsToken,
+    int? lifecycleGeneration,
+  }) async {
     final cleanToken = token?.trim() ?? '';
-    if (cleanToken.isEmpty) return;
+    if (cleanToken.isEmpty) return false;
+
+    if (lifecycleGeneration != null &&
+        lifecycleGeneration != _tokenLifecycleGeneration) {
+      return false;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_lastFcmTokenPrefsKey, cleanToken);
 
     await _saveTokenInFirestore(cleanToken, apnsToken: apnsToken);
-    await _saveTokenInMundiCamBackend(cleanToken, apnsToken: apnsToken);
+
+    // Una limpieza/logout que ocurra mientras Firestore estaba respondiendo debe
+    // invalidar este intento antes de asociar el dispositivo en WordPress.
+    if (lifecycleGeneration != null &&
+        lifecycleGeneration != _tokenLifecycleGeneration) {
+      return false;
+    }
+
+    return _saveTokenInMundiCamBackend(cleanToken, apnsToken: apnsToken);
   }
 
   Future<void> _saveTokenInFirestore(String token, {String? apnsToken}) async {
@@ -1128,7 +1182,7 @@ class NotificationService {
     }
   }
 
-  Future<void> _saveTokenInMundiCamBackend(
+  Future<bool> _saveTokenInMundiCamBackend(
     String token, {
     String? apnsToken,
   }) async {
@@ -1146,12 +1200,18 @@ class NotificationService {
               : 'ℹ️ Token FCM no registrado todavía: sin sesión App API o endpoint pendiente',
         );
       }
+      return saved;
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ No se pudo registrar FCM en App API: $e');
+      return false;
     }
   }
 
   Future<void> clearDeviceRegistration() async {
+    // Invalida cualquier sincronización iniciada antes de este logout/limpieza.
+    // Así un getAPNSToken() pendiente no puede recrear y registrar un token
+    // después de que el usuario haya cerrado o perdido la sesión.
+    _tokenLifecycleGeneration++;
     _cancelIosTokenRetry();
     _tokenSyncInProgress = false;
 

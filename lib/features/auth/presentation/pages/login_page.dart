@@ -100,7 +100,7 @@ class _LoginPageState extends State<LoginPage> {
 
         _openMainScreen(
           afterFirstFrame: () =>
-              NotificationService().syncCurrentTokenWithBackend(),
+              NotificationService().syncAfterAuthentication(),
         );
         return;
       }
@@ -586,7 +586,7 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       await NotificationService()
-          .syncCurrentTokenWithBackend()
+          .syncAfterAuthentication()
           .timeout(const Duration(seconds: 12), onTimeout: () {
         debugPrint('⚠️ FCM tardó demasiado tras login. Se reintentará luego.');
       });
@@ -739,7 +739,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!mounted) return;
         _openMainScreen(
           afterFirstFrame: () =>
-              NotificationService().syncCurrentTokenWithBackend(),
+              NotificationService().syncAfterAuthentication(),
         );
         return;
       }

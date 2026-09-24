@@ -265,8 +265,15 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _selectedIndex == 4) {
-      unawaited(ref.read(cartProvider.notifier).syncFromRemoteCart());
+    if (state == AppLifecycleState.resumed) {
+      // MainScreen solo existe con sesión de app válida. En iOS, volver a primer
+      // plano es otro punto seguro para completar APNs -> FCM -> /fcm/register
+      // si Apple entregó el token después del login inicial.
+      unawaited(NotificationService().syncCurrentTokenWithBackend());
+
+      if (_selectedIndex == 4) {
+        unawaited(ref.read(cartProvider.notifier).syncFromRemoteCart());
+      }
     }
   }
 
