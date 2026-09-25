@@ -1103,7 +1103,14 @@ class ApiService {
     await _ensureInitialized();
 
     final cleanToken = token.trim();
-    if (_appToken.trim().isEmpty || cleanToken.isEmpty) return false;
+    if (_appToken.trim().isEmpty) {
+      debugPrint('🔎 MUNDICAM_FCM_DIAG REGISTER_SKIP reason=no_app_token');
+      return false;
+    }
+    if (cleanToken.isEmpty) {
+      debugPrint('🔎 MUNDICAM_FCM_DIAG REGISTER_SKIP reason=empty_fcm_token');
+      return false;
+    }
 
     final cleanPlatform = platform.trim().isEmpty ? 'android' : platform.trim();
     final email = await currentSessionEmail();
@@ -1132,6 +1139,10 @@ class ApiService {
             response.statusCode! < 300 &&
             data['success'] != false;
 
+        debugPrint(
+          '🔎 MUNDICAM_FCM_DIAG REGISTER_HTTP endpoint=$endpoint status=${response.statusCode ?? 0} success=$ok',
+        );
+
         if (ok) {
           if (kDebugMode) debugPrint('✅ FCM registrado en $endpoint');
           return true;
@@ -1140,7 +1151,15 @@ class ApiService {
         if (kDebugMode) {
           debugPrint('⚠️ FCM endpoint $endpoint respondió: ${response.data}');
         }
+      } on DioException catch (e) {
+        debugPrint(
+          '🔎 MUNDICAM_FCM_DIAG REGISTER_HTTP endpoint=$endpoint status=${e.response?.statusCode ?? 0} success=false exception=DioException',
+        );
+        if (kDebugMode) debugPrint('⚠️ registerFcmToken $endpoint: $e');
       } catch (e) {
+        debugPrint(
+          '🔎 MUNDICAM_FCM_DIAG REGISTER_HTTP endpoint=$endpoint status=0 success=false exception=${e.runtimeType}',
+        );
         if (kDebugMode) debugPrint('⚠️ registerFcmToken $endpoint: $e');
       }
     }

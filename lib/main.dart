@@ -161,6 +161,20 @@ Future<void> _postRunAppBootstrap() async {
   }
 
   if (firebaseReady) {
+    // FCM/APNs debe inicializarse en cuanto Firebase esté listo. No se deja
+    // bloqueado detrás de Remote Config para evitar retrasos/races en iOS.
+    try {
+      await NotificationService()
+          .initialize()
+          .timeout(const Duration(seconds: 15), onTimeout: () {
+        debugPrint(
+          '⚠️ Inicialización FCM tardó demasiado. Se reintentará después.',
+        );
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error inicializando notificaciones: $e');
+    }
+
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
       await remoteConfig.setConfigSettings(
@@ -234,18 +248,6 @@ Future<void> _postRunAppBootstrap() async {
       debugPrint('✅ Remote Config inicializado correctamente');
     } catch (e) {
       debugPrint('⚠️ Remote Config no crítico: $e');
-    }
-
-    try {
-      await NotificationService()
-          .initialize()
-          .timeout(const Duration(seconds: 15), onTimeout: () {
-        debugPrint(
-          '⚠️ Inicialización FCM tardó demasiado. Se reintentará después.',
-        );
-      });
-    } catch (e) {
-      debugPrint('⚠️ Error inicializando notificaciones: $e');
     }
   }
 
@@ -376,10 +378,16 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
         : false;
 
     if (!hasAppSession) {
-      try {
-        await NotificationService().clearDeviceRegistration();
-      } catch (e) {
-        debugPrint('⚠️ No se pudo limpiar el dispositivo FCM: $e');
+      // En una instalación nueva no existe sesión App API previa que limpiar.
+      // Evitamos borrar/crear un token FCM durante el mismo arranque en el que
+      // iOS está registrándose con APNs. Si había una sesión almacenada y ya no
+      // es válida, sí limpiamos la asociación anterior del dispositivo.
+      if (hasStoredToken) {
+        try {
+          await NotificationService().clearDeviceRegistration();
+        } catch (e) {
+          debugPrint('⚠️ No se pudo limpiar el dispositivo FCM: $e');
+        }
       }
 
       if (Firebase.apps.isNotEmpty) {

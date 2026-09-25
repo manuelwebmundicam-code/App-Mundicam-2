@@ -491,6 +491,12 @@ class NotificationService {
   Stream<MundiCamOrderNotification> get orderNotifications =>
       _orderController.stream;
 
+  // Diagnóstico seguro también visible en builds Release/TestFlight.
+  // Nunca imprime tokens, credenciales ni datos personales.
+  void _fcmDiag(String message) {
+    debugPrint('🔎 MUNDICAM_FCM_DIAG $message');
+  }
+
   Future<void> initialize() {
     if (_initialized) {
       return syncCurrentTokenWithBackend();
@@ -508,6 +514,7 @@ class NotificationService {
   }
 
   Future<void> _initializeInternal() async {
+    _fcmDiag('INIT platform=$_platform');
     await _initializeLocalNotifications();
 
     final settings = await _messaging.requestPermission(
@@ -523,6 +530,7 @@ class NotificationService {
     if (kDebugMode) {
       debugPrint('🔔 Permiso notificaciones: ${settings.authorizationStatus}');
     }
+    _fcmDiag('PERMISSION status=${settings.authorizationStatus}');
 
     await _messaging.setForegroundNotificationPresentationOptions(
       alert: false,
@@ -555,6 +563,8 @@ class NotificationService {
         apnsToken: apnsToken,
         lifecycleGeneration: lifecycleGeneration,
       );
+
+      _fcmDiag('BACKEND_REGISTERED=$backendRegistered');
 
       if (Platform.isIOS) {
         if (backendRegistered) {
@@ -1036,6 +1046,7 @@ class NotificationService {
 
       if (Platform.isIOS) {
         apnsToken = await _waitForApnsToken();
+        _fcmDiag('APNS_AVAILABLE=${(apnsToken ?? '').isNotEmpty}');
         if ((apnsToken ?? '').isEmpty) {
           if (kDebugMode) {
             debugPrint(
@@ -1053,6 +1064,7 @@ class NotificationService {
 
       final token = await _messaging.getToken();
       if (kDebugMode) debugPrint('📱 FCM Token $_platform: $token');
+      _fcmDiag('FCM_AVAILABLE=${(token ?? '').trim().isNotEmpty}');
 
       if ((token ?? '').trim().isEmpty) {
         if (Platform.isIOS) {
@@ -1068,6 +1080,7 @@ class NotificationService {
         apnsToken: apnsToken,
         lifecycleGeneration: lifecycleGeneration,
       );
+      _fcmDiag('BACKEND_REGISTERED=$backendRegistered');
 
       if (Platform.isIOS) {
         if (backendRegistered) {
@@ -1102,6 +1115,7 @@ class NotificationService {
 
     _iosTokenRetryAttempt++;
     final attempt = _iosTokenRetryAttempt;
+    _fcmDiag('RETRY scheduled=$attempt/$_maxIosTokenRetryAttempts');
 
     if (kDebugMode) {
       debugPrint(
@@ -1123,15 +1137,18 @@ class NotificationService {
 
   Future<String?> _waitForApnsToken() async {
     String? apnsToken = await _messaging.getAPNSToken();
+    var checks = 1;
 
     for (var attempt = 0; apnsToken == null && attempt < 12; attempt++) {
       await Future.delayed(const Duration(milliseconds: 500));
       apnsToken = await _messaging.getAPNSToken();
+      checks++;
     }
 
     if (apnsToken != null && kDebugMode) {
       debugPrint('🍎 APNs Token: $apnsToken');
     }
+    _fcmDiag('APNS_CHECK available=${apnsToken != null} checks=$checks');
 
     return apnsToken;
   }
@@ -1200,9 +1217,11 @@ class NotificationService {
               : 'ℹ️ Token FCM no registrado todavía: sin sesión App API o endpoint pendiente',
         );
       }
+      _fcmDiag('APP_API_REGISTER success=$saved');
       return saved;
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ No se pudo registrar FCM en App API: $e');
+      _fcmDiag('APP_API_REGISTER exception=${e.runtimeType}');
       return false;
     }
   }
@@ -1218,12 +1237,10 @@ class NotificationService {
     final prefs = await SharedPreferences.getInstance();
     final storedToken = prefs.getString(_lastFcmTokenPrefsKey)?.trim() ?? '';
 
-    String currentToken = storedToken;
-    if (currentToken.isEmpty) {
-      try {
-        currentToken = (await _messaging.getToken())?.trim() ?? '';
-      } catch (_) {}
-    }
+    // Una limpieza nunca debe provocar la creación de un token nuevo.
+    // Si no tenemos el último token almacenado, se omite el unregister remoto
+    // y se elimina el token local directamente más abajo.
+    final currentToken = storedToken;
 
     if (currentToken.isNotEmpty) {
       try {

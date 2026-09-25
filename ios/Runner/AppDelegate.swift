@@ -19,6 +19,7 @@ import FirebaseMessaging
 
     DispatchQueue.main.async {
       print("🍎 Solicitando registro APNs nativo...")
+      print("🔎 MUNDICAM_APNS_DIAG REGISTER_REQUESTED")
       application.registerForRemoteNotifications()
     }
 
@@ -30,6 +31,7 @@ import FirebaseMessaging
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
     print("✅ APNs device token recibido (\(deviceToken.count) bytes)")
+    print("🔎 MUNDICAM_APNS_DIAG REGISTER_SUCCESS bytes=\(deviceToken.count)")
 
     #if canImport(FirebaseMessaging)
     Messaging.messaging().apnsToken = deviceToken
@@ -46,7 +48,14 @@ import FirebaseMessaging
     _ application: UIApplication,
     didFailToRegisterForRemoteNotificationsWithError error: Error
   ) {
-    print("❌ Error registrando APNs: \(error.localizedDescription)")
+    let nsError = error as NSError
+
+    // Diagnóstico seguro para TestFlight/Consola. No expone tokens ni claves.
+    print("❌ MUNDICAM_APNS_DIAG REGISTER_FAILED")
+    print("❌ MUNDICAM_APNS_DIAG domain=\(nsError.domain)")
+    print("❌ MUNDICAM_APNS_DIAG code=\(nsError.code)")
+    print("❌ MUNDICAM_APNS_DIAG description=\(nsError.localizedDescription)")
+    print("❌ MUNDICAM_APNS_DIAG userInfo=\(nsError.userInfo)")
 
     super.application(
       application,
