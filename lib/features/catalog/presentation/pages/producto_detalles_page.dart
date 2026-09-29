@@ -1125,13 +1125,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     final attributeRows = _attributeRows(p);
     final categoriaVisual = _resolveVisualCategory(p);
 
-    String? marca;
-    for (final a in p.attributes) {
-      if (a.name.toLowerCase().contains('marca') && a.options.isNotEmpty) {
-        marca = a.options.first;
-        break;
-      }
-    }
+    final resolvedMarca = p.brandName?.trim() ?? '';
+    final String? marca = resolvedMarca.isEmpty ? null : resolvedMarca;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),

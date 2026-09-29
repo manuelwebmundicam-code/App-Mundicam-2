@@ -119,70 +119,82 @@ class AcademyNotifier
     // Se hace antes de entrar en Academy porque Home instancia este provider.
     // Si el endpoint no trae imageUrl, resolvemos la imagen REAL desde la web
     // publica del propio evento y despues la dejamos en cache.
-    unawaited(_resolveAndWarmAcademyImagesSequentially(firstFutureCourses));
+    unawaited(_resolveAndWarmAcademyImagesInParallel(firstFutureCourses));
   }
 
-  Future<void> _resolveAndWarmAcademyImagesSequentially(
+  Future<void> _resolveAndWarmAcademyImagesInParallel(
     List<CourseModel> courses,
   ) async {
     final service = _ref.read(academyContentServiceProvider);
     final cacheManager = DefaultCacheManager();
-    final resolvedImages = <String, String>{};
 
-    for (final course in courses) {
-      final courseKey = _courseKey(course);
-      if (!_academyImageResolveStarted.add(courseKey)) {
-        continue;
-      }
+    // Las primeras tarjetas de Academy se resuelven en paralelo. Antes cada
+    // imagen esperaba a la anterior, por lo que una URL lenta retrasaba al resto.
+    final resolvedEntries = await Future.wait(
+      courses.map((course) async {
+        final courseKey = _courseKey(course);
+        if (!_academyImageResolveStarted.add(courseKey)) {
+          final existing = _resolvedAcademyImages[courseKey];
+          return existing == null || !_isHttpUrl(existing)
+              ? null
+              : MapEntry(courseKey, existing);
+        }
 
-      var imageUrl = course.imageUrl.trim();
+        var imageUrl = course.imageUrl.trim();
 
-      if (!_isHttpUrl(imageUrl)) {
-        final pageUrl = course.url.trim();
-        if (_isHttpUrl(pageUrl)) {
-          try {
-            imageUrl = await service
-                .getAcademyPageImage(pageUrl)
-                .timeout(const Duration(seconds: 8));
-          } catch (_) {
-            imageUrl = '';
+        if (!_isHttpUrl(imageUrl)) {
+          final pageUrl = course.url.trim();
+          if (_isHttpUrl(pageUrl)) {
+            try {
+              imageUrl = await service
+                  .getAcademyPageImage(pageUrl)
+                  .timeout(const Duration(seconds: 8));
+            } catch (_) {
+              imageUrl = '';
+            }
           }
         }
-      }
 
-      if (!_isHttpUrl(imageUrl)) {
-        // Permitimos reintento posterior si la web fallo temporalmente.
-        _academyImageResolveStarted.remove(courseKey);
-        continue;
-      }
+        if (!_isHttpUrl(imageUrl)) {
+          // Permitimos reintento posterior si la web falló temporalmente.
+          _academyImageResolveStarted.remove(courseKey);
+          return null;
+        }
 
-      resolvedImages[courseKey] = imageUrl;
-      _resolvedAcademyImages[courseKey] = imageUrl;
+        _resolvedAcademyImages[courseKey] = imageUrl;
 
-      if (!_academyImageWarmupStarted.add(imageUrl)) {
-        continue;
-      }
+        if (_academyImageWarmupStarted.add(imageUrl)) {
+          try {
+            final cachedFile = await cacheManager.getFileFromCache(imageUrl);
+            if (cachedFile == null) {
+              await cacheManager
+                  .getSingleFile(
+                    imageUrl,
+                    headers: _academyImageHeaders,
+                  )
+                  .timeout(const Duration(seconds: 12));
+            }
+          } catch (_) {
+            // La precarga es una optimización. Si falla, Academy conserva la
+            // carga normal de esa misma imagen real y el fallback web existente.
+          }
+        }
 
-      try {
-        final cachedFile = await cacheManager.getFileFromCache(imageUrl);
-        if (cachedFile != null) continue;
+        return MapEntry(courseKey, imageUrl);
+      }),
+    );
 
-        await cacheManager
-            .getSingleFile(
-              imageUrl,
-              headers: _academyImageHeaders,
-            )
-            .timeout(const Duration(seconds: 12));
-      } catch (_) {
-        // La precarga es una optimizacion. Si falla, Academy conserva la
-        // carga normal de esa misma imagen real y el fallback web existente.
+    final resolvedImages = <String, String>{};
+    for (final entry in resolvedEntries) {
+      if (entry != null) {
+        resolvedImages[entry.key] = entry.value;
       }
     }
 
     if (resolvedImages.isEmpty) return;
 
     // Si tuvimos que descubrir una URL desde /academy/ o desde la ficha del
-    // evento, la incorporamos al estado. Asi Academy no vuelve a resolverla
+    // evento, la incorporamos al estado. Así Academy no vuelve a resolverla
     // al dibujar la tarjeta por primera vez.
     state.whenData((currentCourses) {
       var changed = false;

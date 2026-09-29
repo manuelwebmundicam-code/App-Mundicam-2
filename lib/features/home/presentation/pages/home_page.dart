@@ -57,10 +57,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   late final VoidCallback _updateAnnouncementListener;
 
   // La pantalla completa de preparación se usa una sola vez por instalación.
-  // En esa primera ejecución esperamos categorías, promociones y Academy. Cuando
-  // las tres fuentes han terminado, se guarda un marcador local y los siguientes
-  // arranques muestran Home directamente mientras cualquier refresco ocurre en
-  // segundo plano.
+  // En esa primera ejecución solo bloqueamos hasta tener listo el catálogo visible
+  // (categorías + marcas + assets locales de marcas). Promociones y Academy arrancan
+  // en paralelo y continúan precargando en segundo plano, evitando alargar el acceso.
   bool _initialHomeReady = HomeWarmupState.completed;
   bool _initialBootstrapRetryScheduled = false;
   int _initialBootstrapRetryCount = 0;
@@ -86,6 +85,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (_initialHomeReady) {
       _startAcademyPreloadAfterHomeReady();
       _scheduleUpdateAnnouncementCheck();
+    } else {
+      _startInitialHomePrefetch();
     }
 
     Future.delayed(const Duration(milliseconds: 250), () {
@@ -106,12 +107,32 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
 
+  void _startInitialHomePrefetch() {
+    // Arrancamos TODO en paralelo desde el primer frame. La versión anterior
+    // esperaba primero a Categorías y solo después lanzaba Marcas/Promociones/Academy,
+    // haciendo la pantalla inicial innecesariamente más lenta.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _initialHomeReady) return;
+
+      try {
+        ref.read(categoriesProvider.future);
+        ref.read(homeBrandsProvider.future);
+        ref.read(homeBrandAssetsProvider.future);
+        ref.read(promotionsProvider.future);
+        ref.read(academyProvider.notifier);
+        _academyPreloadStarted = true;
+      } catch (_) {
+        // Los providers ya gestionan sus propios estados de error/reintento.
+      }
+    });
+  }
+
   void _startAcademyPreloadAfterHomeReady() {
     if (_academyPreloadStarted) return;
     _academyPreloadStarted = true;
 
-    // Academy se precarga solo DESPUÉS de que las categorías esenciales de
-    // Inicio estén listas. Así nunca compite con la primera carga del catálogo.
+    // En instalaciones ya preparadas mantenemos la precarga de Academy en
+    // segundo plano sin bloquear Home.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(academyProvider.notifier);
@@ -187,7 +208,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     ref.invalidate(promotionsProvider);
     ref.invalidate(bannerMixProvider);
     await _loadManagerContact();
-    await Future.delayed(const Duration(milliseconds: 350));
   }
 
   Future<void> _openFooterLink(Uri uri) async {
@@ -222,6 +242,8 @@ class _HomePageState extends ConsumerState<HomePage> {
       _initialBootstrapRetryScheduled = false;
       _initialBootstrapRetryCount = retryNumber;
       ref.invalidate(categoriesProvider);
+      ref.invalidate(homeBrandsProvider);
+      ref.invalidate(homeBrandAssetsProvider);
       ref.invalidate(promotionsProvider);
       ref.read(academyProvider.notifier).retry();
     });
@@ -231,6 +253,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     _initialBootstrapRetryScheduled = false;
     _initialBootstrapRetryCount = 0;
     ref.invalidate(categoriesProvider);
+    ref.invalidate(homeBrandsProvider);
+    ref.invalidate(homeBrandAssetsProvider);
     ref.invalidate(promotionsProvider);
     ref.read(academyProvider.notifier).retry();
     setState(() {});
@@ -545,36 +569,29 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     // Gate solo de la PRIMERA preparación de esta instalación.
-    // Fase 1: categorías. Cuando están listas, arrancamos Promociones + Academy
-    // sin competir con la consulta esencial del catálogo. Fase 2: esperamos a
-    // que ambas fuentes terminen (pueden devolver listas vacías legítimamente).
-    // Después se persiste el marcador y esta pantalla completa no vuelve a salir.
+    // Categorías, Marcas, Promociones y Academy se lanzan EN PARALELO. Para no
+    // penalizar el arranque, la pantalla completa solo espera lo que se ve en el
+    // catálogo de Home: categorías + marcas + assets locales de marcas.
+    // Promociones y Academy siguen precargando en segundo plano.
     if (!_initialHomeReady) {
       final categoriesAsync = ref.watch(categoriesProvider);
+      final brandsAsync = ref.watch(homeBrandsProvider);
+      final brandAssetsAsync = ref.watch(homeBrandAssetsProvider);
+
       final categories = categoriesAsync.asData?.value;
+      final brands = brandsAsync.asData?.value;
+
       final categoriesReady = categories != null && categories.isNotEmpty;
+      final brandsReady = brands != null && brands.isNotEmpty;
+      final brandAssetsReady = brandAssetsAsync.hasValue;
 
-      if (!categoriesReady) {
-        if (categoriesAsync.hasError) {
-          _scheduleInitialBootstrapRetry();
-        }
-
-        return _initialBootstrapRetryCount < _maxInitialBootstrapRetries
-            ? _buildInitialHomeLoading()
-            : _buildInitialHomeRetry();
-      }
-
-      final promotionsAsync = ref.watch(promotionsProvider);
-      final academyAsync = ref.watch(academyProvider);
-
-      final promotionsReady = promotionsAsync.hasValue;
-      final academyReady = academyAsync.hasValue;
-
-      if (promotionsAsync.hasError || academyAsync.hasError) {
+      if (categoriesAsync.hasError ||
+          brandsAsync.hasError ||
+          brandAssetsAsync.hasError) {
         _scheduleInitialBootstrapRetry();
       }
 
-      if (!promotionsReady || !academyReady) {
+      if (!categoriesReady || !brandsReady || !brandAssetsReady) {
         return _initialBootstrapRetryCount < _maxInitialBootstrapRetries
             ? _buildInitialHomeLoading()
             : _buildInitialHomeRetry();

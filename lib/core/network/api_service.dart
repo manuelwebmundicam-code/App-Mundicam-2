@@ -580,6 +580,9 @@ class ApiService {
 
   List<Map<String, dynamic>>? _cachedBrandTerms;
   bool? _cachedBrandTermsHideEmpty;
+  Set<String>? _cachedWebsiteActiveBrandTokens;
+  DateTime? _cachedWebsiteActiveBrandTokensAt;
+  final Map<String, String> _websiteBrandBySkuCache = <String, String>{};
   final Map<String, _CatalogFiltersCacheEntry> _catalogFiltersCache = {};
   final Map<int, CategoryModel> _knownCategories = <int, CategoryModel>{};
   final Set<String> _backgroundSearchPrefetchRunning = <String>{};
@@ -1726,6 +1729,441 @@ class ApiService {
     return brands;
   }
 
+  Future<Set<String>> getWebsiteActiveBrandTokens() async {
+    final cached = _cachedWebsiteActiveBrandTokens;
+    final cachedAt = _cachedWebsiteActiveBrandTokensAt;
+    if (cached != null &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < const Duration(minutes: 5)) {
+      return cached;
+    }
+
+    try {
+      final response = await _dio.get<String>(
+        '/shop/',
+        queryParameters: <String, dynamic>{
+          // Evita que una caché HTML antigua mantenga una marca que ya quedó a 0.
+          '_mundicam_app_brand_sync': DateTime.now().millisecondsSinceEpoch,
+        },
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: const <String, dynamic>{
+            'Accept': 'text/html,application/xhtml+xml',
+            'Cache-Control': 'no-cache',
+          },
+        ),
+      );
+
+      final html = response.data ?? '';
+      if (html.trim().isEmpty) return const <String>{};
+
+      final tokens = <String>{};
+      final document = html_parser.parse(html);
+
+      void addToken(String rawValue) {
+        var value = rawValue.trim();
+        if (value.isEmpty) return;
+
+        try {
+          value = Uri.decodeComponent(value.replaceAll('+', ' '));
+        } catch (_) {}
+
+        value = value.trim();
+        if (value.isEmpty || value == '0') return;
+        tokens.add(value);
+      }
+
+      for (final anchor in document.querySelectorAll('a[href]')) {
+        final href = anchor.attributes['href']?.trim() ?? '';
+        if (href.isEmpty || !href.toLowerCase().contains('mc_brand')) continue;
+
+        final normalizedHref = href.replaceAll('&amp;', '&');
+        final uri = Uri.tryParse(normalizedHref);
+        if (uri == null) continue;
+
+        final values = uri.queryParametersAll['mc_brand'] ?? const <String>[];
+        for (final value in values) {
+          addToken(value);
+        }
+      }
+
+      // Compatibilidad con widgets de filtros que guardan la marca en inputs,
+      // options o atributos data-* en lugar de enlaces tradicionales.
+      for (final element in document.querySelectorAll(
+        '[name="mc_brand"], [data-name="mc_brand"], [data-taxonomy="mc_brand"]',
+      )) {
+        for (final key in const <String>['value', 'data-value', 'data-slug']) {
+          final value = element.attributes[key]?.trim() ?? '';
+          if (value.isNotEmpty) addToken(value);
+        }
+      }
+
+      // Último fallback para HTML/JS serializado donde mc_brand aparezca
+      // directamente en una URL aunque no exista como nodo navegable.
+      final matches = RegExp(
+        r'mc_brand(?:=|%3D)([A-Za-z0-9._%+\-]+)',
+        caseSensitive: false,
+      ).allMatches(html);
+      for (final match in matches) {
+        addToken(match.group(1) ?? '');
+      }
+
+      _cachedWebsiteActiveBrandTokens = Set<String>.from(tokens);
+      _cachedWebsiteActiveBrandTokensAt = DateTime.now();
+
+      if (kDebugMode) {
+        debugPrint('🌐 Marcas activas leídas de la web: ${tokens.length}');
+      }
+
+      return tokens;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo sincronizar el filtro de marcas web: $e');
+      }
+      return const <String>{};
+    }
+  }
+
+  Future<Product> _resolveWebsiteBrandForProductIfNeeded(
+    Product product, {
+    Set<String>? activeBrandKeys,
+  }) async {
+    final sku = product.sku.trim();
+    if (sku.isEmpty) return product;
+
+    try {
+      final activeKeys = activeBrandKeys ??
+          (await getWebsiteActiveBrandTokens())
+              .map(_canonicalBrandKey)
+              .where((key) => key.isNotEmpty)
+              .toSet();
+      if (activeKeys.isEmpty) return product;
+
+      final currentBrand = product.brandName?.trim() ?? '';
+      final currentKey = _canonicalBrandKey(currentBrand);
+
+      // Si la marca que trae el API sigue activa en la web, no hacemos nada.
+      // Solo corregimos productos cuyo atributo de marca se ha quedado obsoleto.
+      if (currentKey.isNotEmpty && activeKeys.contains(currentKey)) {
+        return product;
+      }
+
+      final skuKey = _normalizeSkuForCompare(sku);
+      final cachedBrand = _websiteBrandBySkuCache[skuKey];
+      if (cachedBrand != null && cachedBrand.trim().isNotEmpty) {
+        return _withWebsiteResolvedBrand(product, cachedBrand);
+      }
+
+      final resolvedBrand = await _resolveWebsiteBrandFromProductSource(
+        productId: product.id,
+        sku: sku,
+        productName: product.name,
+      );
+
+      if (resolvedBrand == null || resolvedBrand.trim().isEmpty) {
+        return product;
+      }
+
+      _websiteBrandBySkuCache[skuKey] = resolvedBrand.trim();
+      return _withWebsiteResolvedBrand(product, resolvedBrand.trim());
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ No se pudo resolver la marca web de ${product.sku}: $e',
+        );
+      }
+      return product;
+    }
+  }
+
+  Future<List<Product>> _resolveWebsiteBrandsForProducts(
+    List<Product> products,
+  ) async {
+    if (products.isEmpty) return products;
+
+    // Una sola lectura del filtro web para toda la lista evita repetir el mismo
+    // trabajo por producto. Si la web no responde, conservamos exactamente el
+    // fallback secuencial anterior para no cambiar el comportamiento funcional.
+    final activeTokens = await getWebsiteActiveBrandTokens();
+    if (activeTokens.isEmpty) {
+      final resolved = <Product>[];
+      for (final product in products) {
+        resolved.add(await _resolveWebsiteBrandForProductIfNeeded(product));
+      }
+      return resolved;
+    }
+
+    final activeKeys = activeTokens
+        .map(_canonicalBrandKey)
+        .where((key) => key.isNotEmpty)
+        .toSet();
+
+    // Las correcciones que sí necesiten consultar la ficha web se hacen en
+    // lotes pequeños: más rápido que una a una, sin disparar decenas de
+    // peticiones simultáneas contra WooCommerce. Future.wait conserva el orden.
+    const batchSize = 4;
+    final resolved = <Product>[];
+
+    for (var offset = 0; offset < products.length; offset += batchSize) {
+      final batch = products.skip(offset).take(batchSize);
+      resolved.addAll(
+        await Future.wait(
+          batch.map(
+            (product) => _resolveWebsiteBrandForProductIfNeeded(
+              product,
+              activeBrandKeys: activeKeys,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return resolved;
+  }
+
+  Future<String?> _resolveWebsiteBrandFromProductSource({
+    required int productId,
+    required String sku,
+    required String productName,
+  }) async {
+    // Ruta principal: obtenemos el permalink público del mismo producto por ID
+    // y leemos la marca que realmente muestra la ficha web. Esto evita depender
+    // de una búsqueda HTML ambigua cuando varias referencias contienen el mismo
+    // texto (por ejemplo V16).
+    if (productId > 0) {
+      try {
+        final response = await _dio.get<dynamic>(
+          '/wp-json/wc/store/v1/products/$productId',
+          options: Options(
+            responseType: ResponseType.json,
+            headers: const <String, dynamic>{
+              'Accept': 'application/json',
+              'Cache-Control': 'no-cache',
+            },
+          ),
+        );
+
+        final data = _responseMap(response.data);
+        final permalink = data['permalink']?.toString().trim() ?? '';
+
+        if (permalink.isNotEmpty) {
+          final productResponse = await _dio.get<String>(
+            permalink,
+            options: Options(
+              responseType: ResponseType.plain,
+              headers: const <String, dynamic>{
+                'Accept': 'text/html,application/xhtml+xml',
+                'Cache-Control': 'no-cache',
+              },
+            ),
+          );
+
+          final productHtml = productResponse.data ?? '';
+          if (productHtml.trim().isNotEmpty) {
+            final resolved = await _extractWebsiteBrandFromProductHtml(productHtml);
+            if (resolved != null && resolved.trim().isNotEmpty) {
+              return resolved.trim();
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint(
+            '⚠️ No se pudo resolver marca por Store API para producto $productId: $e',
+          );
+        }
+      }
+    }
+
+    // Compatibilidad con instalaciones donde Store API/permalink no esté
+    // disponible: mantenemos el fallback anterior por búsqueda pública.
+    return _resolveWebsiteBrandFromProductSearch(
+      sku: sku,
+      productName: productName,
+    );
+  }
+
+  Future<String?> _resolveWebsiteBrandFromProductSearch({
+    required String sku,
+    required String productName,
+  }) async {
+    final cleanSku = sku.trim();
+    if (cleanSku.isEmpty) return null;
+
+    final response = await _dio.get<String>(
+      '/shop/',
+      queryParameters: <String, dynamic>{
+        's': cleanSku,
+        'post_type': 'product',
+        '_mundicam_app_brand_product': DateTime.now().millisecondsSinceEpoch,
+      },
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: const <String, dynamic>{
+          'Accept': 'text/html,application/xhtml+xml',
+          'Cache-Control': 'no-cache',
+        },
+      ),
+    );
+
+    final html = response.data ?? '';
+    if (html.trim().isEmpty) return null;
+
+    final document = html_parser.parse(html);
+    String productUrl = '';
+    final normalizedSku = _normalizeSkuForCompare(cleanSku);
+    final normalizedName = _normalizeText(productName);
+
+    final productContainers = document.querySelectorAll(
+      'li.product, article.product, div.product, .product-grid-item, .product-content',
+    );
+
+    for (final container in productContainers) {
+      final text = container.text;
+      final normalizedText = _normalizeSkuForCompare(text);
+      final compactText = _normalizeText(text);
+      final matchesSku = normalizedText.contains(normalizedSku);
+      final matchesName = normalizedName.isNotEmpty &&
+          compactText.contains(normalizedName);
+      if (!matchesSku && !matchesName) continue;
+
+      for (final anchor in container.querySelectorAll('a[href]')) {
+        final href = anchor.attributes['href']?.trim() ?? '';
+        if (_looksLikeProductPermalink(href)) {
+          productUrl = href;
+          break;
+        }
+      }
+      if (productUrl.isNotEmpty) break;
+    }
+
+    if (productUrl.isEmpty) {
+      final anchors = document.querySelectorAll('a[href]');
+      final productLinks = anchors.where((anchor) {
+        final href = anchor.attributes['href']?.trim() ?? '';
+        return _looksLikeProductPermalink(href);
+      }).toList();
+
+      if (productLinks.length == 1) {
+        productUrl = productLinks.first.attributes['href']?.trim() ?? '';
+      } else {
+        for (final anchor in productLinks) {
+          final anchorText = _normalizeText(anchor.text);
+          if (normalizedName.isNotEmpty &&
+              anchorText.isNotEmpty &&
+              (anchorText.contains(normalizedName) ||
+                  normalizedName.contains(anchorText))) {
+            productUrl = anchor.attributes['href']?.trim() ?? '';
+            break;
+          }
+        }
+      }
+    }
+
+    if (productUrl.isEmpty) return null;
+
+    final productResponse = await _dio.get<String>(
+      productUrl,
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: const <String, dynamic>{
+          'Accept': 'text/html,application/xhtml+xml',
+          'Cache-Control': 'no-cache',
+        },
+      ),
+    );
+
+    final productHtml = productResponse.data ?? '';
+    if (productHtml.trim().isEmpty) return null;
+
+    return _extractWebsiteBrandFromProductHtml(productHtml);
+  }
+
+  bool _looksLikeProductPermalink(String href) {
+    final clean = href.trim().toLowerCase();
+    if (clean.isEmpty) return false;
+    return clean.contains('/product/') || clean.contains('/producto/');
+  }
+
+  Future<String?> _extractWebsiteBrandFromProductHtml(String html) async {
+    final document = html_parser.parse(html);
+    final brands = await getMarcas(hideEmpty: false);
+
+    String? displayNameFor(String rawValue) {
+      final expected = _canonicalBrandKey(rawValue);
+      if (expected.isEmpty) return null;
+
+      for (final brand in brands) {
+        final name = brand['name']?.toString().trim() ?? '';
+        final slug = brand['slug']?.toString().trim() ?? '';
+        if (_canonicalBrandKey(name) == expected ||
+            _canonicalBrandKey(slug) == expected) {
+          return name.isEmpty ? rawValue.trim() : name;
+        }
+      }
+      return null;
+    }
+
+    final orderedBrands = List<Map<String, dynamic>>.from(brands)
+      ..sort((a, b) {
+        final aName = a['name']?.toString() ?? '';
+        final bName = b['name']?.toString() ?? '';
+        return bName.length.compareTo(aName.length);
+      });
+
+    // 1) La propia ficha pública muestra "Marca: X". Esta fuente tiene
+    // prioridad y evita confundir enlaces del menú/filtros con la marca real.
+    for (final element in document.querySelectorAll('span, p, div, li')) {
+      final text = element.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (text.length > 180) continue;
+
+      final marker = RegExp(r'\bMarca\s*:\s*', caseSensitive: false)
+          .firstMatch(text);
+      if (marker == null) continue;
+
+      final tail = text.substring(marker.end).trim();
+      if (tail.isEmpty) continue;
+      final normalizedTail = _normalizeText(tail);
+
+      for (final brand in orderedBrands) {
+        final name = brand['name']?.toString().trim() ?? '';
+        if (name.isEmpty) continue;
+        final key = _normalizeText(name);
+        if (key.isNotEmpty && normalizedTail.startsWith(key)) {
+          return name;
+        }
+      }
+    }
+
+    // 2) Respaldo: enlaces de marca, pero solo dentro del bloque de ficha.
+    final scopedRoots = document.querySelectorAll(
+      '.summary, .product_meta, .product-information, .single-product-content, main .product',
+    );
+
+    for (final root in scopedRoots) {
+      for (final anchor in root.querySelectorAll('a[href]')) {
+        final href = (anchor.attributes['href'] ?? '').replaceAll('&amp;', '&');
+        if (href.isEmpty) continue;
+
+        final uri = Uri.tryParse(href);
+        final brandToken = uri?.queryParameters['mc_brand']?.trim() ?? '';
+        if (brandToken.isNotEmpty) {
+          final resolved = displayNameFor(brandToken);
+          if (resolved != null && resolved.isNotEmpty) return resolved;
+        }
+
+        final lowerHref = href.toLowerCase();
+        if (lowerHref.contains('/fabricantes/')) {
+          final anchorText = anchor.text.trim();
+          final resolved = displayNameFor(anchorText);
+          if (resolved != null && resolved.isNotEmpty) return resolved;
+        }
+      }
+    }
+
+    return null;
+  }
+
   Future<List<CategoryModel>> getCategoriasPorMarca({
     required int brandId,
     String? brandName,
@@ -2024,26 +2462,46 @@ class ApiService {
         : ((await getMarcaNombrePorId(effectiveBrandId)) ?? '');
     final guarded = _guardCatalogResultBrand(result, effectiveBrandName);
 
-    // Si la API de catálogo no devuelve nada para una marca concreta, usamos
-    // la propia web de MundiCam como fuente de descubrimiento (mc_brand +
-    // product_cat) y después resolvemos cada SKU por la API autenticada. Así la
-    // web decide qué referencias pertenecen realmente a la marca/categoría,
-    // pero precios, stock y permisos siguen viniendo de la sesión B2B real.
-    if (guarded.products.isEmpty &&
-        effectiveBrandName.isNotEmpty &&
+    // En navegación por MARCAS, la web pública (mc_brand) manda sobre el
+    // atributo legado. La API sigue aportando precio/stock B2B, pero añadimos
+    // las referencias que la web tenga asignadas realmente a esta marca.
+    // Ejemplo: un producto cuyo atributo antiguo siga siendo ZTE pero cuya
+    // marca pública sea MCi debe aparecer dentro de MCi.
+    if (effectiveBrandName.isNotEmpty &&
+        cleanSearch.isEmpty &&
         requestedPage == 1) {
-      final websiteFallback = await _websiteBrandProductsFallback(
+      final websiteResolved = await _websiteBrandProductsFallback(
         brandId: effectiveBrandId,
         brandName: effectiveBrandName,
         categoryId: categoryId,
         perPage: requestedPerPage,
       );
-      if (websiteFallback != null && websiteFallback.products.isNotEmpty) {
-        return websiteFallback;
+
+      if (websiteResolved != null && websiteResolved.products.isNotEmpty) {
+        final mergedById = <int, Product>{
+          for (final product in guarded.products) product.id: product,
+        };
+
+        // La versión resuelta por la web se inserta después para que, si el
+        // producto ya existía, prevalezca la marca pública correcta.
+        for (final product in websiteResolved.products) {
+          mergedById[product.id] = product;
+        }
+
+        final merged = mergedById.values.toList();
+        final resolvedMerged = await _resolveWebsiteBrandsForProducts(merged);
+        return guarded.copyWith(
+          products: resolvedMerged,
+          totalItems: guarded.totalItems > resolvedMerged.length
+              ? guarded.totalItems
+              : resolvedMerged.length,
+        );
       }
     }
 
-    return guarded;
+    final resolvedProducts =
+        await _resolveWebsiteBrandsForProducts(guarded.products);
+    return guarded.copyWith(products: resolvedProducts);
   }
 
   Future<CatalogProductsResult?> _websiteBrandProductsFallback({
@@ -3304,7 +3762,8 @@ class ApiService {
       final data = _responseMap(response.data);
       final productMap = _asMap(data['product'] ?? data['data'] ?? response.data);
       if (productMap.isEmpty) return null;
-      return Product.fromJson(productMap);
+      final product = Product.fromJson(productMap);
+      return _resolveWebsiteBrandForProductIfNeeded(product);
     } catch (e) {
       if (kDebugMode) debugPrint('❌ Error getProductoById($id): $e');
       return null;
@@ -3433,6 +3892,54 @@ class ApiService {
     }
 
     return const <PromotionModel>[];
+  }
+
+
+
+  /// Historial de comunicaciones enviadas para el buzón.
+  ///
+  /// El endpoint está autenticado con el mismo app_token que el resto de
+  /// MundiCam App API. Si no está disponible o hay un fallo de red, se devuelve
+  /// una lista vacía para que el buzón local siga funcionando sin afectar FCM.
+  Future<List<Map<String, dynamic>>> getNotificationHistory({
+    int limit = 100,
+  }) async {
+    final safeLimit = limit < 1 ? 1 : (limit > 100 ? 100 : limit);
+
+    try {
+      final response = await _appGet(
+        '/communications/history',
+        queryParameters: <String, dynamic>{
+          'limit': safeLimit,
+        },
+      );
+
+      final root = _responseMap(response.data);
+      final raw = _firstList([
+        root['items'],
+        root['notifications'],
+        root['data'],
+      ]);
+
+      return raw
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } on DioException catch (error) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ No se pudo cargar el histórico remoto de notificaciones: $error',
+        );
+      }
+      return const <Map<String, dynamic>>[];
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ No se pudo cargar el histórico remoto de notificaciones: $error',
+        );
+      }
+      return const <Map<String, dynamic>>[];
+    }
   }
 
   /// Resuelve la página pública real de una promoción en mundicam.com.
@@ -5081,6 +5588,17 @@ class ApiService {
     if (RegExp(r'\s').hasMatch(raw)) return false;
 
     final compact = raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+
+    // Términos técnicos habituales no son referencias/SKU. Ejemplo: RJ45.
+    // Si se clasifican como SKU, enviamos sku=RJ45 y ocultamos productos cuyo
+    // título/descripcion sí contienen RJ45 pero cuyo SKU real es MC-CON300, etc.
+    if (RegExp(r'^RJ\d{2,3}$').hasMatch(compact)) return false;
+
+    // Referencias cortas reales como V16 también son SKU. Antes se descartaban
+    // por exigir 5 caracteres y el predictivo no mostraba el producto aunque
+    // la búsqueda completa sí lo encontrase.
+    if (RegExp(r'^[A-Z]{1,2}\d{2,3}$').hasMatch(compact)) return true;
+
     if (compact.length < 5) return false;
     if (!RegExp(r'[A-Z]').hasMatch(compact) || !RegExp(r'\d').hasMatch(compact)) {
       return false;

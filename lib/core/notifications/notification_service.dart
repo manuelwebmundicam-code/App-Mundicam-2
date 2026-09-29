@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:mundicam/core/notifications/notification_inbox_store.dart';
 
 class MundiCamOrderNotification {
   final String event;
@@ -588,11 +589,21 @@ class NotificationService {
     RemoteMessage message,
   ) async {
     // Los mensajes que ya contienen `notification` los muestra el sistema cuando
-    // la app está en segundo plano/cerrada. Solo creamos un aviso local para
-    // mensajes data-only, evitando notificaciones duplicadas.
-    if (message.notification != null) return;
-
+    // la app está en segundo plano/cerrada. Los guardamos en el buzón, pero no
+    // creamos un aviso local adicional para evitar notificaciones duplicadas.
     final service = NotificationService();
+    if (message.notification != null) {
+      final systemNotification = MundiCamOrderNotification.fromRemoteMessage(
+        message,
+        showPopup: false,
+        openedByUser: false,
+      );
+      if (systemNotification != null) {
+        await service._saveNotificationInInbox(systemNotification);
+      }
+      return;
+    }
+
     await service._initializeLocalNotifications();
 
     final notification = MundiCamOrderNotification.fromRemoteMessage(
@@ -607,6 +618,7 @@ class NotificationService {
     if (!isNew) return;
 
     await service._showLocalNotification(notification);
+    await service._saveNotificationInInbox(notification);
   }
 
   Future<void> _initializeLocalNotifications() async {
@@ -695,6 +707,7 @@ class NotificationService {
     _emitNotification(
       notification.copyWith(showPopup: notification.wantsInAppPopup),
     );
+    unawaited(_saveNotificationInInbox(notification));
   }
 
   void _handleRemoteMessageOpenedByUser(RemoteMessage message) {
@@ -717,6 +730,7 @@ class NotificationService {
         },
       ),
     );
+    unawaited(_saveNotificationInInbox(notification));
     _emitNotification(notification);
   }
 
@@ -739,6 +753,7 @@ class NotificationService {
         },
       ),
     );
+    unawaited(_saveNotificationInInbox(notification));
     _emitNotification(notification);
   }
 
@@ -921,6 +936,110 @@ class NotificationService {
       hash = (hash * 0x01000193) & 0x7fffffff;
     }
     return hash;
+  }
+
+  Future<void> _saveNotificationInInbox(
+    MundiCamOrderNotification notification,
+  ) async {
+    final data = notification.data;
+
+    // El buzón del cliente debe contener únicamente comunicaciones reales.
+    // Las pruebas técnicas/manuales siguen llegando por FCM para diagnóstico,
+    // pero nunca se persisten ni se muestran como histórico del usuario.
+    if (_isInboxTestNotification(notification, data)) return;
+    final explicitId = data['event_id']?.toString().trim() ??
+        data['eventId']?.toString().trim() ??
+        notification.messageId?.trim() ??
+        data['message_id']?.toString().trim() ??
+        data['notification_id']?.toString().trim() ??
+        '';
+
+    final timestamp = data['timestamp']?.toString().trim() ??
+        data['sent_at']?.toString().trim() ??
+        data['sentAt']?.toString().trim() ??
+        '';
+
+    final fallbackId = <String>[
+      notification.event,
+      notification.orderId?.toString() ?? '',
+      notification.status ?? '',
+      timestamp,
+      notification.title,
+      notification.body,
+    ].join('|');
+
+    final api = ApiService();
+    if (!await api.hasStoredAppSession()) return;
+
+    final wordpressId = await api.currentSessionWordPressId();
+    final email = await api.currentSessionEmail();
+    final scope = NotificationInboxStore.scopeForUser(
+      wordpressId: wordpressId,
+      email: email,
+    );
+    if (scope == null) return;
+
+    await NotificationInboxStore.instance.save(
+      scope: scope,
+      id: explicitId.isNotEmpty ? explicitId : fallbackId,
+      title: notification.title,
+      body: notification.body,
+      event: notification.event,
+      imageUrl: notification.imageUrl,
+      orderId: notification.orderId,
+      orderNumber: notification.orderNumber,
+      status: notification.status,
+      openedByUser: notification.openedByUser,
+    );
+  }
+
+  bool _isInboxTestNotification(
+    MundiCamOrderNotification notification,
+    Map<String, dynamic> data,
+  ) {
+    String clean(dynamic value) =>
+        value?.toString().trim().toLowerCase() ?? '';
+
+    final event = clean(notification.event);
+    final type = clean(data['type']);
+    final source = clean(data['source']);
+    final eventId = clean(data['event_id'] ?? data['eventId']);
+    final testFlag = clean(data['is_test'] ?? data['test'] ?? data['diagnostic']);
+
+    const testMarkers = <String>{
+      'diagnostic_test',
+      'fcm_test',
+      'push_test',
+      'test',
+    };
+
+    if (testMarkers.contains(event) ||
+        testMarkers.contains(type) ||
+        source == 'test' ||
+        source == 'diagnostic') {
+      return true;
+    }
+
+    if (eventId.startsWith('diagnostic:') ||
+        eventId.startsWith('test:') ||
+        eventId.startsWith('fcm-test:')) {
+      return true;
+    }
+
+    if (testFlag == '1' || testFlag == 'true' || testFlag == 'yes') {
+      return true;
+    }
+
+    // Valores exactos usados por la prueba manual del plugin. Evitamos una
+    // heurística por la palabra "prueba" para no ocultar comunicaciones reales.
+    final title = clean(notification.title);
+    final body = clean(notification.body);
+    if (title == 'prueba mundicam' &&
+        body == 'prueba de notificación desde wordpress') {
+      return true;
+    }
+
+    return false;
   }
 
   void _emitNotification(MundiCamOrderNotification notification) {

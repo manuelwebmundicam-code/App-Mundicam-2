@@ -8,8 +8,21 @@ import 'package:mundicam/shared/theme/app_theme.dart';
 
 final homeBrandsProvider =
 FutureProvider<List<Map<String, dynamic>>>((ref) async {
-  final brands =
-  await ApiService().getMarcas(hideEmpty: true, forceRefresh: true);
+  final api = ApiService();
+
+  // Ambas fuentes son independientes. Las arrancamos a la vez para que Home
+  // no pague dos esperas de red consecutivas al preparar la pestaña MARCAS.
+  final brandsFuture =
+      api.getMarcas(hideEmpty: false, forceRefresh: true);
+  final websiteBrandTokensFuture = api.getWebsiteActiveBrandTokens();
+
+  final brands = await brandsFuture;
+  final websiteBrandTokens = await websiteBrandTokensFuture;
+
+  final websiteBrandKeys = websiteBrandTokens
+      .map(_canonicalBrandKey)
+      .where((key) => key.isNotEmpty)
+      .toSet();
 
   final deduped = <Map<String, dynamic>>[];
   final seen = <String>{};
@@ -22,9 +35,24 @@ FutureProvider<List<Map<String, dynamic>>>((ref) async {
     final canonical = _canonicalBrandKey(
       name.isNotEmpty ? name : slug,
     );
+    final slugCanonical = _canonicalBrandKey(slug);
 
-    if (canonical.isEmpty || !seen.add(canonical)) {
+    // La pantalla MARCAS debe seguir la marca real publicada en la web
+    // (mc_brand), no el atributo legado pa_marcas del producto.
+    // Si no podemos leer el filtro web, conservamos el fallback anterior por count.
+    final isWebsiteActive = websiteBrandKeys.isNotEmpty
+        ? websiteBrandKeys.contains(canonical) ||
+            (slugCanonical.isNotEmpty && websiteBrandKeys.contains(slugCanonical))
+        : _parseInt(brand['count']) > 0;
+
+    if (!isWebsiteActive || canonical.isEmpty || !seen.add(canonical)) {
       continue;
+    }
+
+    // El count de /brands puede venir del atributo antiguo. Si la web confirma
+    // la marca como activa, evitamos que ese count legado la oculte.
+    if (websiteBrandKeys.isNotEmpty && _parseInt(brand['count']) <= 0) {
+      brand['count'] = 1;
     }
 
     deduped.add(brand);
@@ -164,8 +192,9 @@ class BrandGrid extends ConsumerWidget {
           final id = _parseInt(brand['id']);
           final name =
               brand['name']?.toString().trim() ?? '';
+          final count = _parseInt(brand['count']);
 
-          return id > 0 && name.isNotEmpty;
+          return id > 0 && name.isNotEmpty && count > 0;
         }).toList();
 
         if (visibleBrands.isEmpty) {
