@@ -678,7 +678,7 @@ class CartPage extends ConsumerWidget {
             Icon(
               Icons.shopping_cart_outlined,
               size: 76,
-              color: Colors.grey.shade300,
+              color: const Color(0xFFB0B6BF),
             ),
             const SizedBox(height: 18),
             const Text(

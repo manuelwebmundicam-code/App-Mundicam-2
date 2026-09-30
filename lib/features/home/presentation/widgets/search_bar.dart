@@ -637,7 +637,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
 
   bool _looksLikeSku(String value) {
     final raw = value.trim();
-    if (raw.length < 4) return false;
+    if (raw.length < 3) return false;
 
     // Senior rule: si el usuario escribe una frase con espacios, NO es SKU.
     // Ejemplos de búsqueda general: "dahua 6mp", "camara ajax",
@@ -647,6 +647,10 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
 
     final upper = raw.toUpperCase();
     final compact = upper.replaceAll(RegExp(r'[^A-Z0-9]'), '');
+
+    // Referencias cortas reales como V16 deben entrar en el predictivo como SKU.
+    if (RegExp(r'^[A-Z]{1,2}\d{2,3}$').hasMatch(compact)) return true;
+
     if (compact.length < 5) return false;
     if (!RegExp(r'[A-Z]').hasMatch(compact) || !RegExp(r'\d').hasMatch(compact)) {
       return false;

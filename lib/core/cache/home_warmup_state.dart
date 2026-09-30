@@ -3,7 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Estado local del calentamiento inicial de Home.
 ///
 /// La pantalla completa de carga se usa una sola vez por instalación, hasta que
-/// categorías + promociones + Academy hayan terminado su primera carga. Después
+/// categorías + marcas + promociones + Academy hayan terminado su primera carga.
+/// Después
 /// los providers pueden refrescar en segundo plano sin volver a bloquear Home.
 class HomeWarmupState {
   HomeWarmupState._();

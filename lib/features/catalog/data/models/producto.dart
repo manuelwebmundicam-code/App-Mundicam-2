@@ -376,19 +376,41 @@ class Product {
 
     final extractedBrand = _extractBrandFromJson(json);
 
-    final hasBrandAttribute = parsedAttributes.any((attr) {
-      return _isBrandAttribute(_normalizeAttributeName(attr.name));
-    });
+    // Si el backend devuelve una marca/fabricante explícito, esa es la fuente
+    // válida para la app. El atributo WooCommerce puede conservar un valor
+    // antiguo (por ejemplo ZTE) aunque la marca publicada en la web sea MCi.
+    // Sustituimos solo el atributo de marca; el resto de atributos queda intacto.
+    if (extractedBrand != null && extractedBrand.trim().isNotEmpty) {
+      final resolvedBrand = extractedBrand.trim();
+      final resolvedAttributes = <ProductAttribute>[];
+      var replacedBrandAttribute = false;
 
-    if (extractedBrand != null &&
-        extractedBrand.trim().isNotEmpty &&
-        !hasBrandAttribute) {
-      parsedAttributes.add(
-        ProductAttribute(
-          name: 'Fabricante',
-          options: [extractedBrand.trim()],
-        ),
-      );
+      for (final attr in parsedAttributes) {
+        if (_isBrandAttribute(_normalizeAttributeName(attr.name))) {
+          resolvedAttributes.add(
+            ProductAttribute(
+              name: attr.name.trim().isEmpty ? 'Fabricante' : attr.name,
+              options: [resolvedBrand],
+            ),
+          );
+          replacedBrandAttribute = true;
+        } else {
+          resolvedAttributes.add(attr);
+        }
+      }
+
+      if (!replacedBrandAttribute) {
+        resolvedAttributes.add(
+          ProductAttribute(
+            name: 'Fabricante',
+            options: [resolvedBrand],
+          ),
+        );
+      }
+
+      parsedAttributes
+        ..clear()
+        ..addAll(resolvedAttributes);
     }
 
     // =========================

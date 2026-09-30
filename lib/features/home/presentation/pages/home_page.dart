@@ -57,8 +57,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   late final VoidCallback _updateAnnouncementListener;
 
   // La pantalla completa de preparación se usa una sola vez por instalación.
-  // En esa primera ejecución esperamos categorías, promociones y Academy. Cuando
-  // las tres fuentes han terminado, se guarda un marcador local y los siguientes
+  // En esa primera ejecución esperamos categorías, marcas, promociones y Academy.
+  // Cuando las cuatro fuentes han terminado, se guarda un marcador local y los siguientes
   // arranques muestran Home directamente mientras cualquier refresco ocurre en
   // segundo plano.
   bool _initialHomeReady = HomeWarmupState.completed;
@@ -222,6 +222,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       _initialBootstrapRetryScheduled = false;
       _initialBootstrapRetryCount = retryNumber;
       ref.invalidate(categoriesProvider);
+      ref.invalidate(homeBrandsProvider);
       ref.invalidate(promotionsProvider);
       ref.read(academyProvider.notifier).retry();
     });
@@ -231,6 +232,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     _initialBootstrapRetryScheduled = false;
     _initialBootstrapRetryCount = 0;
     ref.invalidate(categoriesProvider);
+    ref.invalidate(homeBrandsProvider);
     ref.invalidate(promotionsProvider);
     ref.read(academyProvider.notifier).retry();
     setState(() {});
@@ -545,9 +547,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     // Gate solo de la PRIMERA preparación de esta instalación.
-    // Fase 1: categorías. Cuando están listas, arrancamos Promociones + Academy
-    // sin competir con la consulta esencial del catálogo. Fase 2: esperamos a
-    // que ambas fuentes terminen (pueden devolver listas vacías legítimamente).
+    // Fase 1: categorías. Cuando están listas, arrancamos Marcas + Promociones +
+    // Academy sin competir con la consulta esencial del catálogo. Fase 2: esperamos
+    // a que las tres fuentes terminen (pueden devolver listas vacías legítimamente).
     // Después se persiste el marcador y esta pantalla completa no vuelve a salir.
     if (!_initialHomeReady) {
       final categoriesAsync = ref.watch(categoriesProvider);
@@ -564,17 +566,21 @@ class _HomePageState extends ConsumerState<HomePage> {
             : _buildInitialHomeRetry();
       }
 
+      final brandsAsync = ref.watch(homeBrandsProvider);
       final promotionsAsync = ref.watch(promotionsProvider);
       final academyAsync = ref.watch(academyProvider);
 
+      final brandsReady = brandsAsync.hasValue;
       final promotionsReady = promotionsAsync.hasValue;
       final academyReady = academyAsync.hasValue;
 
-      if (promotionsAsync.hasError || academyAsync.hasError) {
+      if (brandsAsync.hasError ||
+          promotionsAsync.hasError ||
+          academyAsync.hasError) {
         _scheduleInitialBootstrapRetry();
       }
 
-      if (!promotionsReady || !academyReady) {
+      if (!brandsReady || !promotionsReady || !academyReady) {
         return _initialBootstrapRetryCount < _maxInitialBootstrapRetries
             ? _buildInitialHomeLoading()
             : _buildInitialHomeRetry();
