@@ -16,24 +16,24 @@ class PromotionsPage extends ConsumerWidget {
     BuildContext context,
     PromotionModel promotion,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
+    Uri? uri;
 
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      const SnackBar(
-        duration: Duration(seconds: 12),
-        content: Text('Abriendo promoción en MundiCam…'),
-      ),
-    );
-
-    final uri = await ApiService().resolvePromotionWebUri(promotion);
+    final direct = Uri.tryParse(promotion.webUrl.trim());
+    if (direct != null &&
+        (direct.scheme == 'https' || direct.scheme == 'http') &&
+        (direct.host.toLowerCase() == 'mundicam.com' ||
+            direct.host.toLowerCase() == 'www.mundicam.com')) {
+      uri = direct;
+    } else {
+      // Compatibilidad con promociones antiguas que pudieran no tener URL
+      // guardada. No afecta a las nuevas, que usan target_url del plugin.
+      uri = await ApiService().resolvePromotionWebUri(promotion);
+    }
 
     if (!context.mounted) return;
 
-    messenger.hideCurrentSnackBar();
-
     if (uri == null) {
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
             'No se ha encontrado la página web de esta promoción.',
@@ -43,12 +43,20 @@ class PromotionsPage extends ConsumerWidget {
       return;
     }
 
+    final cleanUri = uri.replace(
+      queryParameters: <String, String>{
+        ...uri.queryParameters,
+        'mundicam_app_promo': '1',
+      },
+    );
+
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => MundiCamWebViewPage(
           title: 'PROMOCIÓN',
-          initialUri: uri,
+          initialUri: cleanUri,
           closeOnBack: true,
+          showAppBar: false,
         ),
       ),
     );

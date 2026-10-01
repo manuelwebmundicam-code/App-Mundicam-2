@@ -13,6 +13,7 @@ class MundiCamWebViewPage extends StatefulWidget {
     this.url,
     this.focusRegistration = false,
     this.closeOnBack = false,
+    this.showAppBar = true,
   }) : assert(
           initialUri != null || url != null,
           'Debe indicarse initialUri o url.',
@@ -31,6 +32,11 @@ class MundiCamWebViewPage extends StatefulWidget {
   /// cierran esta WebView y vuelven directamente a la pantalla Flutter
   /// que la abrió, sin recorrer el historial interno de la web.
   final bool closeOnBack;
+
+  /// Permite ocultar únicamente la barra Flutter en pantallas que ya
+  /// presentan su propio contenido a pantalla completa, como Promociones.
+  /// Por defecto sigue activa para no cambiar el resto de WebViews.
+  final bool showAppBar;
 
   Uri get resolvedInitialUri => initialUri ?? Uri.parse(url!);
 
@@ -199,10 +205,12 @@ class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.white,
-        appBar: ProfessionalPageAppBar(
-          title: widget.title,
-          onBack: _handleBack,
-        ),
+        appBar: widget.showAppBar
+            ? ProfessionalPageAppBar(
+                title: widget.title,
+                onBack: _handleBack,
+              )
+            : null,
         body: Stack(
           children: [
             WebViewWidget(controller: _controller),
