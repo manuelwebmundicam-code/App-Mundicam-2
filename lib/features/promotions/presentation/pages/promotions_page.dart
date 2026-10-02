@@ -53,10 +53,12 @@ class PromotionsPage extends ConsumerWidget {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => MundiCamWebViewPage(
-          title: 'PROMOCIÓN',
+          title: 'PROMOCIONES',
           initialUri: cleanUri,
           closeOnBack: true,
-          showAppBar: false,
+          showAppBar: true,
+          showRefreshButton: true,
+          contentTopSpacing: 12.0,
         ),
       ),
     );

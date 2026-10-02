@@ -14,6 +14,8 @@ class MundiCamWebViewPage extends StatefulWidget {
     this.focusRegistration = false,
     this.closeOnBack = false,
     this.showAppBar = true,
+    this.showRefreshButton = false,
+    this.contentTopSpacing = 0.0,
   }) : assert(
           initialUri != null || url != null,
           'Debe indicarse initialUri o url.',
@@ -37,6 +39,14 @@ class MundiCamWebViewPage extends StatefulWidget {
   /// presentan su propio contenido a pantalla completa, como Promociones.
   /// Por defecto sigue activa para no cambiar el resto de WebViews.
   final bool showAppBar;
+
+  /// Muestra el botón de recarga en la cabecera Flutter. Por defecto queda
+  /// desactivado para no alterar el resto de WebViews de la app.
+  final bool showRefreshButton;
+
+  /// Espacio visual entre la AppBar Flutter y el contenido web.
+  /// Se deja a 0 por defecto para no alterar otras WebViews.
+  final double contentTopSpacing;
 
   Uri get resolvedInitialUri => initialUri ?? Uri.parse(url!);
 
@@ -209,23 +219,34 @@ class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
             ? ProfessionalPageAppBar(
                 title: widget.title,
                 onBack: _handleBack,
+                onRefresh: widget.showRefreshButton
+                    ? () => _controller.reload()
+                    : null,
               )
             : null,
-        body: Stack(
+        body: Column(
           children: [
-            WebViewWidget(controller: _controller),
-            if (_loadingProgress < 100)
-              Align(
-                alignment: Alignment.topCenter,
-                child: LinearProgressIndicator(
-                  value: _loadingProgress > 0
-                      ? _loadingProgress / 100
-                      : null,
-                  minHeight: 2,
-                  color: AppColors.primary,
-                  backgroundColor: const Color(0xFFF1F3F5),
-                ),
+            if (widget.contentTopSpacing > 0)
+              SizedBox(height: widget.contentTopSpacing),
+            Expanded(
+              child: Stack(
+                children: [
+                  WebViewWidget(controller: _controller),
+                  if (_loadingProgress < 100)
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: LinearProgressIndicator(
+                        value: _loadingProgress > 0
+                            ? _loadingProgress / 100
+                            : null,
+                        minHeight: 2,
+                        color: AppColors.primary,
+                        backgroundColor: const Color(0xFFF1F3F5),
+                      ),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),
