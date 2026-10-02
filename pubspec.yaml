@@ -3,8 +3,7 @@ description: "App oficial de Mundicam"
 publish_to: "none"
 
 # Nueva versión Android e iOS.
-version: 1.6.11+42
-
+version: 1.6.11+43
 environment:
   sdk: ">=3.9.2 <4.0.0"
 
