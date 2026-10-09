@@ -40,7 +40,10 @@ class _HomeHeaderState extends State<HomeHeader> {
     try {
       final entries = await loadNotificationInboxEntries();
       if (!mounted) return;
-      setState(() => _notificationCount = entries.length);
+      setState(
+        () => _notificationCount =
+            entries.where((entry) => !entry.openedByUser).length,
+      );
     } catch (_) {
       // El contador es visual y nunca debe afectar al funcionamiento del home.
     }

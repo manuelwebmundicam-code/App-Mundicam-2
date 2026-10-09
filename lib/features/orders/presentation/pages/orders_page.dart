@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
+import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
 import 'package:mundicam/features/orders/data/models/order_model.dart';
@@ -40,6 +41,7 @@ class OrdersPage extends ConsumerStatefulWidget {
 class _OrdersPageState extends ConsumerState<OrdersPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  int? _payingOrderId;
 
   @override
   void dispose() {
@@ -71,6 +73,72 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _payOrder(BuildContext context, OrderMundicam order) async {
+    if (_payingOrderId != null || !order.actions.canPay) return;
+    if (order.id <= 0 || order.orderKey.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se dispone de la clave necesaria para pagar este pedido.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _payingOrderId = order.id);
+    try {
+      final paymentUrl = await ApiService().getSecureCardPaymentUrl(
+        orderId: order.id,
+        orderKey: order.orderKey,
+      );
+      if (!mounted) return;
+
+      if (paymentUrl == null || paymentUrl.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este pedido no dispone ahora mismo de un enlace de pago válido.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PaymentPage(
+            orderId: order.id,
+            orderKey: order.orderKey,
+            paymentUrl: paymentUrl,
+            orderNumber: order.number.trim().isEmpty
+                ? order.id.toString()
+                : order.number.trim(),
+            paymentMethodTitle: order.paymentMethodTitle.trim().isEmpty
+                ? 'Pagar pedido'
+                : order.paymentMethodTitle.trim(),
+          ),
+        ),
+      );
+
+      if (mounted) {
+        ref.invalidate(ordersProvider);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo abrir el pago del pedido: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _payingOrderId = null);
+      }
+    }
   }
 
   @override
@@ -370,6 +438,43 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    if (order.actions.canPay) ...[
+                      SizedBox(
+                        height: 30,
+                        child: ElevatedButton.icon(
+                          onPressed: _payingOrderId == null
+                              ? () => _payOrder(context, order)
+                              : null,
+                          icon: _payingOrderId == order.id
+                              ? const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.payment_rounded, size: 14),
+                          label: const Text(
+                            'PAGAR',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                    ],
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 9,
@@ -565,6 +670,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
   OrderMundicam? _loadedOrder;
   bool _isRepeating = false;
   bool _isCancelling = false;
+  bool _isPaying = false;
 
   final Map<int, Product?> _productPreviewCache = <int, Product?>{};
   final Map<int, Future<Product?>> _productPreviewFutures =
@@ -774,6 +880,70 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+    }
+  }
+
+  Future<void> _payOrder(OrderMundicam order) async {
+    if (_isPaying || !order.actions.canPay) return;
+    if (order.id <= 0 || order.orderKey.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se dispone de la clave necesaria para pagar este pedido.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isPaying = true);
+    try {
+      final paymentUrl = await ApiService().getSecureCardPaymentUrl(
+        orderId: order.id,
+        orderKey: order.orderKey,
+      );
+      if (!mounted) return;
+
+      if (paymentUrl == null || paymentUrl.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este pedido no dispone ahora mismo de un enlace de pago válido.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PaymentPage(
+            orderId: order.id,
+            orderKey: order.orderKey,
+            paymentUrl: paymentUrl,
+            orderNumber: order.number.trim().isEmpty
+                ? order.id.toString()
+                : order.number.trim(),
+            paymentMethodTitle: order.paymentMethodTitle.trim().isEmpty
+                ? 'Pagar pedido'
+                : order.paymentMethodTitle.trim(),
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+      ref.invalidate(ordersProvider);
+      await _refresh();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo abrir el pago del pedido: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPaying = false);
     }
   }
 
@@ -1044,6 +1214,40 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                   ),
                 ],
                 const SizedBox(height: 14),
+                if (order.actions.canPay) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton.icon(
+                      onPressed: _isPaying ? null : () => _payOrder(order),
+                      icon: _isPaying
+                          ? const SizedBox(
+                              width: 17,
+                              height: 17,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.payment_rounded, size: 18),
+                      label: Text(
+                        _isPaying ? 'ABRIENDO PAGO...' : 'PAGAR',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 if (order.actions.canCancel) ...[
                   SizedBox(
                     width: double.infinity,

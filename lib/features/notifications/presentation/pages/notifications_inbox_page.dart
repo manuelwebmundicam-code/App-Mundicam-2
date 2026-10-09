@@ -178,6 +178,22 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
   }
 
   Future<void> _showNotificationDetails(NotificationInboxEntry entry) async {
+    final openedEntry = entry.openedByUser
+        ? entry
+        : entry.copyWith(openedByUser: true);
+
+    if (!entry.openedByUser) {
+      setState(() {
+        _entries = _entries
+            .map((item) => item.id == entry.id ? openedEntry : item)
+            .toList(growable: false);
+      });
+
+      await _persistOpenedState(entry);
+    }
+
+    if (!mounted) return;
+
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -186,7 +202,7 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
           contentPadding: const EdgeInsets.fromLTRB(22, 0, 22, 10),
           actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           title: Text(
-            entry.title,
+            openedEntry.title,
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
           content: SingleChildScrollView(
@@ -194,11 +210,11 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if ((entry.imageUrl ?? '').isNotEmpty) ...[
+                if ((openedEntry.imageUrl ?? '').isNotEmpty) ...[
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.network(
-                      entry.imageUrl!,
+                      openedEntry.imageUrl!,
                       width: double.infinity,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
@@ -207,7 +223,7 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
                   const SizedBox(height: 14),
                 ],
                 Text(
-                  entry.body,
+                  openedEntry.body,
                   style: const TextStyle(
                     fontSize: 15,
                     height: 1.4,
@@ -216,7 +232,7 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  _formatDate(entry.receivedAt),
+                  _formatDate(openedEntry.receivedAt),
                   style: const TextStyle(
                     fontSize: 12,
                     color: Color(0xFF818893),
@@ -235,6 +251,28 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
       },
     );
   }
+
+  Future<void> _persistOpenedState(NotificationInboxEntry entry) async {
+    try {
+      final api = ApiService();
+      final wordpressId = await api.currentSessionWordPressId();
+      final email = await api.currentSessionEmail();
+      final scope = NotificationInboxStore.scopeForUser(
+        wordpressId: wordpressId,
+        email: email,
+      );
+
+      if (scope == null) return;
+
+      await NotificationInboxStore.instance.markOpened(
+        scope: scope,
+        entry: entry,
+      );
+    } catch (_) {
+      // El estado leído es visual/local y nunca debe bloquear la apertura.
+    }
+  }
+
 }
 
 class _NotificationCard extends StatelessWidget {
@@ -249,9 +287,12 @@ class _NotificationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final imageUrl = entry.imageUrl?.trim() ?? '';
+    final isUnread = !entry.openedByUser;
+    final cardColor =
+        isUnread ? const Color(0xFFE5E7EB) : Colors.white;
 
     return Material(
-      color: Colors.white,
+      color: cardColor,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
@@ -259,8 +300,13 @@ class _NotificationCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
+            color: cardColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFE8EBEF)),
+            border: Border.all(
+              color: isUnread
+                  ? const Color(0xFFD1D5DB)
+                  : const Color(0xFFE8EBEF),
+            ),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x0A000000),

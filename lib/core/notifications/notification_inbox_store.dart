@@ -46,6 +46,23 @@ class NotificationInboxEntry {
         cleanId.startsWith('fcm-test:');
   }
 
+  NotificationInboxEntry copyWith({
+    bool? openedByUser,
+  }) {
+    return NotificationInboxEntry(
+      id: id,
+      title: title,
+      body: body,
+      event: event,
+      imageUrl: imageUrl,
+      orderId: orderId,
+      orderNumber: orderNumber,
+      status: status,
+      receivedAt: receivedAt,
+      openedByUser: openedByUser ?? this.openedByUser,
+    );
+  }
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'title': title,
@@ -208,6 +225,27 @@ class NotificationInboxStore {
         debugPrint('⚠️ No se pudo guardar notificación en el buzón: $e');
       }
     }
+  }
+
+
+  Future<void> markOpened({
+    required String scope,
+    required NotificationInboxEntry entry,
+  }) async {
+    if (entry.openedByUser) return;
+
+    await save(
+      scope: scope,
+      id: entry.id,
+      title: entry.title,
+      body: entry.body,
+      event: entry.event,
+      imageUrl: entry.imageUrl,
+      orderId: entry.orderId,
+      orderNumber: entry.orderNumber,
+      status: entry.status,
+      openedByUser: true,
+    );
   }
 
 
