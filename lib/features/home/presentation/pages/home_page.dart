@@ -10,15 +10,12 @@ import 'package:mundicam/features/home/presentation/widgets/category_grid.dart';
 import 'package:mundicam/features/home/presentation/widgets/brand_grid.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/cache/home_warmup_state.dart';
-import 'package:mundicam/core/config/update_announcement_service.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
 import 'package:mundicam/features/company/presentation/pages/empresa_page.dart';
 import 'package:mundicam/features/promotions/presentation/providers/promotions_provider.dart';
 import 'package:mundicam/features/promotions/presentation/widgets/promotions_banner.dart';
 import 'package:mundicam/features/training/presentation/providers/academy_provider.dart';
-
-enum _UpdateAnnouncementAction { update, later }
 
 class HomePage extends ConsumerStatefulWidget {
   final VoidCallback? onGoCart;
@@ -52,14 +49,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _didLogFirstBuild = false;
   bool _academyPreloadStarted = false;
 
-  bool _updateAnnouncementCheckScheduled = false;
-  bool _updateAnnouncementDialogVisible = false;
-  late final VoidCallback _updateAnnouncementListener;
-
   // La pantalla completa de preparación se usa una sola vez por instalación.
-  // En esa primera ejecución solo bloqueamos hasta tener listo el catálogo visible
-  // (categorías + marcas + assets locales de marcas). Promociones y Academy arrancan
-  // en paralelo y continúan precargando en segundo plano, evitando alargar el acceso.
+  // En esa primera ejecución esperamos categorías, promociones y Academy. Cuando
+  // las tres fuentes han terminado, se guarda un marcador local y los siguientes
+  // arranques muestran Home directamente mientras cualquier refresco ocurre en
+  // segundo plano.
   bool _initialHomeReady = HomeWarmupState.completed;
   bool _initialBootstrapRetryScheduled = false;
   int _initialBootstrapRetryCount = 0;
@@ -77,16 +71,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     _loadManagerContact();
     _homeScrollController.addListener(_handleHomeScroll);
 
-    _updateAnnouncementListener = _scheduleUpdateAnnouncementCheck;
-    UpdateAnnouncementService.instance.state.addListener(
-      _updateAnnouncementListener,
-    );
-
     if (_initialHomeReady) {
       _startAcademyPreloadAfterHomeReady();
-      _scheduleUpdateAnnouncementCheck();
-    } else {
-      _startInitialHomePrefetch();
     }
 
     Future.delayed(const Duration(milliseconds: 250), () {
@@ -107,32 +93,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
 
-  void _startInitialHomePrefetch() {
-    // Arrancamos TODO en paralelo desde el primer frame. La versión anterior
-    // esperaba primero a Categorías y solo después lanzaba Marcas/Promociones/Academy,
-    // haciendo la pantalla inicial innecesariamente más lenta.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _initialHomeReady) return;
-
-      try {
-        ref.read(categoriesProvider.future);
-        ref.read(homeBrandsProvider.future);
-        ref.read(homeBrandAssetsProvider.future);
-        ref.read(promotionsProvider.future);
-        ref.read(academyProvider.notifier);
-        _academyPreloadStarted = true;
-      } catch (_) {
-        // Los providers ya gestionan sus propios estados de error/reintento.
-      }
-    });
-  }
-
   void _startAcademyPreloadAfterHomeReady() {
     if (_academyPreloadStarted) return;
     _academyPreloadStarted = true;
 
-    // En instalaciones ya preparadas mantenemos la precarga de Academy en
-    // segundo plano sin bloquear Home.
+    // Academy se precarga solo DESPUÉS de que las categorías esenciales de
+    // Inicio estén listas. Así nunca compite con la primera carga del catálogo.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(academyProvider.notifier);
@@ -194,9 +160,6 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   void dispose() {
-    UpdateAnnouncementService.instance.state.removeListener(
-      _updateAnnouncementListener,
-    );
     _homeScrollController.removeListener(_handleHomeScroll);
     _homeScrollController.dispose();
     super.dispose();
@@ -208,6 +171,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     ref.invalidate(promotionsProvider);
     ref.invalidate(bannerMixProvider);
     await _loadManagerContact();
+    await Future.delayed(const Duration(milliseconds: 350));
   }
 
   Future<void> _openFooterLink(Uri uri) async {
@@ -242,8 +206,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       _initialBootstrapRetryScheduled = false;
       _initialBootstrapRetryCount = retryNumber;
       ref.invalidate(categoriesProvider);
-      ref.invalidate(homeBrandsProvider);
-      ref.invalidate(homeBrandAssetsProvider);
       ref.invalidate(promotionsProvider);
       ref.read(academyProvider.notifier).retry();
     });
@@ -253,8 +215,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     _initialBootstrapRetryScheduled = false;
     _initialBootstrapRetryCount = 0;
     ref.invalidate(categoriesProvider);
-    ref.invalidate(homeBrandsProvider);
-    ref.invalidate(homeBrandAssetsProvider);
     ref.invalidate(promotionsProvider);
     ref.read(academyProvider.notifier).retry();
     setState(() {});
@@ -267,207 +227,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     _initialBootstrapRetryScheduled = false;
     HomeWarmupState.markComplete();
     _startAcademyPreloadAfterHomeReady();
-    _scheduleUpdateAnnouncementCheck();
-  }
-
-  void _scheduleUpdateAnnouncementCheck() {
-    if (!_initialHomeReady ||
-        _updateAnnouncementCheckScheduled ||
-        _updateAnnouncementDialogVisible ||
-        !mounted) {
-      return;
-    }
-
-    _updateAnnouncementCheckScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      _updateAnnouncementCheckScheduled = false;
-      if (!mounted || !_initialHomeReady) return;
-      await _maybeShowUpdateAnnouncement();
-    });
-  }
-
-  Future<void> _maybeShowUpdateAnnouncement() async {
-    if (_updateAnnouncementDialogVisible || !mounted) return;
-
-    final service = UpdateAnnouncementService.instance;
-    final updateState = service.state.value;
-    if (!updateState.available) return;
-
-    final alreadySeen = await service.wasSeen(updateState.latestVersion);
-    if (!mounted || alreadySeen) return;
-
-    // Remote Config puede haber cambiado mientras leíamos SharedPreferences.
-    final latestState = service.state.value;
-    if (!latestState.available ||
-        latestState.latestVersion != updateState.latestVersion) {
-      return;
-    }
-
-    _updateAnnouncementDialogVisible = true;
-
-    try {
-      final action = await showDialog<_UpdateAnnouncementAction>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          return Dialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 24),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 430),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 18, 24, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      latestState.title,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontFamily: 'Oswald',
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    _buildUpdatePoint(latestState.point1),
-                    const SizedBox(height: 10),
-                    _buildUpdatePoint(latestState.point2),
-                    const SizedBox(height: 10),
-                    _buildUpdatePoint(latestState.point3),
-                    const SizedBox(height: 16),
-                    Text(
-                      latestState.moreText,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: FilledButton.icon(
-                              onPressed: () => Navigator.of(dialogContext).pop(
-                                _UpdateAnnouncementAction.update,
-                              ),
-                              icon: const Icon(Icons.open_in_new_rounded),
-                              label: Text(
-                                latestState.updateButtonLabel,
-                                textAlign: TextAlign.center,
-                              ),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: AppColors.primary,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: OutlinedButton(
-                              onPressed: () => Navigator.of(dialogContext).pop(
-                                _UpdateAnnouncementAction.later,
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Colors.black87,
-                                side: const BorderSide(
-                                  color: Colors.black45,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              child: Text(
-                                latestState.laterButtonLabel,
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      );
-
-      if (!mounted) return;
-
-      if (action == _UpdateAnnouncementAction.update) {
-        final uri = Uri.tryParse(latestState.storeUrl);
-        var opened = false;
-
-        if (uri != null) {
-          try {
-            opened = await launchUrl(
-              uri,
-              mode: LaunchMode.externalApplication,
-            );
-          } catch (e) {
-            debugPrint('⚠️ No se pudo abrir la tienda: $e');
-          }
-        }
-
-        if (opened) {
-          await service.markSeen(latestState.latestVersion);
-        } else if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No se pudo abrir la tienda. Inténtalo de nuevo.'),
-            ),
-          );
-        }
-      } else if (action == _UpdateAnnouncementAction.later) {
-        await service.markSeen(latestState.latestVersion);
-      }
-    } finally {
-      _updateAnnouncementDialogVisible = false;
-    }
-  }
-
-  Widget _buildUpdatePoint(String text) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 1),
-          child: Icon(
-            Icons.check_circle_rounded,
-            size: 21,
-            color: AppColors.primary,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(
-              fontSize: 15,
-              height: 1.35,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   Widget _buildInitialHomeLoading() {
@@ -569,29 +328,36 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     // Gate solo de la PRIMERA preparación de esta instalación.
-    // Categorías, Marcas, Promociones y Academy se lanzan EN PARALELO. Para no
-    // penalizar el arranque, la pantalla completa solo espera lo que se ve en el
-    // catálogo de Home: categorías + marcas + assets locales de marcas.
-    // Promociones y Academy siguen precargando en segundo plano.
+    // Fase 1: categorías. Cuando están listas, arrancamos Promociones + Academy
+    // sin competir con la consulta esencial del catálogo. Fase 2: esperamos a
+    // que ambas fuentes terminen (pueden devolver listas vacías legítimamente).
+    // Después se persiste el marcador y esta pantalla completa no vuelve a salir.
     if (!_initialHomeReady) {
       final categoriesAsync = ref.watch(categoriesProvider);
-      final brandsAsync = ref.watch(homeBrandsProvider);
-      final brandAssetsAsync = ref.watch(homeBrandAssetsProvider);
-
       final categories = categoriesAsync.asData?.value;
-      final brands = brandsAsync.asData?.value;
-
       final categoriesReady = categories != null && categories.isNotEmpty;
-      final brandsReady = brands != null && brands.isNotEmpty;
-      final brandAssetsReady = brandAssetsAsync.hasValue;
 
-      if (categoriesAsync.hasError ||
-          brandsAsync.hasError ||
-          brandAssetsAsync.hasError) {
+      if (!categoriesReady) {
+        if (categoriesAsync.hasError) {
+          _scheduleInitialBootstrapRetry();
+        }
+
+        return _initialBootstrapRetryCount < _maxInitialBootstrapRetries
+            ? _buildInitialHomeLoading()
+            : _buildInitialHomeRetry();
+      }
+
+      final promotionsAsync = ref.watch(promotionsProvider);
+      final academyAsync = ref.watch(academyProvider);
+
+      final promotionsReady = promotionsAsync.hasValue;
+      final academyReady = academyAsync.hasValue;
+
+      if (promotionsAsync.hasError || academyAsync.hasError) {
         _scheduleInitialBootstrapRetry();
       }
 
-      if (!categoriesReady || !brandsReady || !brandAssetsReady) {
+      if (!promotionsReady || !academyReady) {
         return _initialBootstrapRetryCount < _maxInitialBootstrapRetries
             ? _buildInitialHomeLoading()
             : _buildInitialHomeRetry();

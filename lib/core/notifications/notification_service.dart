@@ -12,8 +12,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
-import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/notifications/notification_inbox_store.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 
 class MundiCamOrderNotification {
   final String event;
@@ -84,6 +84,32 @@ class MundiCamOrderNotification {
         data['imageUrl'],
         data['image'],
       ]);
+
+  String? get targetUrl => _firstNonEmptyString([
+        data['target_url'],
+        data['targetUrl'],
+        data['web_url'],
+        data['webUrl'],
+        data['action_url'],
+        data['actionUrl'],
+        data['url'],
+        data['link'],
+      ]);
+
+  String get inboxId {
+    return _firstNonEmptyString([
+          data['event_id'],
+          data['eventId'],
+          messageId,
+          data['communication_id'] == null
+              ? null
+              : "communication:${data['communication_id']}:$event",
+          orderId == null
+              ? null
+              : 'order:$orderId:$event:${status ?? ''}',
+        ]) ??
+        'notification:$event:${title.trim()}:${body.trim()}';
+  }
 
   bool get wantsInAppPopup {
     final raw = data['in_app_popup'];
@@ -487,16 +513,9 @@ class NotificationService {
   Timer? _iosTokenRetryTimer;
   int _iosTokenRetryAttempt = 0;
   bool _tokenSyncInProgress = false;
-  int _tokenLifecycleGeneration = 0;
 
   Stream<MundiCamOrderNotification> get orderNotifications =>
       _orderController.stream;
-
-  // Diagnóstico seguro también visible en builds Release/TestFlight.
-  // Nunca imprime tokens, credenciales ni datos personales.
-  void _fcmDiag(String message) {
-    debugPrint('🔎 MUNDICAM_FCM_DIAG $message');
-  }
 
   Future<void> initialize() {
     if (_initialized) {
@@ -515,7 +534,6 @@ class NotificationService {
   }
 
   Future<void> _initializeInternal() async {
-    _fcmDiag('INIT platform=$_platform');
     await _initializeLocalNotifications();
 
     final settings = await _messaging.requestPermission(
@@ -531,7 +549,6 @@ class NotificationService {
     if (kDebugMode) {
       debugPrint('🔔 Permiso notificaciones: ${settings.authorizationStatus}');
     }
-    _fcmDiag('PERMISSION status=${settings.authorizationStatus}');
 
     await _messaging.setForegroundNotificationPresentationOptions(
       alert: false,
@@ -550,25 +567,15 @@ class NotificationService {
     });
 
     _messaging.onTokenRefresh.listen((token) async {
-      final lifecycleGeneration = _tokenLifecycleGeneration;
       final apnsToken = Platform.isIOS ? await _waitForApnsToken() : null;
 
-      if (lifecycleGeneration != _tokenLifecycleGeneration) return;
-
-      // Si Firebase ya nos entrega un token FCM, lo intentamos registrar aunque
-      // APNs todavía no pueda leerse en ese instante. En iOS solo damos por
-      // cerrado el ciclo de reintentos cuando el backend MundiCam confirma que
-      // el dispositivo ha quedado vinculado a la sesión WordPress real.
-      final backendRegistered = await _saveToken(
-        token,
-        apnsToken: apnsToken,
-        lifecycleGeneration: lifecycleGeneration,
-      );
-
-      _fcmDiag('BACKEND_REGISTERED=$backendRegistered');
+      // Si Firebase ya nos entrega un token FCM, lo registramos aunque APNs
+      // todavía no pueda leerse en ese instante. La plataforma sigue siendo
+      // 'ios' y el backend podrá incluir este dispositivo en los envíos.
+      await _saveToken(token, apnsToken: apnsToken);
 
       if (Platform.isIOS) {
-        if (backendRegistered) {
+        if ((apnsToken ?? '').isNotEmpty) {
           _cancelIosTokenRetry();
         } else {
           _scheduleIosTokenRetry();
@@ -588,23 +595,7 @@ class NotificationService {
   static Future<void> handleBackgroundRemoteMessage(
     RemoteMessage message,
   ) async {
-    // Los mensajes que ya contienen `notification` los muestra el sistema cuando
-    // la app está en segundo plano/cerrada. Los guardamos en el buzón, pero no
-    // creamos un aviso local adicional para evitar notificaciones duplicadas.
     final service = NotificationService();
-    if (message.notification != null) {
-      final systemNotification = MundiCamOrderNotification.fromRemoteMessage(
-        message,
-        showPopup: false,
-        openedByUser: false,
-      );
-      if (systemNotification != null) {
-        await service._saveNotificationInInbox(systemNotification);
-      }
-      return;
-    }
-
-    await service._initializeLocalNotifications();
 
     final notification = MundiCamOrderNotification.fromRemoteMessage(
       message,
@@ -614,11 +605,25 @@ class NotificationService {
 
     if (notification == null) return;
 
+    // El buzón debe conservar también avisos recibidos con la app cerrada,
+    // aunque Android/iOS muestre la notificación directamente y el usuario
+    // no llegue a pulsarla.
+    await service._persistInboxNotification(
+      notification,
+      receivedAt: message.sentTime,
+    );
+
+    // Los mensajes que ya contienen `notification` los muestra el sistema cuando
+    // la app está en segundo plano/cerrada. Solo creamos un aviso local para
+    // mensajes data-only, evitando notificaciones duplicadas.
+    if (message.notification != null) return;
+
+    await service._initializeLocalNotifications();
+
     final isNew = await service._markRemoteMessageAsProcessed(message);
     if (!isNew) return;
 
     await service._showLocalNotification(notification);
-    await service._saveNotificationInInbox(notification);
   }
 
   Future<void> _initializeLocalNotifications() async {
@@ -692,6 +697,11 @@ class NotificationService {
       return;
     }
 
+    await _persistInboxNotification(
+      notification,
+      receivedAt: message.sentTime,
+    );
+
     try {
       await _showLocalNotification(notification);
     } catch (e) {
@@ -707,7 +717,6 @@ class NotificationService {
     _emitNotification(
       notification.copyWith(showPopup: notification.wantsInAppPopup),
     );
-    unawaited(_saveNotificationInInbox(notification));
   }
 
   void _handleRemoteMessageOpenedByUser(RemoteMessage message) {
@@ -719,28 +728,11 @@ class NotificationService {
 
     if (notification == null) return;
     unawaited(
-      MundicamAnalyticsService.instance.track(
-        eventName: 'push_opened',
-        objectType: notification.orderId != null ? 'order' : 'notification',
-        objectId: notification.orderId,
-        metadata: <String, dynamic>{
-          'event': notification.event,
-          if ((notification.status ?? '').trim().isNotEmpty)
-            'status': notification.status!.trim(),
-        },
+      _persistInboxNotification(
+        notification,
+        receivedAt: message.sentTime,
       ),
     );
-    unawaited(_saveNotificationInInbox(notification));
-    _emitNotification(notification);
-  }
-
-  void _handleLocalNotificationResponse(NotificationResponse response) {
-    final notification = MundiCamOrderNotification.fromPayload(
-      response.payload,
-      openedByUser: true,
-    );
-
-    if (notification == null) return;
     unawaited(
       MundicamAnalyticsService.instance.track(
         eventName: 'push_opened',
@@ -753,8 +745,68 @@ class NotificationService {
         },
       ),
     );
-    unawaited(_saveNotificationInInbox(notification));
     _emitNotification(notification);
+  }
+
+  void _handleLocalNotificationResponse(NotificationResponse response) {
+    final notification = MundiCamOrderNotification.fromPayload(
+      response.payload,
+      openedByUser: true,
+    );
+
+    if (notification == null) return;
+    unawaited(_persistInboxNotification(notification));
+    unawaited(
+      MundicamAnalyticsService.instance.track(
+        eventName: 'push_opened',
+        objectType: notification.orderId != null ? 'order' : 'notification',
+        objectId: notification.orderId,
+        metadata: <String, dynamic>{
+          'event': notification.event,
+          if ((notification.status ?? '').trim().isNotEmpty)
+            'status': notification.status!.trim(),
+        },
+      ),
+    );
+    _emitNotification(notification);
+  }
+
+  Future<void> _persistInboxNotification(
+    MundiCamOrderNotification notification, {
+    DateTime? receivedAt,
+  }) async {
+    try {
+      final api = ApiService();
+      final hasSession = await api.hasStoredAppSession();
+      if (!hasSession) return;
+
+      final wordpressId = await api.currentSessionWordPressId();
+      final email = await api.currentSessionEmail();
+      final scope = NotificationInboxStore.scopeForUser(
+        wordpressId: wordpressId,
+        email: email,
+      );
+      if (scope == null) return;
+
+      await NotificationInboxStore.instance.save(
+        scope: scope,
+        id: notification.inboxId,
+        title: notification.title,
+        body: notification.body,
+        event: notification.event,
+        imageUrl: notification.imageUrl,
+        targetUrl: notification.targetUrl,
+        orderId: notification.orderId,
+        orderNumber: notification.orderNumber,
+        status: notification.status,
+        receivedAt: receivedAt,
+        openedByUser: notification.openedByUser,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo guardar la notificación en el buzón: $e');
+      }
+    }
   }
 
   Future<void> _showLocalNotification(
@@ -938,110 +990,6 @@ class NotificationService {
     return hash;
   }
 
-  Future<void> _saveNotificationInInbox(
-    MundiCamOrderNotification notification,
-  ) async {
-    final data = notification.data;
-
-    // El buzón del cliente debe contener únicamente comunicaciones reales.
-    // Las pruebas técnicas/manuales siguen llegando por FCM para diagnóstico,
-    // pero nunca se persisten ni se muestran como histórico del usuario.
-    if (_isInboxTestNotification(notification, data)) return;
-    final explicitId = data['event_id']?.toString().trim() ??
-        data['eventId']?.toString().trim() ??
-        notification.messageId?.trim() ??
-        data['message_id']?.toString().trim() ??
-        data['notification_id']?.toString().trim() ??
-        '';
-
-    final timestamp = data['timestamp']?.toString().trim() ??
-        data['sent_at']?.toString().trim() ??
-        data['sentAt']?.toString().trim() ??
-        '';
-
-    final fallbackId = <String>[
-      notification.event,
-      notification.orderId?.toString() ?? '',
-      notification.status ?? '',
-      timestamp,
-      notification.title,
-      notification.body,
-    ].join('|');
-
-    final api = ApiService();
-    if (!await api.hasStoredAppSession()) return;
-
-    final wordpressId = await api.currentSessionWordPressId();
-    final email = await api.currentSessionEmail();
-    final scope = NotificationInboxStore.scopeForUser(
-      wordpressId: wordpressId,
-      email: email,
-    );
-    if (scope == null) return;
-
-    await NotificationInboxStore.instance.save(
-      scope: scope,
-      id: explicitId.isNotEmpty ? explicitId : fallbackId,
-      title: notification.title,
-      body: notification.body,
-      event: notification.event,
-      imageUrl: notification.imageUrl,
-      orderId: notification.orderId,
-      orderNumber: notification.orderNumber,
-      status: notification.status,
-      openedByUser: notification.openedByUser,
-    );
-  }
-
-  bool _isInboxTestNotification(
-    MundiCamOrderNotification notification,
-    Map<String, dynamic> data,
-  ) {
-    String clean(dynamic value) =>
-        value?.toString().trim().toLowerCase() ?? '';
-
-    final event = clean(notification.event);
-    final type = clean(data['type']);
-    final source = clean(data['source']);
-    final eventId = clean(data['event_id'] ?? data['eventId']);
-    final testFlag = clean(data['is_test'] ?? data['test'] ?? data['diagnostic']);
-
-    const testMarkers = <String>{
-      'diagnostic_test',
-      'fcm_test',
-      'push_test',
-      'test',
-    };
-
-    if (testMarkers.contains(event) ||
-        testMarkers.contains(type) ||
-        source == 'test' ||
-        source == 'diagnostic') {
-      return true;
-    }
-
-    if (eventId.startsWith('diagnostic:') ||
-        eventId.startsWith('test:') ||
-        eventId.startsWith('fcm-test:')) {
-      return true;
-    }
-
-    if (testFlag == '1' || testFlag == 'true' || testFlag == 'yes') {
-      return true;
-    }
-
-    // Valores exactos usados por la prueba manual del plugin. Evitamos una
-    // heurística por la palabra "prueba" para no ocultar comunicaciones reales.
-    final title = clean(notification.title);
-    final body = clean(notification.body);
-    if (title == 'prueba mundicam' &&
-        body == 'prueba de notificación desde wordpress') {
-      return true;
-    }
-
-    return false;
-  }
-
   void _emitNotification(MundiCamOrderNotification notification) {
     if (kDebugMode) {
       debugPrint(
@@ -1138,17 +1086,6 @@ class NotificationService {
     ].map((value) => value?.toString() ?? '').join('|');
   }
 
-  /// Reinicia el presupuesto de reintentos iOS justo después de que
-  /// WordPress haya confirmado la sesión. Los intentos de arranque pueden haber
-  /// ocurrido antes del login y no deben impedir que el iPhone se registre una
-  /// vez que ya existe un app_token válido.
-  Future<void> syncAfterAuthentication() async {
-    if (Platform.isIOS) {
-      _cancelIosTokenRetry();
-    }
-    await syncCurrentTokenWithBackend();
-  }
-
   Future<void> syncCurrentTokenWithBackend() async {
     if (_tokenSyncInProgress) {
       if (Platform.isIOS) {
@@ -1158,14 +1095,12 @@ class NotificationService {
     }
 
     _tokenSyncInProgress = true;
-    final lifecycleGeneration = _tokenLifecycleGeneration;
 
     try {
       String? apnsToken;
 
       if (Platform.isIOS) {
         apnsToken = await _waitForApnsToken();
-        _fcmDiag('APNS_AVAILABLE=${(apnsToken ?? '').isNotEmpty}');
         if ((apnsToken ?? '').isEmpty) {
           if (kDebugMode) {
             debugPrint(
@@ -1177,13 +1112,8 @@ class NotificationService {
         }
       }
 
-      // Si mientras esperábamos APNs se inició una limpieza/logout, este intento
-      // pertenece ya a una generación antigua y no debe recrear/registrar el token.
-      if (lifecycleGeneration != _tokenLifecycleGeneration) return;
-
       final token = await _messaging.getToken();
       if (kDebugMode) debugPrint('📱 FCM Token $_platform: $token');
-      _fcmDiag('FCM_AVAILABLE=${(token ?? '').trim().isNotEmpty}');
 
       if ((token ?? '').trim().isEmpty) {
         if (Platform.isIOS) {
@@ -1192,23 +1122,10 @@ class NotificationService {
         return;
       }
 
-      if (lifecycleGeneration != _tokenLifecycleGeneration) return;
-
-      final backendRegistered = await _saveToken(
-        token,
-        apnsToken: apnsToken,
-        lifecycleGeneration: lifecycleGeneration,
-      );
-      _fcmDiag('BACKEND_REGISTERED=$backendRegistered');
+      await _saveToken(token, apnsToken: apnsToken);
 
       if (Platform.isIOS) {
-        if (backendRegistered) {
-          _cancelIosTokenRetry();
-        } else {
-          // Tener APNs/FCM no basta: si el intento ocurrió antes del login o el
-          // endpoint no confirmó el alta, mantenemos un reintento acotado.
-          _scheduleIosTokenRetry();
-        }
+        _cancelIosTokenRetry();
       }
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ No se pudo obtener/guardar token FCM: $e');
@@ -1234,7 +1151,6 @@ class NotificationService {
 
     _iosTokenRetryAttempt++;
     final attempt = _iosTokenRetryAttempt;
-    _fcmDiag('RETRY scheduled=$attempt/$_maxIosTokenRetryAttempts');
 
     if (kDebugMode) {
       debugPrint(
@@ -1256,48 +1172,28 @@ class NotificationService {
 
   Future<String?> _waitForApnsToken() async {
     String? apnsToken = await _messaging.getAPNSToken();
-    var checks = 1;
 
     for (var attempt = 0; apnsToken == null && attempt < 12; attempt++) {
       await Future.delayed(const Duration(milliseconds: 500));
       apnsToken = await _messaging.getAPNSToken();
-      checks++;
     }
 
     if (apnsToken != null && kDebugMode) {
       debugPrint('🍎 APNs Token: $apnsToken');
     }
-    _fcmDiag('APNS_CHECK available=${apnsToken != null} checks=$checks');
 
     return apnsToken;
   }
 
-  Future<bool> _saveToken(
-    String? token, {
-    String? apnsToken,
-    int? lifecycleGeneration,
-  }) async {
+  Future<void> _saveToken(String? token, {String? apnsToken}) async {
     final cleanToken = token?.trim() ?? '';
-    if (cleanToken.isEmpty) return false;
-
-    if (lifecycleGeneration != null &&
-        lifecycleGeneration != _tokenLifecycleGeneration) {
-      return false;
-    }
+    if (cleanToken.isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_lastFcmTokenPrefsKey, cleanToken);
 
     await _saveTokenInFirestore(cleanToken, apnsToken: apnsToken);
-
-    // Una limpieza/logout que ocurra mientras Firestore estaba respondiendo debe
-    // invalidar este intento antes de asociar el dispositivo en WordPress.
-    if (lifecycleGeneration != null &&
-        lifecycleGeneration != _tokenLifecycleGeneration) {
-      return false;
-    }
-
-    return _saveTokenInMundiCamBackend(cleanToken, apnsToken: apnsToken);
+    await _saveTokenInMundiCamBackend(cleanToken, apnsToken: apnsToken);
   }
 
   Future<void> _saveTokenInFirestore(String token, {String? apnsToken}) async {
@@ -1318,7 +1214,7 @@ class NotificationService {
     }
   }
 
-  Future<bool> _saveTokenInMundiCamBackend(
+  Future<void> _saveTokenInMundiCamBackend(
     String token, {
     String? apnsToken,
   }) async {
@@ -1336,30 +1232,24 @@ class NotificationService {
               : 'ℹ️ Token FCM no registrado todavía: sin sesión App API o endpoint pendiente',
         );
       }
-      _fcmDiag('APP_API_REGISTER success=$saved');
-      return saved;
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ No se pudo registrar FCM en App API: $e');
-      _fcmDiag('APP_API_REGISTER exception=${e.runtimeType}');
-      return false;
     }
   }
 
   Future<void> clearDeviceRegistration() async {
-    // Invalida cualquier sincronización iniciada antes de este logout/limpieza.
-    // Así un getAPNSToken() pendiente no puede recrear y registrar un token
-    // después de que el usuario haya cerrado o perdido la sesión.
-    _tokenLifecycleGeneration++;
     _cancelIosTokenRetry();
     _tokenSyncInProgress = false;
 
     final prefs = await SharedPreferences.getInstance();
     final storedToken = prefs.getString(_lastFcmTokenPrefsKey)?.trim() ?? '';
 
-    // Una limpieza nunca debe provocar la creación de un token nuevo.
-    // Si no tenemos el último token almacenado, se omite el unregister remoto
-    // y se elimina el token local directamente más abajo.
-    final currentToken = storedToken;
+    String currentToken = storedToken;
+    if (currentToken.isEmpty) {
+      try {
+        currentToken = (await _messaging.getToken())?.trim() ?? '';
+      } catch (_) {}
+    }
 
     if (currentToken.isNotEmpty) {
       try {

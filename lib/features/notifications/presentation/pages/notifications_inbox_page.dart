@@ -6,8 +6,16 @@ import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/notifications/notification_inbox_store.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/mundicam_webview_page.dart';
 
-Future<List<NotificationInboxEntry>> loadNotificationInboxEntries() async {
+List<Map<String, dynamic>>? _remoteHistoryCache;
+String? _remoteHistoryScope;
+DateTime? _remoteHistoryCachedAt;
+const Duration _remoteHistoryCacheTtl = Duration(minutes: 1);
+
+Future<List<NotificationInboxEntry>> loadNotificationInboxEntries({
+  bool forceRemoteRefresh = false,
+}) async {
   final api = ApiService();
   final hasSession = await api.hasStoredAppSession();
   if (!hasSession) return const <NotificationInboxEntry>[];
@@ -18,32 +26,185 @@ Future<List<NotificationInboxEntry>> loadNotificationInboxEntries() async {
     wordpressId: wordpressId,
     email: email,
   );
+  if (scope == null) return const <NotificationInboxEntry>[];
 
-  final localEntries = scope == null
-      ? const <NotificationInboxEntry>[]
-      : await NotificationInboxStore.instance.load(scope: scope);
+  final store = NotificationInboxStore.instance;
 
-  final remoteRaw = await api.getNotificationHistory(limit: 100);
-  final remoteEntries = remoteRaw
-      .map(_notificationInboxEntryFromRemote)
-      .whereType<NotificationInboxEntry>()
-      .where((entry) => !entry.isTestOrDiagnostic)
-      .toList();
+  final localEntriesFuture = store.load(scope: scope);
+  final deletedIdsFuture = store.loadDeletedIds(scope: scope);
+  final remoteHistoryFuture = _loadRemoteNotificationHistory(
+    api: api,
+    scope: scope,
+    forceRefresh: forceRemoteRefresh,
+  );
 
-  final merged = <String, NotificationInboxEntry>{};
+  final results = await Future.wait<dynamic>([
+    localEntriesFuture,
+    deletedIdsFuture,
+    remoteHistoryFuture,
+  ]);
 
-  for (final entry in remoteEntries) {
-    merged[entry.id] = entry;
-  }
+  final localEntries =
+      (results[0] as List<NotificationInboxEntry>)
+          .where((entry) => !entry.isTestOrDiagnostic)
+          .toList(growable: false);
+  final deletedIds = results[1] as Set<String>;
+  final remoteHistory = results[2] as List<Map<String, dynamic>>;
+
+  final byId = <String, NotificationInboxEntry>{};
 
   for (final entry in localEntries) {
-    merged[entry.id] = entry;
+    if (!deletedIds.contains(entry.id)) {
+      byId[entry.id] = entry;
+    }
   }
 
-  final entries = merged.values.toList()
+  for (final raw in remoteHistory) {
+    final remoteEntry = _historyEntryFromJson(raw);
+    if (remoteEntry == null ||
+        remoteEntry.isTestOrDiagnostic ||
+        deletedIds.contains(remoteEntry.id)) {
+      continue;
+    }
+
+    final local = byId[remoteEntry.id];
+    if (local == null) {
+      byId[remoteEntry.id] = remoteEntry;
+      continue;
+    }
+
+    byId[remoteEntry.id] = NotificationInboxEntry(
+      id: remoteEntry.id,
+      title: remoteEntry.title,
+      body: remoteEntry.body,
+      event: remoteEntry.event,
+      imageUrl: remoteEntry.imageUrl ?? local.imageUrl,
+      targetUrl: remoteEntry.targetUrl ?? local.targetUrl,
+      orderId: remoteEntry.orderId ?? local.orderId,
+      orderNumber: remoteEntry.orderNumber ?? local.orderNumber,
+      status: remoteEntry.status ?? local.status,
+      receivedAt: remoteEntry.receivedAt,
+      openedByUser: local.openedByUser,
+    );
+  }
+
+  final entries = byId.values.toList(growable: false)
     ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
 
   return entries;
+}
+
+Future<List<Map<String, dynamic>>> _loadRemoteNotificationHistory({
+  required ApiService api,
+  required String scope,
+  required bool forceRefresh,
+}) async {
+  final now = DateTime.now();
+  final cacheIsValid = !forceRefresh &&
+      _remoteHistoryScope == scope &&
+      _remoteHistoryCache != null &&
+      _remoteHistoryCachedAt != null &&
+      now.difference(_remoteHistoryCachedAt!) < _remoteHistoryCacheTtl;
+
+  if (cacheIsValid) {
+    return _remoteHistoryCache!;
+  }
+
+  final history = await api.getNotificationHistory(limit: 100);
+  _remoteHistoryScope = scope;
+  _remoteHistoryCache = history;
+  _remoteHistoryCachedAt = now;
+  return history;
+}
+
+NotificationInboxEntry? _historyEntryFromJson(Map<String, dynamic> json) {
+  final event = _firstCleanString([
+        json['event'],
+        json['type'],
+        'general',
+      ]) ??
+      'general';
+
+  final id = _firstCleanString([
+    json['event_id'],
+    json['eventId'],
+    json['notification_id'],
+    json['communication_id'] == null
+        ? null
+        : "$event:${json['communication_id']}",
+    json['id'] == null ? null : "$event:${json['id']}",
+  ]);
+
+  if (id == null) return null;
+
+  final sentAt = _parseNotificationDate(
+    json['sent_at'] ?? json['created_at'] ?? json['date'],
+  );
+
+  return NotificationInboxEntry(
+    id: id,
+    title: _firstCleanString([
+          json['title'],
+          json['titulo'],
+        ]) ??
+        'Aviso MundiCam',
+    body: _firstCleanString([
+          json['body'],
+          json['message'],
+          json['notification_body'],
+          json['descripcion'],
+        ]) ??
+        'Tienes una nueva notificación.',
+    event: event,
+    imageUrl: _nullableCleanString(
+      json['image_url'] ??
+          json['notification_image_url'] ??
+          json['image'] ??
+          json['imagen_url'],
+    ),
+    targetUrl: _nullableCleanString(
+      json['target_url'] ??
+          json['url'] ??
+          json['web_url'] ??
+          json['link'],
+    ),
+    orderId: _parseNullableInt(json['order_id']),
+    orderNumber: _nullableCleanString(json['order_number']),
+    status: _nullableCleanString(json['status']),
+    receivedAt: sentAt,
+    // El historial remoto es archivo: no debe convertir de golpe todas las
+    // comunicaciones antiguas en "no leídas". Si esta comunicación también
+    // llegó por FCM a este dispositivo, el estado local prevalece en el merge.
+    openedByUser: true,
+  );
+}
+
+DateTime _parseNotificationDate(dynamic value) {
+  final raw = value?.toString().trim() ?? '';
+  if (raw.isEmpty) return DateTime.now();
+
+  return DateTime.tryParse(raw) ??
+      DateTime.tryParse(raw.replaceFirst(' ', 'T')) ??
+      DateTime.now();
+}
+
+String? _firstCleanString(List<dynamic> values) {
+  for (final value in values) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isNotEmpty && text.toLowerCase() != 'null') return text;
+  }
+  return null;
+}
+
+String? _nullableCleanString(dynamic value) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty || text.toLowerCase() == 'null' ? null : text;
+}
+
+int? _parseNullableInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString().trim() ?? '');
 }
 
 class NotificationsInboxPage extends StatefulWidget {
@@ -76,12 +237,17 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
     super.dispose();
   }
 
-  Future<void> _loadEntries({bool showLoading = true}) async {
+  Future<void> _loadEntries({
+    bool showLoading = true,
+    bool forceRemoteRefresh = false,
+  }) async {
     if (showLoading && mounted) {
       setState(() => _loading = true);
     }
 
-    final entries = await loadNotificationInboxEntries();
+    final entries = await loadNotificationInboxEntries(
+      forceRemoteRefresh: forceRemoteRefresh,
+    );
 
     if (!mounted) return;
 
@@ -99,7 +265,10 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
         title: const Text('Notificaciones'),
       ),
       body: RefreshIndicator(
-        onRefresh: () => _loadEntries(showLoading: false),
+        onRefresh: () => _loadEntries(
+          showLoading: false,
+          forceRemoteRefresh: true,
+        ),
         child: _buildBody(),
       ),
     );
@@ -144,7 +313,7 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
                       ),
                       SizedBox(height: 8),
                       Text(
-                        'Las notificaciones enviadas por MundiCam aparecerán aquí.',
+                        'Los avisos de MundiCam y las actualizaciones de tus pedidos aparecerán aquí.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 14,
@@ -171,13 +340,14 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
         final entry = _entries[index];
         return _NotificationCard(
           entry: entry,
-          onTap: () => _showNotificationDetails(entry),
+          onTap: () => _openNotification(entry),
+          onDelete: () => _confirmDelete(entry),
         );
       },
     );
   }
 
-  Future<void> _showNotificationDetails(NotificationInboxEntry entry) async {
+  Future<void> _openNotification(NotificationInboxEntry entry) async {
     final openedEntry = entry.openedByUser
         ? entry
         : entry.copyWith(openedByUser: true);
@@ -194,62 +364,179 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
 
     if (!mounted) return;
 
+    final target = openedEntry.targetUrl?.trim() ?? '';
+    final uri = Uri.tryParse(target);
+    if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => MundiCamWebViewPage(
+            title: 'NOTIFICACIÓN',
+            initialUri: uri,
+            closeOnBack: true,
+          ),
+        ),
+      );
+      return;
+    }
+
+    await _showNotificationDetails(openedEntry);
+  }
+
+  Future<void> _showNotificationDetails(NotificationInboxEntry entry) async {
+    if (!mounted) return;
+
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 8),
-          contentPadding: const EdgeInsets.fromLTRB(22, 0, 22, 10),
-          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-          title: Text(
-            openedEntry.title,
-            style: const TextStyle(fontWeight: FontWeight.w700),
+        final screen = MediaQuery.sizeOf(dialogContext);
+        final dialogWidth =
+            (screen.width - 32).clamp(280.0, 480.0).toDouble();
+        final maxDialogHeight = screen.height * 0.82;
+        final imageWidth = (dialogWidth - 44).clamp(120.0, 436.0).toDouble();
+
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
           ),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if ((openedEntry.imageUrl ?? '').isNotEmpty) ...[
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      openedEntry.imageUrl!,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: dialogWidth,
+              maxHeight: maxDialogHeight,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.title,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF20242A),
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if ((entry.imageUrl ?? '').isNotEmpty) ...[
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: SizedBox(
+                                width: imageWidth,
+                                child: Image.network(
+                                  entry.imageUrl!,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) =>
+                                      const SizedBox.shrink(),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          Text(
+                            entry.body,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              height: 1.4,
+                              color: Color(0xFF33373D),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            _formatDate(entry.receivedAt),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF818893),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('Cerrar'),
+                    ),
+                  ),
                 ],
-                Text(
-                  openedEntry.body,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    height: 1.4,
-                    color: Color(0xFF33373D),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  _formatDate(openedEntry.receivedAt),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF818893),
-                  ),
-                ),
-              ],
+              ),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmDelete(NotificationInboxEntry entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Eliminar notificación'),
+          content: const Text(
+            'Esta notificación dejará de aparecer en tu buzón de esta app.',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cerrar'),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text(
+                'Eliminar',
+                style: TextStyle(color: AppColors.primary),
+              ),
             ),
           ],
         );
       },
     );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final api = ApiService();
+      final wordpressId = await api.currentSessionWordPressId();
+      final email = await api.currentSessionEmail();
+      final scope = NotificationInboxStore.scopeForUser(
+        wordpressId: wordpressId,
+        email: email,
+      );
+      if (scope == null) return;
+
+      await NotificationInboxStore.instance.deleteEntry(
+        scope: scope,
+        id: entry.id,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _entries = _entries
+            .where((item) => item.id != entry.id)
+            .toList(growable: false);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo eliminar la notificación.'),
+        ),
+      );
+    }
   }
 
   Future<void> _persistOpenedState(NotificationInboxEntry entry) async {
@@ -272,24 +559,24 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
       // El estado leído es visual/local y nunca debe bloquear la apertura.
     }
   }
-
 }
 
 class _NotificationCard extends StatelessWidget {
   final NotificationInboxEntry entry;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
 
   const _NotificationCard({
     required this.entry,
     required this.onTap,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     final imageUrl = entry.imageUrl?.trim() ?? '';
     final isUnread = !entry.openedByUser;
-    final cardColor =
-        isUnread ? const Color(0xFFE5E7EB) : Colors.white;
+    final cardColor = isUnread ? const Color(0xFFE5E7EB) : Colors.white;
 
     return Material(
       color: cardColor,
@@ -356,13 +643,33 @@ class _NotificationCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              const Padding(
-                padding: EdgeInsets.only(top: 2),
-                child: Icon(
-                  Icons.chevron_right_rounded,
-                  size: 22,
-                  color: Color(0xFFB3B8C0),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 34,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      size: 22,
+                      color: Color(0xFFB3B8C0),
+                    ),
+                    const SizedBox(height: 8),
+                    IconButton(
+                      tooltip: 'Eliminar',
+                      onPressed: onDelete,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
+                      ),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        size: 20,
+                        color: Color(0xFF9CA3AF),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -416,32 +723,6 @@ class _NotificationLeading extends StatelessWidget {
       ),
     );
   }
-}
-
-
-NotificationInboxEntry? _notificationInboxEntryFromRemote(
-  Map<String, dynamic> json,
-) {
-  final eventId = json['event_id']?.toString().trim() ?? '';
-  final communicationId = json['communication_id']?.toString().trim() ??
-      json['id']?.toString().trim() ??
-      '';
-
-  final id = eventId.isNotEmpty
-      ? eventId
-      : (communicationId.isNotEmpty ? 'communication:$communicationId' : '');
-
-  if (id.isEmpty) return null;
-
-  return NotificationInboxEntry.fromJson(<String, dynamic>{
-    'id': id,
-    'title': json['title'],
-    'body': json['body'],
-    'event': json['event'] ?? json['type'],
-    'image_url': json['image_url'],
-    'received_at': json['sent_at'] ?? json['published_at'],
-    'opened_by_user': false,
-  });
 }
 
 String _formatDate(DateTime value) {

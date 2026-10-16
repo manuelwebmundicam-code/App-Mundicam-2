@@ -9,6 +9,7 @@ class NotificationInboxEntry {
   final String body;
   final String event;
   final String? imageUrl;
+  final String? targetUrl;
   final int? orderId;
   final String? orderNumber;
   final String? status;
@@ -21,6 +22,7 @@ class NotificationInboxEntry {
     required this.body,
     required this.event,
     required this.imageUrl,
+    required this.targetUrl,
     required this.orderId,
     required this.orderNumber,
     required this.status,
@@ -55,6 +57,7 @@ class NotificationInboxEntry {
       body: body,
       event: event,
       imageUrl: imageUrl,
+      targetUrl: targetUrl,
       orderId: orderId,
       orderNumber: orderNumber,
       status: status,
@@ -69,6 +72,7 @@ class NotificationInboxEntry {
         'body': body,
         'event': event,
         'image_url': imageUrl,
+        'target_url': targetUrl,
         'order_id': orderId,
         'order_number': orderNumber,
         'status': status,
@@ -93,7 +97,12 @@ class NotificationInboxEntry {
         fallback: 'Tienes una nueva notificación.',
       ),
       event: _clean(json['event'], fallback: 'general'),
-      imageUrl: _nullableClean(json['image_url']),
+      imageUrl: _nullableClean(
+        json['image_url'] ?? json['notification_image_url'] ?? json['image'],
+      ),
+      targetUrl: _nullableClean(
+        json['target_url'] ?? json['url'] ?? json['link'] ?? json['web_url'],
+      ),
       orderId: _parseInt(json['order_id']),
       orderNumber: _nullableClean(json['order_number']),
       status: _nullableClean(json['status']),
@@ -121,7 +130,10 @@ class NotificationInboxEntry {
 
 class NotificationInboxStore {
   static const String _prefsKeyPrefix = 'mundicam_notification_inbox_v1';
+  static const String _deletedPrefsKeyPrefix =
+      'mundicam_notification_inbox_deleted_v1';
   static const int _maxEntries = 100;
+  static const int _maxDeletedIds = 500;
 
   static final NotificationInboxStore instance = NotificationInboxStore._();
   NotificationInboxStore._();
@@ -129,6 +141,7 @@ class NotificationInboxStore {
   Future<List<NotificationInboxEntry>> load({required String scope}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final deletedIds = await loadDeletedIds(scope: scope);
       final rawEntries =
           prefs.getStringList(_prefsKeyForScope(scope)) ?? const <String>[];
       final entries = <NotificationInboxEntry>[];
@@ -140,7 +153,9 @@ class NotificationInboxStore {
           final entry = NotificationInboxEntry.fromJson(
             Map<String, dynamic>.from(decoded),
           );
-          if (entry != null && !entry.isTestOrDiagnostic) {
+          if (entry != null &&
+              !entry.isTestOrDiagnostic &&
+              !deletedIds.contains(entry.id)) {
             entries.add(entry);
           }
         } catch (_) {
@@ -165,9 +180,11 @@ class NotificationInboxStore {
     required String body,
     required String event,
     String? imageUrl,
+    String? targetUrl,
     int? orderId,
     String? orderNumber,
     String? status,
+    DateTime? receivedAt,
     required bool openedByUser,
   }) async {
     try {
@@ -187,6 +204,11 @@ class NotificationInboxStore {
         return;
       }
 
+      final deletedIds = await loadDeletedIds(scope: scope);
+      if (deletedIds.contains(id)) {
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final current = await load(scope: scope);
 
@@ -201,10 +223,11 @@ class NotificationInboxStore {
             : body.trim(),
         event: event.trim().isEmpty ? 'general' : event.trim(),
         imageUrl: _nullableClean(imageUrl),
+        targetUrl: _nullableClean(targetUrl),
         orderId: orderId,
         orderNumber: _nullableClean(orderNumber),
         status: _nullableClean(status),
-        receivedAt: existing?.receivedAt ?? DateTime.now(),
+        receivedAt: existing?.receivedAt ?? receivedAt ?? DateTime.now(),
         openedByUser: openedByUser || (existing?.openedByUser ?? false),
       );
 
@@ -241,11 +264,60 @@ class NotificationInboxStore {
       body: entry.body,
       event: entry.event,
       imageUrl: entry.imageUrl,
+      targetUrl: entry.targetUrl,
       orderId: entry.orderId,
       orderNumber: entry.orderNumber,
       status: entry.status,
+      receivedAt: entry.receivedAt,
       openedByUser: true,
     );
+  }
+
+
+  Future<Set<String>> loadDeletedIds({required String scope}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return (prefs.getStringList(_deletedPrefsKeyForScope(scope)) ??
+              const <String>[])
+          .map((id) => id.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> deleteEntry({
+    required String scope,
+    required String id,
+  }) async {
+    final cleanId = id.trim();
+    if (cleanId.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final current = await load(scope: scope)
+        ..removeWhere((entry) => entry.id == cleanId);
+
+      await prefs.setStringList(
+        _prefsKeyForScope(scope),
+        current.map((entry) => jsonEncode(entry.toJson())).toList(),
+      );
+
+      final deleted = await loadDeletedIds(scope: scope);
+      deleted.add(cleanId);
+
+      final ids = deleted.toList(growable: true);
+      if (ids.length > _maxDeletedIds) {
+        ids.removeRange(0, ids.length - _maxDeletedIds);
+      }
+
+      await prefs.setStringList(_deletedPrefsKeyForScope(scope), ids);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ No se pudo borrar la notificación del buzón: $e');
+      }
+    }
   }
 
 
@@ -263,6 +335,11 @@ class NotificationInboxStore {
   static String _prefsKeyForScope(String scope) {
     final encoded = base64Url.encode(utf8.encode(scope));
     return '${_prefsKeyPrefix}_$encoded';
+  }
+
+  static String _deletedPrefsKeyForScope(String scope) {
+    final encoded = base64Url.encode(utf8.encode(scope));
+    return '${_deletedPrefsKeyPrefix}_$encoded';
   }
 
   static String? _nullableClean(String? value) {

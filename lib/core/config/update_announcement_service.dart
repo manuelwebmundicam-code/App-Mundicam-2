@@ -1,7 +1,6 @@
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/config/force_update_service.dart';
 
@@ -11,9 +10,7 @@ class UpdateAnnouncementState {
   final String currentVersion;
   final String latestVersion;
   final String title;
-  final String point1;
-  final String point2;
-  final String point3;
+  final List<String> points;
   final String moreText;
   final String updateButtonLabel;
   final String laterButtonLabel;
@@ -24,9 +21,7 @@ class UpdateAnnouncementState {
     required this.currentVersion,
     required this.latestVersion,
     required this.title,
-    required this.point1,
-    required this.point2,
-    required this.point3,
+    required this.points,
     required this.moreText,
     required this.updateButtonLabel,
     required this.laterButtonLabel,
@@ -38,22 +33,21 @@ class UpdateAnnouncementState {
     this.latestVersion = '',
   })  : available = false,
         title = '',
-        point1 = '',
-        point2 = '',
-        point3 = '',
+        points = const <String>[],
         moreText = '',
         updateButtonLabel = '',
         laterButtonLabel = '',
         storeUrl = '';
 }
 
-/// Popup informativo de nueva versión para Home.
+/// Aviso OPCIONAL de nueva versión.
 ///
-/// - Es independiente del bloqueo de actualización obligatoria.
-/// - Solo se activa cuando Remote Config lo indica y la versión publicada es
-///   superior a la instalada.
-/// - Se muestra una sola vez por versión publicada en cada instalación.
-/// - Si Remote Config falla o está incompleto, no molesta al usuario (fail-open).
+/// Reglas:
+/// - Si la versión instalada es igual o superior a latest_*: no muestra nada.
+/// - Si es inferior a latest_* pero sigue permitida por min_*: muestra aviso.
+/// - El bloqueo obligatorio sigue perteneciendo exclusivamente a
+///   ForceUpdateService.
+/// - Si Remote Config está incompleto o falla, no molesta al usuario.
 class UpdateAnnouncementService {
   UpdateAnnouncementService._();
 
@@ -73,12 +67,10 @@ class UpdateAnnouncementService {
   static const String laterButtonLabelKey =
       'update_announcement_later_button_label';
 
-  static const String _seenPrefix = 'mundicam_update_announcement_seen_';
-
   final ValueNotifier<UpdateAnnouncementState> state =
       ValueNotifier<UpdateAnnouncementState>(
-        const UpdateAnnouncementState.none(),
-      );
+    const UpdateAnnouncementState.none(),
+  );
 
   String _currentVersion = '';
 
@@ -104,12 +96,12 @@ class UpdateAnnouncementService {
     try {
       final currentVersion = await _resolveCurrentVersion();
       if (currentVersion.isEmpty) {
-        _clear('sin versión instalada');
+        _clear('no se pudo determinar la versión instalada');
         return;
       }
 
       if (!remoteConfig.getBool(enabledKey)) {
-        _clear('aviso desactivado', currentVersion: currentVersion);
+        _clear('aviso opcional desactivado');
         return;
       }
 
@@ -118,7 +110,7 @@ class UpdateAnnouncementService {
       final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
       if (!isAndroid && !isIos) {
-        _clear('plataforma no compatible', currentVersion: currentVersion);
+        _clear('plataforma no sujeta al aviso');
         return;
       }
 
@@ -137,108 +129,78 @@ class UpdateAnnouncementService {
           .trim();
 
       final title = remoteConfig.getString(titleKey).trim();
-      final point1 = remoteConfig.getString(point1Key).trim();
-      final point2 = remoteConfig.getString(point2Key).trim();
-      final point3 = remoteConfig.getString(point3Key).trim();
-      final moreText = remoteConfig.getString(moreTextKey).trim();
       final updateButtonLabel =
           remoteConfig.getString(updateButtonLabelKey).trim();
       final laterButtonLabel =
           remoteConfig.getString(laterButtonLabelKey).trim();
 
-      // Para evitar popups incompletos, solo se activa cuando todo lo necesario
-      // está configurado de forma explícita en Firebase.
+      // Estos campos son los mínimos necesarios para un aviso utilizable.
       if (latestVersion.isEmpty ||
           storeUrl.isEmpty ||
           title.isEmpty ||
-          point1.isEmpty ||
-          point2.isEmpty ||
-          point3.isEmpty ||
-          moreText.isEmpty ||
           updateButtonLabel.isEmpty ||
           laterButtonLabel.isEmpty) {
-        _clear(
-          'configuración incompleta',
-          currentVersion: currentVersion,
-          latestVersion: latestVersion,
-        );
+        _clear('configuración del aviso incompleta');
         return;
       }
 
       final comparison = _compareVersions(currentVersion, latestVersion);
-      if (comparison == null || comparison >= 0) {
-        _clear(
-          comparison == null ? 'versión no válida' : 'app ya actualizada',
+      if (comparison == null) {
+        _clear('versión no válida');
+        return;
+      }
+
+      if (comparison >= 0) {
+        state.value = UpdateAnnouncementState.none(
           currentVersion: currentVersion,
           latestVersion: latestVersion,
         );
+        debugPrint(
+          '✅ Sin aviso opcional: $currentVersion >= $latestVersion',
+        );
         return;
       }
+
+      final points = <String>[
+        remoteConfig.getString(point1Key).trim(),
+        remoteConfig.getString(point2Key).trim(),
+        remoteConfig.getString(point3Key).trim(),
+      ].where((value) => value.isNotEmpty).toList(growable: false);
 
       state.value = UpdateAnnouncementState(
         available: true,
         currentVersion: currentVersion,
         latestVersion: latestVersion,
         title: title,
-        point1: point1,
-        point2: point2,
-        point3: point3,
-        moreText: moreText,
+        points: points,
+        moreText: remoteConfig.getString(moreTextKey).trim(),
         updateButtonLabel: updateButtonLabel,
         laterButtonLabel: laterButtonLabel,
         storeUrl: storeUrl,
       );
 
       debugPrint(
-        '⬆️ Nueva versión disponible: $currentVersion < $latestVersion',
+        'ℹ️ Nueva versión disponible: $currentVersion < $latestVersion',
       );
     } catch (e) {
-      _clear('error evaluando aviso: $e');
+      _clear('error evaluando el aviso opcional: $e');
     }
   }
 
-  Future<bool> wasSeen(String latestVersion) async {
-    final version = latestVersion.trim();
-    if (version.isEmpty) return true;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool('$_seenPrefix$version') ?? false;
-    } catch (e) {
-      debugPrint('⚠️ No se pudo leer el estado del aviso: $e');
-      return false;
-    }
-  }
-
-  Future<void> markSeen(String latestVersion) async {
-    final version = latestVersion.trim();
-    if (version.isEmpty) return;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('$_seenPrefix$version', true);
-    } catch (e) {
-      debugPrint('⚠️ No se pudo guardar el estado del aviso: $e');
-    }
-  }
-
-  void _clear(
-    String reason, {
-    String currentVersion = '',
-    String latestVersion = '',
-  }) {
+  void _clear(String reason) {
     state.value = UpdateAnnouncementState.none(
-      currentVersion: currentVersion,
-      latestVersion: latestVersion,
+      currentVersion: _currentVersion,
     );
-    debugPrint('ℹ️ Aviso de nueva versión inactivo: $reason');
+    debugPrint('ℹ️ Aviso opcional inactivo: $reason');
   }
 
   int? _compareVersions(String current, String latest) {
     final currentParts = _parseVersion(current);
     final latestParts = _parseVersion(latest);
 
-    if (currentParts == null || latestParts == null) return null;
+    if (currentParts == null || latestParts == null) {
+      return null;
+    }
 
     final length = currentParts.length > latestParts.length
         ? currentParts.length
@@ -261,6 +223,7 @@ class UpdateAnnouncementService {
       value = value.substring(1);
     }
 
+    // El build (+44, +45...) no cambia la versión comercial.
     value = value.split('+').first.split('-').first;
     if (value.isEmpty) return null;
 
