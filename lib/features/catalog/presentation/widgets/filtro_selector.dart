@@ -104,36 +104,11 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
                       _errorCard(_error!),
                       const SizedBox(height: 12),
                     ],
-                    _sectionCard(
-                      title: 'Ordenar por',
-                      icon: Icons.swap_vert_rounded,
-                      child: Column(
-                        children: [
-                          _buildSortTile(
-                            'Más recientes',
-                            'date',
-                            Icons.access_time_rounded,
-                          ),
-                          const SizedBox(height: 8),
-                          _buildSortTile(
-                            'Precio bajo primero',
-                            'price_asc',
-                            Icons.trending_up_rounded,
-                          ),
-                          const SizedBox(height: 8),
-                          _buildSortTile(
-                            'Precio alto primero',
-                            'price_desc',
-                            Icons.trending_down_rounded,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     if (_loading && _availableFilterGroups.isEmpty)
                       _sectionCard(
                         title: 'Filtros',
                         icon: Icons.tune_rounded,
+                        showHeader: false,
                         child: _loadingBox('Cargando filtros de la web...'),
                       )
                     else if (!_loading && _availableFilterGroups.isEmpty)
@@ -391,12 +366,14 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
   void _limpiarFiltros() {
     setState(() {
+      final currentOrder = _draftFilters.orderBy;
       _draftFilters = _hasLockedBrand
           ? MundiFilters(
               brand: widget.lockedBrandName!.trim(),
               brandId: widget.lockedBrandId,
+              orderBy: currentOrder,
             )
-          : const MundiFilters();
+          : MundiFilters(orderBy: currentOrder);
     });
   }
 
@@ -612,6 +589,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     required IconData icon,
     required Widget child,
     String? subtitle,
+    bool showHeader = true,
   }) {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
@@ -630,45 +608,47 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, size: 17, color: AppColors.primary),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  title.toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.textPrimary,
-                    letterSpacing: 0.72,
-                    fontFamily: 'Oswald',
+          if (showHeader) ...[
+            Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: Icon(icon, size: 17, color: AppColors.primary),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    title.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textPrimary,
+                      letterSpacing: 0.72,
+                      fontFamily: 'Oswald',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 7),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  fontSize: 11.2,
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w600,
+                  height: 1.25,
                 ),
               ),
             ],
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 7),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                fontSize: 11.2,
-                color: Color(0xFF6B7280),
-                fontWeight: FontWeight.w600,
-                height: 1.25,
-              ),
-            ),
+            const SizedBox(height: 13),
           ],
-          const SizedBox(height: 13),
           child,
         ],
       ),
@@ -943,8 +923,8 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
   Widget _bottomButtons(MundiFilters filtroState) {
     final hasFilters = _hasLockedBrand
-        ? filtroState.hasSearch || filtroState.hasOrder || filtroState.hasAttributes
-        : filtroState.hasActiveFilters;
+        ? filtroState.hasSearch || filtroState.hasAttributes
+        : filtroState.hasBrand || filtroState.hasSearch || filtroState.hasAttributes;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 14),

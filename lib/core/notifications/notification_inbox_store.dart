@@ -12,6 +12,7 @@ class NotificationInboxEntry {
   final int? orderId;
   final String? orderNumber;
   final String? status;
+  final bool isPromotion;
   final DateTime receivedAt;
   final bool openedByUser;
 
@@ -24,6 +25,7 @@ class NotificationInboxEntry {
     required this.orderId,
     required this.orderNumber,
     required this.status,
+    required this.isPromotion,
     required this.receivedAt,
     required this.openedByUser,
   });
@@ -58,6 +60,7 @@ class NotificationInboxEntry {
       orderId: orderId,
       orderNumber: orderNumber,
       status: status,
+      isPromotion: isPromotion,
       receivedAt: receivedAt,
       openedByUser: openedByUser ?? this.openedByUser,
     );
@@ -72,6 +75,7 @@ class NotificationInboxEntry {
         'order_id': orderId,
         'order_number': orderNumber,
         'status': status,
+        'is_promotion': isPromotion,
         'received_at': receivedAt.toIso8601String(),
         'opened_by_user': openedByUser,
       };
@@ -85,6 +89,9 @@ class NotificationInboxEntry {
         ) ??
         DateTime.now();
 
+    final event = _clean(json['event'], fallback: 'general');
+    final storedPromotion = json['is_promotion'];
+
     return NotificationInboxEntry(
       id: id,
       title: _clean(json['title'], fallback: 'Aviso MundiCam'),
@@ -92,14 +99,25 @@ class NotificationInboxEntry {
         json['body'],
         fallback: 'Tienes una nueva notificación.',
       ),
-      event: _clean(json['event'], fallback: 'general'),
+      event: event,
       imageUrl: _nullableClean(json['image_url']),
       orderId: _parseInt(json['order_id']),
       orderNumber: _nullableClean(json['order_number']),
       status: _nullableClean(json['status']),
+      // Compatibilidad con notificaciones antiguas ya guardadas antes de
+      // existir este campo: solo se infiere por eventos de promoción reales.
+      isPromotion: storedPromotion == true || _isPromotionEvent(event),
       receivedAt: receivedAt,
       openedByUser: json['opened_by_user'] == true,
     );
+  }
+
+  static bool _isPromotionEvent(String event) {
+    final normalized = event.trim().toLowerCase();
+    return normalized == 'promotion' ||
+        normalized == 'promotion_synced' ||
+        normalized == 'promocion' ||
+        normalized == 'promoción';
   }
 
   static String _clean(dynamic value, {required String fallback}) {
@@ -168,6 +186,7 @@ class NotificationInboxStore {
     int? orderId,
     String? orderNumber,
     String? status,
+    bool isPromotion = false,
     required bool openedByUser,
   }) async {
     try {
@@ -204,6 +223,7 @@ class NotificationInboxStore {
         orderId: orderId,
         orderNumber: _nullableClean(orderNumber),
         status: _nullableClean(status),
+        isPromotion: isPromotion || (existing?.isPromotion ?? false),
         receivedAt: existing?.receivedAt ?? DateTime.now(),
         openedByUser: openedByUser || (existing?.openedByUser ?? false),
       );
@@ -244,6 +264,7 @@ class NotificationInboxStore {
       orderId: entry.orderId,
       orderNumber: entry.orderNumber,
       status: entry.status,
+      isPromotion: entry.isPromotion,
       openedByUser: true,
     );
   }

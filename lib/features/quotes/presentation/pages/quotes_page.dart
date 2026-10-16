@@ -5,21 +5,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../../core/network/api_service.dart';
-import '../../../../core/analytics/mundicam_analytics_service.dart';
-import '../../../../core/reviews/mundicam_review_service.dart';
-import '../../../../shared/theme/app_theme.dart';
-import '../../../../shared/widgets/professional_page_app_bar.dart';
-import '../../../cart/presentation/pages/cart_page.dart';
-import '../../../cart/presentation/providers/cart_provider.dart';
-import '../../../../shared/providers/badge_provider.dart';
-import '../../../catalog/data/models/producto.dart';
-import '../../../catalog/presentation/pages/producto_detalles_page.dart';
-import '../../data/models/quote_model.dart';
-import '../../data/models/local_quote_model.dart';
-import '../providers/quote_provider.dart';
-import '../providers/local_quote_provider.dart';
-import '../providers/quotes_sync_provider.dart';
+import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
+import 'package:mundicam/core/reviews/mundicam_review_service.dart';
+import 'package:mundicam/shared/theme/app_theme.dart';
+import 'package:mundicam/shared/widgets/professional_page_app_bar.dart';
+import 'package:mundicam/features/cart/presentation/pages/cart_page.dart';
+import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
+import 'package:mundicam/shared/providers/badge_provider.dart';
+import 'package:mundicam/features/catalog/data/models/producto.dart';
+import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
+import 'package:mundicam/features/quotes/data/models/quote_model.dart';
+import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
+import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
+import 'package:mundicam/features/quotes/presentation/providers/quotes_sync_provider.dart';
 
 class QuotesPage extends ConsumerStatefulWidget {
   final VoidCallback? onGoHome;

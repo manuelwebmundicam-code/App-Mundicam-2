@@ -6,11 +6,11 @@ import 'package:intl/intl.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart';
-import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
 import 'package:mundicam/features/orders/data/models/order_model.dart';
 import 'package:mundicam/features/orders/presentation/providers/order_provider.dart';
+import 'package:mundicam/features/checkout/presentation/pages/payment_page.dart';
 import 'package:mundicam/features/rma/presentation/pages/rma_from_page.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
 import 'package:mundicam/features/quotes/presentation/providers/quote_provider.dart';
@@ -41,7 +41,6 @@ class OrdersPage extends ConsumerStatefulWidget {
 class _OrdersPageState extends ConsumerState<OrdersPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-  int? _payingOrderId;
 
   @override
   void dispose() {
@@ -63,6 +62,77 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
 
+  bool _isCardPendingOrder(OrderMundicam order) {
+    final method = order.paymentMethod.toLowerCase().trim();
+    final status = order.normalizedStatus;
+    final isCard = method.contains('redsys') ||
+        method.contains('sermepa') ||
+        method == 'tpv' ||
+        method.contains('redsys_tpv');
+
+    return isCard &&
+        !order.isPaid &&
+        order.orderKey.trim().isNotEmpty &&
+        order.actions.canPay &&
+        (status == 'pending' || status == 'on-hold' || status == 'failed');
+  }
+
+  Future<void> _payOrderFromList(
+    BuildContext context,
+    OrderMundicam order,
+  ) async {
+    final paymentUrl = await ApiService().getSecureCardPaymentUrl(
+      orderId: order.id,
+      orderKey: order.orderKey,
+    );
+
+    if (!mounted) return;
+
+    if (paymentUrl == null ||
+        paymentUrl.trim().isEmpty ||
+        !paymentUrl.contains('mundicam_app_payment_token=')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se pudo abrir el pago seguro de este pedido. Actualiza el pedido e inténtalo de nuevo.',
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final paid = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PaymentPage(
+          orderId: order.id,
+          orderKey: order.orderKey,
+          paymentUrl: paymentUrl,
+          orderNumber: order.number.isNotEmpty ? order.number : order.id.toString(),
+          amount: double.tryParse(order.total.replaceAll(',', '.')),
+          paymentMethodTitle: order.paymentMethodTitle.trim().isNotEmpty
+              ? order.paymentMethodTitle
+              : 'Pago seguro con tarjeta',
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    ref.invalidate(ordersProvider);
+
+    if (paid == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pago confirmado. El pedido se está actualizando.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   void _openOrderDetail(BuildContext context, OrderMundicam order) {
     Navigator.push(
       context,
@@ -73,72 +143,6 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
         ),
       ),
     );
-  }
-
-  Future<void> _payOrder(BuildContext context, OrderMundicam order) async {
-    if (_payingOrderId != null || !order.actions.canPay) return;
-    if (order.id <= 0 || order.orderKey.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se dispone de la clave necesaria para pagar este pedido.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _payingOrderId = order.id);
-    try {
-      final paymentUrl = await ApiService().getSecureCardPaymentUrl(
-        orderId: order.id,
-        orderKey: order.orderKey,
-      );
-      if (!mounted) return;
-
-      if (paymentUrl == null || paymentUrl.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Este pedido no dispone ahora mismo de un enlace de pago válido.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PaymentPage(
-            orderId: order.id,
-            orderKey: order.orderKey,
-            paymentUrl: paymentUrl,
-            orderNumber: order.number.trim().isEmpty
-                ? order.id.toString()
-                : order.number.trim(),
-            paymentMethodTitle: order.paymentMethodTitle.trim().isEmpty
-                ? 'Pagar pedido'
-                : order.paymentMethodTitle.trim(),
-          ),
-        ),
-      );
-
-      if (mounted) {
-        ref.invalidate(ordersProvider);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('No se pudo abrir el pago del pedido: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _payingOrderId = null);
-      }
-    }
   }
 
   @override
@@ -438,37 +442,25 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    if (order.actions.canPay) ...[
+                    if (_isCardPendingOrder(order)) ...[
                       SizedBox(
                         height: 30,
-                        child: ElevatedButton.icon(
-                          onPressed: _payingOrderId == null
-                              ? () => _payOrder(context, order)
-                              : null,
-                          icon: _payingOrderId == order.id
-                              ? const SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.payment_rounded, size: 14),
-                          label: const Text(
-                            'PAGAR',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
+                        child: ElevatedButton(
+                          onPressed: () => _payOrderFromList(context, order),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primary,
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
                             elevation: 0,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                          child: const Text(
+                            'PAGAR',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w900,
                             ),
                           ),
                         ),
@@ -670,7 +662,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
   OrderMundicam? _loadedOrder;
   bool _isRepeating = false;
   bool _isCancelling = false;
-  bool _isPaying = false;
+  bool _isOpeningPayment = false;
 
   final Map<int, Product?> _productPreviewCache = <int, Product?>{};
   final Map<int, Future<Product?>> _productPreviewFutures =
@@ -883,70 +875,6 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
     }
   }
 
-  Future<void> _payOrder(OrderMundicam order) async {
-    if (_isPaying || !order.actions.canPay) return;
-    if (order.id <= 0 || order.orderKey.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se dispone de la clave necesaria para pagar este pedido.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isPaying = true);
-    try {
-      final paymentUrl = await ApiService().getSecureCardPaymentUrl(
-        orderId: order.id,
-        orderKey: order.orderKey,
-      );
-      if (!mounted) return;
-
-      if (paymentUrl == null || paymentUrl.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Este pedido no dispone ahora mismo de un enlace de pago válido.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PaymentPage(
-            orderId: order.id,
-            orderKey: order.orderKey,
-            paymentUrl: paymentUrl,
-            orderNumber: order.number.trim().isEmpty
-                ? order.id.toString()
-                : order.number.trim(),
-            paymentMethodTitle: order.paymentMethodTitle.trim().isEmpty
-                ? 'Pagar pedido'
-                : order.paymentMethodTitle.trim(),
-          ),
-        ),
-      );
-
-      if (!mounted) return;
-      ref.invalidate(ordersProvider);
-      await _refresh();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('No se pudo abrir el pago del pedido: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isPaying = false);
-    }
-  }
-
   Future<void> _cancelOrder(OrderMundicam order) async {
     if (_isCancelling || !order.actions.canCancel) return;
     if (order.orderKey.trim().isEmpty) {
@@ -1034,6 +962,85 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+    }
+  }
+
+  bool _canPayCurrentOrder(OrderMundicam order) {
+    final method = order.paymentMethod.toLowerCase().trim();
+    final status = order.normalizedStatus;
+    final isCard = method.contains('redsys') ||
+        method.contains('sermepa') ||
+        method == 'tpv' ||
+        method.contains('redsys_tpv');
+
+    return isCard &&
+        !order.isPaid &&
+        order.orderKey.trim().isNotEmpty &&
+        order.actions.canPay &&
+        (status == 'pending' || status == 'on-hold' || status == 'failed');
+  }
+
+  Future<void> _payPendingOrder(OrderMundicam order) async {
+    if (_isOpeningPayment) return;
+
+    setState(() => _isOpeningPayment = true);
+
+    try {
+      final paymentUrl = await ApiService().getSecureCardPaymentUrl(
+        orderId: order.id,
+        orderKey: order.orderKey,
+      );
+
+      if (!mounted) return;
+
+      if (paymentUrl == null ||
+          paymentUrl.trim().isEmpty ||
+          !paymentUrl.contains('mundicam_app_payment_token=')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No se pudo abrir el pago seguro de este pedido. Actualiza e inténtalo de nuevo.',
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      final paid = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => PaymentPage(
+            orderId: order.id,
+            orderKey: order.orderKey,
+            paymentUrl: paymentUrl,
+            orderNumber: order.number.isNotEmpty ? order.number : order.id.toString(),
+            amount: double.tryParse(order.total.replaceAll(',', '.')),
+            paymentMethodTitle: order.paymentMethodTitle.trim().isNotEmpty
+                ? order.paymentMethodTitle
+                : 'Pago seguro con tarjeta',
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+
+      ref.invalidate(ordersProvider);
+      await _refresh();
+
+      if (paid == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pago confirmado. Pedido actualizado.'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isOpeningPayment = false);
+      }
     }
   }
 
@@ -1214,13 +1221,15 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                   ),
                 ],
                 const SizedBox(height: 14),
-                if (order.actions.canPay) ...[
+                if (_canPayCurrentOrder(order)) ...[
                   SizedBox(
                     width: double.infinity,
-                    height: 46,
+                    height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: _isPaying ? null : () => _payOrder(order),
-                      icon: _isPaying
+                      onPressed: _isOpeningPayment
+                          ? null
+                          : () => _payPendingOrder(order),
+                      icon: _isOpeningPayment
                           ? const SizedBox(
                               width: 17,
                               height: 17,
@@ -1229,17 +1238,18 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                                 color: Colors.white,
                               ),
                             )
-                          : const Icon(Icons.payment_rounded, size: 18),
+                          : const Icon(Icons.payment_rounded, size: 19),
                       label: Text(
-                        _isPaying ? 'ABRIENDO PAGO...' : 'PAGAR',
+                        _isOpeningPayment ? 'ABRIENDO PAGO...' : 'PAGAR',
                         style: const TextStyle(
-                          fontSize: 11.5,
+                          fontSize: 12,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
+                        elevation: 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),

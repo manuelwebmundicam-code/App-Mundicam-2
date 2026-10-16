@@ -265,6 +265,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
           ref.read(productFilterProvider.notifier).reset();
           _restoreBrandContext();
+          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
           if (hasInitialSearch) {
             ref.read(productFilterProvider.notifier).update(
               search: initialSearch,
@@ -282,6 +283,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
           // la última marca que abrió esa misma categoría. Vaciamos el estado y
           // recargamos SIEMPRE con la marca actual para impedir cruces Dahua /
           // Hikvision / HiWatch / cualquier otra marca.
+          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
           _reloadCurrentCategory(scrollTop: false);
           _prewarmCategorySearchCache();
         });
@@ -300,7 +302,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         if (hasInitialSearch) {
           ref.read(productFilterProvider.notifier).update(
             search: initialSearch,
-            orderBy: '',
+            orderBy: 'price_asc',
             brand: '',
             brandId: null,
             attributeTermIds: const <String, int>{},
@@ -311,7 +313,11 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         } else if (shouldClearFiltersFromOtherCategory) {
           _searchController.clear();
           ref.read(productFilterProvider.notifier).reset();
+          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
           _reloadCurrentCategory(scrollTop: true);
+        } else if (currentFilters.orderBy.trim().isEmpty) {
+          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+          _reloadCurrentCategory(scrollTop: false);
         }
 
         _prewarmCategorySearchCache();
@@ -1181,7 +1187,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       _preserveFiltersForNextCategoryOpen = true;
       ref.read(productFilterProvider.notifier).update(
         search: cleanValue,
-        orderBy: '',
+        orderBy: 'price_asc',
         brand: '',
         brandId: null,
         attributeTermIds: const <String, int>{},
@@ -1860,10 +1866,17 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     final previousFilters = ref.read(productFilterProvider);
 
     _searchController.clear();
-    ref.read(productFilterProvider.notifier).reset();
+    ref.read(productFilterProvider.notifier).update(
+      brand: '',
+      search: '',
+      orderBy: previousFilters.orderBy,
+      attributeTermIds: const <String, int>{},
+      attributeLabels: const <String, String>{},
+      attributeGroupLabels: const <String, String>{},
+    );
     _restoreBrandContext();
 
-    if (!previousFilters.hasActiveFilters) {
+    if (!(previousFilters.hasBrand || previousFilters.hasSearch || previousFilters.hasAttributes)) {
       _reloadCurrentCategory();
     }
 
@@ -1934,11 +1947,32 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     // El drawer se reconstruye usando el ID activo y recarga sus filtros reales.
     ref.read(productFilterProvider.notifier).reset();
     _restoreBrandContext();
+    ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _reloadCurrentCategory(scrollTop: true);
     });
+  }
+
+  Future<void> _openSort() async {
+    _hideSearchSuggestions();
+    _searchDebounce?.cancel();
+    FocusScope.of(context).unfocus();
+
+    final currentOrder = ref.read(productFilterProvider).orderBy;
+    final selectedOrder = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CatalogSortSheet(selectedOrder: currentOrder),
+    );
+
+    if (!mounted || selectedOrder == null) return;
+
+    final notifier = ref.read(productFilterProvider.notifier);
+    notifier.setOrderBy(
+      selectedOrder.trim().isEmpty ? 'price_asc' : selectedOrder,
+    );
   }
 
   void _openFilters() {
@@ -1970,7 +2004,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       productsPaginatedProvider(_activeCatalogCategoryId).notifier,
     );
     final filters = ref.watch(productFilterProvider);
-    final hasActiveFilters = filters.hasActiveFilters;
+    final hasVisibleFilters =
+        filters.hasBrand || filters.hasSearch || filters.hasAttributes;
     final totalItems = notifier.totalItems;
     final loadedItems = productosState.length;
 
@@ -2043,6 +2078,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                 onChanged: _onSearchChanged,
                 onSubmitted: _applySearchNow,
                 onClearSearch: _clearSearch,
+                onOpenSort: _openSort,
                 onOpenFilters: _openFilters,
                 subcategoriesFuture: _subcategoriesFuture,
                 subcategoriesExpanded: _subcategoriesExpanded,
@@ -2054,7 +2090,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                 brandContextTaxonomy: _brandContextTaxonomy,
               ),
             ),
-            if (hasActiveFilters)
+            if (hasVisibleFilters)
               SliverToBoxAdapter(
                 child: _ActiveFiltersBar(
                   categoryName: _activeCatalogCategoryName,
@@ -2270,6 +2306,7 @@ class _CatalogControls extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final VoidCallback onSubmitted;
   final VoidCallback onClearSearch;
+  final VoidCallback onOpenSort;
   final VoidCallback onOpenFilters;
   final Future<List<CategoryModel>> subcategoriesFuture;
   final bool subcategoriesExpanded;
@@ -2293,6 +2330,7 @@ class _CatalogControls extends StatelessWidget {
     required this.onChanged,
     required this.onSubmitted,
     required this.onClearSearch,
+    required this.onOpenSort,
     required this.onOpenFilters,
     required this.subcategoriesFuture,
     required this.subcategoriesExpanded,
@@ -2466,22 +2504,67 @@ class _CatalogControls extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
+              InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: onOpenSort,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: filters.hasOrder
+                        ? AppColors.primary
+                        : const Color(0xFFF0F2F5),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: filters.hasOrder
+                          ? AppColors.primary
+                          : const Color(0xFFD9DEE7),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.swap_vert_rounded,
+                        size: 17,
+                        color: filters.hasOrder
+                            ? Colors.white
+                            : AppColors.textPrimary,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'Ordenar',
+                        style: TextStyle(
+                          fontSize: 12.2,
+                          fontWeight: FontWeight.w900,
+                          color: filters.hasOrder
+                              ? Colors.white
+                              : AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 7),
               InkWell(
                 borderRadius: BorderRadius.circular(999),
                 onTap: onOpenFilters,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
+                    horizontal: 10,
                     vertical: 9,
                   ),
                   decoration: BoxDecoration(
-                    color: filters.hasActiveFilters
+                    color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
                         ? AppColors.primary
                         : const Color(0xFFF0F2F5),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: filters.hasActiveFilters
+                      color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
                           ? AppColors.primary
                           : const Color(0xFFD9DEE7),
                     ),
@@ -2492,17 +2575,17 @@ class _CatalogControls extends StatelessWidget {
                       Icon(
                         Icons.tune_rounded,
                         size: 17,
-                        color: filters.hasActiveFilters
+                        color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
                             ? Colors.white
                             : AppColors.textPrimary,
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 5),
                       Text(
                         'Filtros',
                         style: TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 12.2,
                           fontWeight: FontWeight.w900,
-                          color: filters.hasActiveFilters
+                          color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
                               ? Colors.white
                               : AppColors.textPrimary,
                         ),
@@ -3293,7 +3376,6 @@ class _ActiveFiltersBar extends StatelessWidget {
       categoryName,
       if (filters.brand.trim().isNotEmpty) 'Marca: ${filters.brand.trim()}',
       if (filters.search.trim().isNotEmpty) 'Búsqueda: ${filters.search.trim()}',
-      if (filters.hasOrder) _orderLabel(filters.orderBy),
     ];
 
     return Container(
@@ -3403,6 +3485,144 @@ class _ActiveFiltersBar extends StatelessWidget {
       default:
         return '';
     }
+  }
+}
+
+class _CatalogSortSheet extends StatelessWidget {
+  final String selectedOrder;
+
+  const _CatalogSortSheet({required this.selectedOrder});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF4F7FB),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 42,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFD5D9E0),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.swap_vert_rounded,
+                    color: AppColors.primary,
+                    size: 21,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Ordenar por',
+                    style: TextStyle(
+                      fontFamily: 'Oswald',
+                      fontSize: 19,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _option(context, 'Más recientes', 'date', Icons.access_time_rounded),
+            const SizedBox(height: 8),
+            _option(context, 'Precio bajo primero', 'price_asc', Icons.trending_up_rounded),
+            const SizedBox(height: 8),
+            _option(context, 'Precio alto primero', 'price_desc', Icons.trending_down_rounded),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _option(
+    BuildContext context,
+    String label,
+    String value,
+    IconData icon,
+  ) {
+    final selected = selectedOrder == value;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => Navigator.of(context).pop(selected ? '' : value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primary.withOpacity(0.08)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? AppColors.primary.withOpacity(0.35)
+                : const Color(0xFFE1E5EC),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: selected ? AppColors.primary : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(
+                  color: selected ? AppColors.primary : const Color(0xFFE1E5EC),
+                ),
+              ),
+              child: Icon(
+                icon,
+                size: 17,
+                color: selected ? Colors.white : const Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.2,
+                  fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                  color: selected ? AppColors.primary : AppColors.textPrimary,
+                ),
+              ),
+            ),
+            Icon(
+              selected ? Icons.check_circle_rounded : Icons.chevron_right_rounded,
+              size: 21,
+              color: selected ? AppColors.primary : const Color(0xFF9CA3AF),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

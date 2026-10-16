@@ -13,40 +13,62 @@ class HomeHeader extends StatefulWidget {
   State<HomeHeader> createState() => _HomeHeaderState();
 }
 
-class _HomeHeaderState extends State<HomeHeader> {
-  int _notificationCount = 0;
+class _HomeHeaderState extends State<HomeHeader>
+    with WidgetsBindingObserver {
+  int _unreadNotifications = 0;
   StreamSubscription<MundiCamOrderNotification>? _notificationSubscription;
 
   @override
   void initState() {
     super.initState();
-    _refreshNotificationCount();
+    WidgetsBinding.instance.addObserver(this);
+    _loadUnreadCount();
 
-    _notificationSubscription = NotificationService().orderNotifications.listen(
-      (_) => Future<void>.delayed(
-        const Duration(milliseconds: 200),
-        _refreshNotificationCount,
-      ),
-    );
+    _notificationSubscription =
+        NotificationService().orderNotifications.listen((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      await _loadUnreadCount();
+    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _notificationSubscription?.cancel();
     super.dispose();
   }
 
-  Future<void> _refreshNotificationCount() async {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadUnreadCount();
+    }
+  }
+
+  Future<void> _loadUnreadCount() async {
     try {
       final entries = await loadNotificationInboxEntries();
-      if (!mounted) return;
-      setState(
-        () => _notificationCount =
-            entries.where((entry) => !entry.openedByUser).length,
-      );
+      final unread = entries.where((entry) => !entry.openedByUser).length;
+
+      if (!mounted || unread == _unreadNotifications) return;
+
+      setState(() {
+        _unreadNotifications = unread;
+      });
     } catch (_) {
-      // El contador es visual y nunca debe afectar al funcionamiento del home.
+      // El contador es informativo y nunca debe bloquear el Home.
     }
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => const NotificationsInboxPage(),
+      ),
+    );
+
+    if (!mounted) return;
+    await _loadUnreadCount();
   }
 
   @override
@@ -85,125 +107,109 @@ class _HomeHeaderState extends State<HomeHeader> {
             ),
           ),
           const Spacer(),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const NotificationsInboxPage(),
+          _HeaderActionButton(
+            onTap: _openNotifications,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Center(
+                  child: Icon(
+                    Icons.mail_outline_rounded,
+                    color: AppColors.primary,
+                    size: 22,
                   ),
-                );
-                await _refreshNotificationCount();
-              },
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: const Color(0xFFE6EAF0),
-                    width: 1.2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
                 ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.center,
-                  children: [
-                    Image.asset(
-                      'assets/images/icon_mail.png',
-                      width: 22,
-                      height: 22,
-                      fit: BoxFit.contain,
-                      color: AppColors.primary,
-                      colorBlendMode: BlendMode.srcIn,
-                    ),
-                    if (_notificationCount > 0)
-                      Positioned(
-                        right: -6,
-                        top: -7,
-                        child: Container(
-                          constraints: const BoxConstraints(
-                            minWidth: 17,
-                            minHeight: 17,
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade600,
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white,
-                              width: 1.2,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            _notificationCount > 99
-                                ? '99+'
-                                : '$_notificationCount',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              height: 1,
-                              fontWeight: FontWeight.w700,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
+                if (_unreadNotifications > 0)
+                  Positioned(
+                    top: -7,
+                    right: -7,
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 19,
+                        minHeight: 19,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.white,
+                          width: 2,
                         ),
                       ),
-                  ],
-                ),
-              ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _unreadNotifications > 99
+                            ? '99+'
+                            : _unreadNotifications.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          height: 1,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ProfilePage()),
-                );
-              },
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: const Color(0xFFE6EAF0),
-                    width: 1.2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.person_rounded,
-                  color: AppColors.primary,
-                  size: 21,
-                ),
-              ),
+          const SizedBox(width: 10),
+          _HeaderActionButton(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilePage()),
+              );
+            },
+            child: const Icon(
+              Icons.person_rounded,
+              color: AppColors.primary,
+              size: 21,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _HeaderActionButton extends StatelessWidget {
+  final VoidCallback onTap;
+  final Widget child;
+
+  const _HeaderActionButton({
+    required this.onTap,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: const Color(0xFFE6EAF0),
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: child,
+        ),
       ),
     );
   }

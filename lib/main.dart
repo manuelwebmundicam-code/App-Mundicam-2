@@ -19,6 +19,7 @@ import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/core/config/force_update_service.dart';
 import 'package:mundicam/core/config/update_announcement_service.dart';
 import 'package:mundicam/features/system/presentation/pages/force_update_page.dart';
+import 'package:mundicam/features/system/presentation/widgets/update_announcement_gate.dart';
 import 'package:mundicam/features/auth/presentation/pages/login_page.dart';
 import 'package:mundicam/app/main_screen.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
@@ -161,20 +162,6 @@ Future<void> _postRunAppBootstrap() async {
   }
 
   if (firebaseReady) {
-    // FCM/APNs debe inicializarse en cuanto Firebase esté listo. No se deja
-    // bloqueado detrás de Remote Config para evitar retrasos/races en iOS.
-    try {
-      await NotificationService()
-          .initialize()
-          .timeout(const Duration(seconds: 15), onTimeout: () {
-        debugPrint(
-          '⚠️ Inicialización FCM tardó demasiado. Se reintentará después.',
-        );
-      });
-    } catch (e) {
-      debugPrint('⚠️ Error inicializando notificaciones: $e');
-    }
-
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
       await remoteConfig.setConfigSettings(
@@ -198,7 +185,8 @@ Future<void> _postRunAppBootstrap() async {
         ForceUpdateService.messageKey: '',
         ForceUpdateService.buttonLabelKey: '',
 
-        // Popup informativo de actualización en Home. Independiente del bloqueo.
+        // Aviso opcional para usuarios que están una versión por detrás.
+        // No bloquea: solo informa y permite "Más tarde".
         UpdateAnnouncementService.enabledKey: false,
         UpdateAnnouncementService.latestAndroidVersionKey: '',
         UpdateAnnouncementService.latestIosVersionKey: '',
@@ -206,9 +194,9 @@ Future<void> _postRunAppBootstrap() async {
         UpdateAnnouncementService.point1Key: '',
         UpdateAnnouncementService.point2Key: '',
         UpdateAnnouncementService.point3Key: '',
-        UpdateAnnouncementService.moreTextKey: 'Y mucho más…',
-        UpdateAnnouncementService.updateButtonLabelKey: 'Actualizar ahora',
-        UpdateAnnouncementService.laterButtonLabelKey: 'Más tarde',
+        UpdateAnnouncementService.moreTextKey: '',
+        UpdateAnnouncementService.updateButtonLabelKey: '',
+        UpdateAnnouncementService.laterButtonLabelKey: '',
       });
 
       // Evalúa primero los últimos valores activados que Firebase pudiera
@@ -233,7 +221,9 @@ Future<void> _postRunAppBootstrap() async {
             await remoteConfig.activate();
             await ForceUpdateService.instance.evaluate(remoteConfig);
             await UpdateAnnouncementService.instance.evaluate(remoteConfig);
-            debugPrint('✅ Remote Config actualizado y reevaluado');
+            debugPrint(
+              '✅ Remote Config actualizado: bloqueo y aviso reevaluados',
+            );
           } catch (e) {
             // Fail-open: un problema de Remote Config nunca debe bloquear
             // accidentalmente la aplicación.
@@ -248,6 +238,18 @@ Future<void> _postRunAppBootstrap() async {
       debugPrint('✅ Remote Config inicializado correctamente');
     } catch (e) {
       debugPrint('⚠️ Remote Config no crítico: $e');
+    }
+
+    try {
+      await NotificationService()
+          .initialize()
+          .timeout(const Duration(seconds: 15), onTimeout: () {
+        debugPrint(
+          '⚠️ Inicialización FCM tardó demasiado. Se reintentará después.',
+        );
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error inicializando notificaciones: $e');
     }
   }
 
@@ -318,7 +320,9 @@ class MyApp extends StatelessWidget {
       title: 'Mundicam',
       theme: AppTheme.lightTheme,
       home: const ForceUpdateGate(
-        child: AuthWrapper(),
+        child: UpdateAnnouncementGate(
+          child: AuthWrapper(),
+        ),
       ),
     );
   }
@@ -378,16 +382,10 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
         : false;
 
     if (!hasAppSession) {
-      // En una instalación nueva no existe sesión App API previa que limpiar.
-      // Evitamos borrar/crear un token FCM durante el mismo arranque en el que
-      // iOS está registrándose con APNs. Si había una sesión almacenada y ya no
-      // es válida, sí limpiamos la asociación anterior del dispositivo.
-      if (hasStoredToken) {
-        try {
-          await NotificationService().clearDeviceRegistration();
-        } catch (e) {
-          debugPrint('⚠️ No se pudo limpiar el dispositivo FCM: $e');
-        }
+      try {
+        await NotificationService().clearDeviceRegistration();
+      } catch (e) {
+        debugPrint('⚠️ No se pudo limpiar el dispositivo FCM: $e');
       }
 
       if (Firebase.apps.isNotEmpty) {

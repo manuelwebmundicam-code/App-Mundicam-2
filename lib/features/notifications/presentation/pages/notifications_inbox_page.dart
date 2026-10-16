@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/notifications/notification_inbox_store.dart';
 import 'package:mundicam/core/notifications/notification_service.dart';
+import 'package:mundicam/features/promotions/presentation/pages/promotions_page.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
 Future<List<NotificationInboxEntry>> loadNotificationInboxEntries() async {
@@ -23,24 +24,9 @@ Future<List<NotificationInboxEntry>> loadNotificationInboxEntries() async {
       ? const <NotificationInboxEntry>[]
       : await NotificationInboxStore.instance.load(scope: scope);
 
-  final remoteRaw = await api.getNotificationHistory(limit: 100);
-  final remoteEntries = remoteRaw
-      .map(_notificationInboxEntryFromRemote)
-      .whereType<NotificationInboxEntry>()
+  final entries = localEntries
       .where((entry) => !entry.isTestOrDiagnostic)
-      .toList();
-
-  final merged = <String, NotificationInboxEntry>{};
-
-  for (final entry in remoteEntries) {
-    merged[entry.id] = entry;
-  }
-
-  for (final entry in localEntries) {
-    merged[entry.id] = entry;
-  }
-
-  final entries = merged.values.toList()
+      .toList()
     ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
 
   return entries;
@@ -241,7 +227,16 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
               ],
             ),
           ),
+          actionsAlignment: openedEntry.isPromotion
+              ? MainAxisAlignment.spaceBetween
+              : MainAxisAlignment.end,
           actions: [
+            if (openedEntry.isPromotion)
+              TextButton.icon(
+                onPressed: () => _openPromotionsFromDialog(dialogContext),
+                icon: const Icon(Icons.local_offer_outlined, size: 18),
+                label: const Text('Ir a promoción'),
+              ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('Cerrar'),
@@ -249,6 +244,18 @@ class _NotificationsInboxPageState extends State<NotificationsInboxPage> {
           ],
         );
       },
+    );
+  }
+
+  void _openPromotionsFromDialog(BuildContext dialogContext) {
+    Navigator.of(dialogContext).pop();
+
+    if (!mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const PromotionsPage(),
+      ),
     );
   }
 
@@ -419,30 +426,6 @@ class _NotificationLeading extends StatelessWidget {
 }
 
 
-NotificationInboxEntry? _notificationInboxEntryFromRemote(
-  Map<String, dynamic> json,
-) {
-  final eventId = json['event_id']?.toString().trim() ?? '';
-  final communicationId = json['communication_id']?.toString().trim() ??
-      json['id']?.toString().trim() ??
-      '';
-
-  final id = eventId.isNotEmpty
-      ? eventId
-      : (communicationId.isNotEmpty ? 'communication:$communicationId' : '');
-
-  if (id.isEmpty) return null;
-
-  return NotificationInboxEntry.fromJson(<String, dynamic>{
-    'id': id,
-    'title': json['title'],
-    'body': json['body'],
-    'event': json['event'] ?? json['type'],
-    'image_url': json['image_url'],
-    'received_at': json['sent_at'] ?? json['published_at'],
-    'opened_by_user': false,
-  });
-}
 
 String _formatDate(DateTime value) {
   String twoDigits(int number) => number.toString().padLeft(2, '0');

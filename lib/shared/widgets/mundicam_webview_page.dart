@@ -13,9 +13,7 @@ class MundiCamWebViewPage extends StatefulWidget {
     this.url,
     this.focusRegistration = false,
     this.closeOnBack = false,
-    this.showAppBar = true,
-    this.showRefreshButton = false,
-    this.contentTopSpacing = 0.0,
+    this.hideWebsiteChrome = false,
   }) : assert(
           initialUri != null || url != null,
           'Debe indicarse initialUri o url.',
@@ -35,18 +33,11 @@ class MundiCamWebViewPage extends StatefulWidget {
   /// que la abrió, sin recorrer el historial interno de la web.
   final bool closeOnBack;
 
-  /// Permite ocultar únicamente la barra Flutter en pantallas que ya
-  /// presentan su propio contenido a pantalla completa, como Promociones.
-  /// Por defecto sigue activa para no cambiar el resto de WebViews.
-  final bool showAppBar;
-
-  /// Muestra el botón de recarga en la cabecera Flutter. Por defecto queda
-  /// desactivado para no alterar el resto de WebViews de la app.
-  final bool showRefreshButton;
-
-  /// Espacio visual entre la AppBar Flutter y el contenido web.
-  /// Se deja a 0 por defecto para no alterar otras WebViews.
-  final double contentTopSpacing;
+  /// Oculta únicamente el cromado exterior de la web (cabecera, buscador,
+  /// footer, breadcrumbs, chat, etc.) sin tocar el contenido principal.
+  /// Pensado para Promociones. Por defecto false para no afectar Academy,
+  /// registro, checkout ni otras WebViews.
+  final bool hideWebsiteChrome;
 
   Uri get resolvedInitialUri => initialUri ?? Uri.parse(url!);
 
@@ -61,6 +52,8 @@ typedef MundicamWebViewPage = MundiCamWebViewPage;
 class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
   late final WebViewController _controller;
   int _loadingProgress = 0;
+  bool _websiteChromeReady = false;
+  bool _chromeStyleRunning = false;
 
   @override
   void initState() {
@@ -71,11 +64,30 @@ class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
       ..setBackgroundColor(Colors.white)
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (_) {
+            if (!mounted) return;
+            setState(() {
+              _loadingProgress = 0;
+              _websiteChromeReady = !widget.hideWebsiteChrome;
+            });
+          },
           onProgress: (progress) {
             if (!mounted) return;
             setState(() => _loadingProgress = progress);
+
+            // En Promociones aplicamos pronto el CSS para evitar el flash
+            // del header/buscador web, pero sin tocar nunca el contenido.
+            if (widget.hideWebsiteChrome && progress >= 15) {
+              _applyWebsiteChromeStyle();
+            }
           },
-          onPageFinished: (_) {
+          onPageFinished: (_) async {
+            if (widget.hideWebsiteChrome) {
+              await _applyWebsiteChromeStyle(forceReady: true);
+              await Future<void>.delayed(const Duration(milliseconds: 120));
+              await _applyWebsiteChromeStyle(forceReady: true);
+            }
+
             final normalizedTitle = widget.title.toUpperCase();
             final shouldFocusRegistration = widget.focusRegistration ||
                 normalizedTitle.contains('INSCRIPCIÓN') ||
@@ -102,6 +114,117 @@ class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
         ),
       )
       ..loadRequest(widget.resolvedInitialUri);
+  }
+
+  Future<void> _applyWebsiteChromeStyle({bool forceReady = false}) async {
+    if (!widget.hideWebsiteChrome || _chromeStyleRunning) return;
+    _chromeStyleRunning = true;
+
+    const script = r'''      (function () {
+        var style = document.getElementById('mundicam-app-clean-webview-style');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'mundicam-app-clean-webview-style';
+          (document.head || document.documentElement).appendChild(style);
+        }
+
+        style.textContent = `
+          /* Solo cromado exterior de WordPress/XStore. No se toca article,
+             main, entry-content ni ningún contenedor de contenido. */
+          #wpadminbar,
+          #header,
+          .site-header,
+          .header-wrapper,
+          .header-main,
+          .main-header,
+          .mobile-header-wrapper,
+          .mobile-header,
+          .et-mobile-panel-wrapper,
+          .et-mobile-panel,
+          .et_b_header-menu,
+          .et_b_header-cart,
+          .et_b_header-account,
+          .et_b_header-search,
+          .header-search,
+          .etheme-search-form,
+          .ajax-search-form,
+          #sidebar,
+          .sidebar-wrapper,
+          .single-post-sidebar,
+          .blog-sidebar,
+          .site-footer,
+          .footer-wrapper,
+          .footer-main,
+          .main-footer,
+          .copyrights-wrapper,
+          .back-top,
+          .back-to-top,
+          .breadcrumbs,
+          .breadcrumb,
+          .post-navigation,
+          .comments-area,
+          #comments,
+          .related-posts,
+          .related-posts-wrapper,
+          .cky-consent-container,
+          #cmplz-cookiebanner-container,
+          .cmplz-cookiebanner,
+          #cookie-law-info-bar,
+          #cookie-notice,
+          .grecaptcha-badge,
+          .joinchat,
+          #joinchat,
+          [class*="joinchat"],
+          [id*="joinchat"],
+          [class*="chat-widget"],
+          [id*="chat-widget"],
+          [class*="chatbot"],
+          [id*="chatbot"],
+          [class*="tawk"],
+          [id*="tawk"],
+          [class*="crisp"],
+          [id*="crisp"],
+          [class*="intercom"],
+          [id*="intercom"],
+          [class*="tidio"],
+          [id*="tidio"],
+          [class*="jivo"],
+          [id*="jivo"] {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            max-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow-x: hidden !important;
+            background: #fff !important;
+          }
+        `;
+
+        return true;
+      })();
+    ''';
+
+    try {
+      await _controller.runJavaScript(script);
+      if (mounted && !_websiteChromeReady) {
+        setState(() => _websiteChromeReady = true);
+      }
+    } catch (error) {
+      debugPrint('No se pudo aplicar el modo WebView limpio: $error');
+      // Nunca dejamos una promoción en blanco por un fallo de CSS/JS.
+      if (mounted && (forceReady || !_websiteChromeReady)) {
+        setState(() => _websiteChromeReady = true);
+      }
+    } finally {
+      _chromeStyleRunning = false;
+    }
   }
 
   Future<void> _focusRegistrationForm() async {
@@ -215,38 +338,36 @@ class _MundiCamWebViewPageState extends State<MundiCamWebViewPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.white,
-        appBar: widget.showAppBar
-            ? ProfessionalPageAppBar(
-                title: widget.title,
-                onBack: _handleBack,
-                onRefresh: widget.showRefreshButton
-                    ? () => _controller.reload()
-                    : null,
-              )
-            : null,
-        body: Column(
+        appBar: ProfessionalPageAppBar(
+          title: widget.title,
+          onBack: _handleBack,
+        ),
+        body: Stack(
           children: [
-            if (widget.contentTopSpacing > 0)
-              SizedBox(height: widget.contentTopSpacing),
-            Expanded(
-              child: Stack(
-                children: [
-                  WebViewWidget(controller: _controller),
-                  if (_loadingProgress < 100)
-                    Align(
-                      alignment: Alignment.topCenter,
-                      child: LinearProgressIndicator(
-                        value: _loadingProgress > 0
-                            ? _loadingProgress / 100
-                            : null,
-                        minHeight: 2,
-                        color: AppColors.primary,
-                        backgroundColor: const Color(0xFFF1F3F5),
-                      ),
+            WebViewWidget(controller: _controller),
+            if (widget.hideWebsiteChrome && !_websiteChromeReady)
+              const Positioned.fill(
+                child: ColoredBox(
+                  color: Colors.white,
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      color: AppColors.primary,
                     ),
-                ],
+                  ),
+                ),
               ),
-            ),
+            if (_loadingProgress < 100)
+              Align(
+                alignment: Alignment.topCenter,
+                child: LinearProgressIndicator(
+                  value: _loadingProgress > 0
+                      ? _loadingProgress / 100
+                      : null,
+                  minHeight: 2,
+                  color: AppColors.primary,
+                  backgroundColor: const Color(0xFFF1F3F5),
+                ),
+              ),
           ],
         ),
       ),
