@@ -552,7 +552,7 @@ class ApiService {
       'Pedido Generado desde APP MundiCam';
 
   // Sensación de velocidad del buscador:
-  // primera pantalla pequeña y páginas siguientes precargadas en segundo plano.
+  // primera pantalla pequeña y siguientes páginas solo a petición del usuario.
   static const int _fastSearchFirstPageSize = 10;
   static const int _fastSearchNextPageSize = 10;
   static const int _fastSearchMaxBackgroundPages = 3;
@@ -1941,7 +1941,7 @@ class ApiService {
         : await getMarcaIdPorNombre(brandName);
 
     // Si la búsqueda es amplia, no bloqueamos la pantalla esperando 60/80/100 productos.
-    // Devolvemos 10 rápido y dejamos preparadas las páginas siguientes en caché.
+    // Devolvemos 10 rápido; las páginas siguientes se cargarán al desplazarse.
     final useFastFirstPage = cleanSearch.isNotEmpty &&
         requestedPage == 1 &&
         requestedPerPage > _fastSearchFirstPageSize &&
@@ -1982,19 +1982,6 @@ class ApiService {
         );
       },
     );
-
-    if (useFastFirstPage && result.hasNextPage) {
-      _startBackgroundSearchPrefetch(
-        categoryId: categoryId,
-        brandId: effectiveBrandId,
-        brandName: cleanBrandName,
-        search: cleanSearch,
-        orderBy: mappedOrderBy,
-        attributeTermIds: attributeTermIds,
-        attributeLabels: attributeLabels,
-        startPage: 2,
-      );
-    }
 
     // Defensa final de catálogo: si el backend devuelve explícitamente un
     // producto de otra marca, nunca lo mostramos dentro de una marca bloqueada.

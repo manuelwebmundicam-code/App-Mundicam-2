@@ -27,29 +27,99 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
   final ApiService _apiService = ApiService();
   final FirebaseService _firebase = FirebaseService();
 
-  late Future<List<Product>> _productosFuture;
+  static const int _pageSize = 15;
+  final ScrollController _scrollController = ScrollController();
+  late Future<CatalogProductsResult> _productosFuture;
+  final List<Product> _productos = <Product>[];
+  int? _brandId;
+  int _generation = 0;
+  int _currentPage = 1;
+  bool _hasMore = false;
+  bool _loadingMore = false;
+
 
   @override
   void initState() {
     super.initState();
-    _productosFuture = _loadProductosMarca();
+    _scrollController.addListener(_onScroll);
+    _productosFuture = _loadProductosMarca(_generation);
   }
 
-  Future<List<Product>> _loadProductosMarca() async {
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients || _loadingMore || !_hasMore) return;
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 250) {
+      _loadNextPage();
+    }
+  }
+
+  Future<CatalogProductsResult> _loadProductosMarca(int generation) async {
     final brandId = await _apiService.getMarcaIdPorNombre(widget.brandName);
     final result = await _apiService.getProductosCatalogoFiltrado(
       brandId: brandId,
       brandName: widget.brandName,
       page: 1,
-      perPage: 50,
+      perPage: _pageSize,
     );
-    return result.products;
+    if (mounted && generation == _generation) {
+      _brandId = brandId;
+      _productos
+        ..clear()
+        ..addAll(result.products);
+      _currentPage = result.currentPage;
+      _hasMore = result.hasNextPage && result.products.isNotEmpty;
+    }
+    return result;
+  }
+
+  Future<void> _loadNextPage() async {
+    if (_loadingMore || !_hasMore) return;
+    final generation = _generation;
+    final nextPage = _currentPage + 1;
+    setState(() => _loadingMore = true);
+    try {
+      final result = await _apiService.getProductosCatalogoFiltrado(
+        brandId: _brandId,
+        brandName: widget.brandName,
+        page: nextPage,
+        perPage: _pageSize,
+      );
+      if (!mounted || generation != _generation) return;
+      final ids = _productos.map((product) => product.id).toSet();
+      setState(() {
+        for (final product in result.products) {
+          if (ids.add(product.id)) _productos.add(product);
+        }
+        _currentPage = nextPage;
+        _hasMore = result.hasNextPage && result.products.isNotEmpty;
+      });
+    } catch (_) {
+      // Conservamos lo ya mostrado y permitimos reintentar desde el pie de lista.
+    } finally {
+      if (mounted && generation == _generation) {
+        setState(() => _loadingMore = false);
+      }
+    }
   }
 
   Future<void> _refreshProductos() async {
     setState(() {
-      _productosFuture = _loadProductosMarca();
+      _generation++;
+      _brandId = null;
+      _currentPage = 1;
+      _hasMore = false;
+      _loadingMore = false;
+      _productos.clear();
+      _productosFuture = _loadProductosMarca(_generation);
     });
+    await _productosFuture;
   }
 
   @override
@@ -63,7 +133,7 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
         onBack: () => Navigator.of(context).pop(),
         onRefresh: _refreshProductos,
       ),
-      body: FutureBuilder<List<Product>>(
+      body: FutureBuilder<CatalogProductsResult>(
         future: _productosFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -117,7 +187,7 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
             );
           }
 
-          final productos = snapshot.data ?? <Product>[];
+          final productos = _productos;
 
           if (productos.isEmpty) {
             return Center(
@@ -150,10 +220,24 @@ class _ProductoPorMarcaState extends State<ProductoPorMarca> {
             color: AppColors.primary,
             onRefresh: _refreshProductos,
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
               physics: const AlwaysScrollableScrollPhysics(),
-              itemCount: productos.length,
+              itemCount: productos.length + (_hasMore || _loadingMore ? 1 : 0),
               itemBuilder: (context, index) {
+                if (index == productos.length) {
+                  return Center(
+                    child: _loadingMore
+                        ? const Padding(
+                            padding: EdgeInsets.all(18),
+                            child: CircularProgressIndicator(color: AppColors.primary),
+                          )
+                        : TextButton(
+                            onPressed: _loadNextPage,
+                            child: const Text('Cargar más productos'),
+                          ),
+                  );
+                }
                 return ProductTile(
                   key: ValueKey(productos[index].id),
                   p: productos[index],

@@ -36,7 +36,7 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   Object? _lastError;
 
-  final int _perPage = 30;
+  final int _perPage = 15;
 
   ProductsPaginatedNotifier({
     required this.apiService,

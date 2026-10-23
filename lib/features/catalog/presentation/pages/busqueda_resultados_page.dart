@@ -202,9 +202,6 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         });
       });
 
-      if (_hasMore) {
-        _loadMoreResults(automatic: true, requestToken: token);
-      }
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
@@ -221,7 +218,6 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
   }
 
   Future<void> _loadMoreResults({
-    bool automatic = false,
     int? requestToken,
   }) async {
     if (_loading || _loadingMore || !_hasMore) return;
@@ -284,19 +280,11 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         _loadingMore = false;
       });
 
-      // Carga una segunda página automática solo cuando el usuario acaba de entrar.
-      // Así la pantalla enseña 10 rápido y acto seguido deja más resultados listos.
-      if (automatic && _hasMore && mounted && token == _requestToken) {
-        Future<void>.delayed(const Duration(milliseconds: 120), () {
-          if (!mounted || token != _requestToken) return;
-          _loadMoreResults(requestToken: token);
-        });
-      }
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
         _loadingMore = false;
-        if (!automatic) _error = e;
+        _error = e;
       });
       if (kDebugMode) {
         debugPrint('⚠️ Error cargando más resultados de búsqueda: $e');
