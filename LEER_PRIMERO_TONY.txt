@@ -1,0 +1,30 @@
+# ENTREGA DE LIB MUNDICAM — PRUEBAS DE CONEXIÓN VPS / B2B
+Fecha: 09/11/2026
+Estado: SOLO QA / DESARROLLO — NO PUBLICAR EN PRODUCCIÓN SIN REGRESIÓN.
+
+Archivo: MundiCam_lib_COMPLETO_VPS_QA_B2B_2026-11-09.zip
+Contenido: carpeta lib/ COMPLETA con 131 archivos Dart.
+
+CAMBIOS PARA LA AUDITORÍA B2B:
+- lib/core/network/vps_category_parity_audit.dart: nuevo comparador de categorías WP-VPS.
+- lib/core/network/api_service.dart: auditarCategoriasVps(), fuerza WordPress para muestra comercial.
+- lib/features/home/presentation/pages/home_page.dart: auditoría DEBUG solo con flag.
+- lib/core/network/vps_catalog_service.dart: indicadores hijos/hojas a partir del árbol público verificado.
+
+INSTALACIÓN (TONY):
+1. Hacer copia de la carpeta lib/ actual del proyecto Flutter.
+2. Extraer el ZIP en la RAÍZ del proyecto App-Mundicam-2; reemplazará la carpeta lib/, no pubspec ni otros directorios.
+3. No ejecutar flutter pub upgrade ni actualizar versiones de paquetes.
+4. Comprobar flutter analyze y compilar.
+5. Ejecutar SOLO en debug:
+   flutter run --debug --dart-define=MUNDICAM_B2B_CATEGORY_PARITY_AUDIT=true
+6. Iniciar sesión de prueba B2B y abrir Home, buscar MUNDICAM_B2B_CATEGORY_PARITY_QA.
+7. Enviar SOLO la línea con contadores, sin tokens FCM, correos, IP o credenciales.
+8. Repetir con una segunda tarifa/rol B2B, comprobar categorías 144,44,49.
+9. Ante diferencias o fallos, restaurar la carpeta lib de la copia.
+
+IMPORTANTE:
+- Esta entrega NO ACTIVA el catálogo del VPS para todos los clientes. El flag MUNDICAM_VPS_CATEGORY_TREE_QA permanece false por defecto.
+- R19 no hace falta para la auditoría; WordPress sigue R17.
+- Esta rama es solo transporte de ZIP para el técnico; no se ha cambiado main, WordPress, VPS ni tiendas.
+- Los datos públicos del VPS NO sustituyen precios, stock, descuentos Flycart ni ordenaciones comerciales.
