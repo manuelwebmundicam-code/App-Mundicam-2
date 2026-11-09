@@ -1,0 +1,39 @@
+MUNDICAM — ENTREGA PARA VALIDACIÓN, NO PRODUCCIÓN (09/11/2026)
+
+ZIP: MundiCam_lib_QA_VPS_BUSCADOR_FILTROS_R19_2026-11-09.zip
+Contiene carpeta lib/ completa del laboratorio, 132 archivos Dart.
+
+ESTADO EN ORIGEN:
+- 71 pruebas Flutter completas PASS. dart analyze del código modificado sin errores.
+- 15 pruebas aisladas PHP R19 PASS (en entorno PHP CLI simulado).
+- WordPress producción sigue R17, no se ha cambiado.
+- El VPS Typesense funciona, pero no ofrece precios comerciales por rol.
+- Marcas en WordPress y VPS tienen IDs distintos: no intercambiarlas.
+- Auditoría de categorías WP/VPS con admin: 489/489, sin diferencia estructural; quedan pruebas de clientes B2B.
+
+CAMBIOS DE ESTA ENTREGA:
+- lib/core/network/catalog_filter_request.dart, nuevo helper que añade facets_only=1 solo con flag.
+- lib/core/network/api_service.dart, modo R19 opt-in y fallback al endpoint anterior en 400/422 o respuesta inválida.
+- Mantiene conector VPS, caché segregada por identidad, buscador por SKU con hidratación comercial, Firebase corregido.
+
+PASOS PARA TONY EN FLUTTER (DESARROLLO):
+1. Guardar backup de su carpeta lib ANTES de copiar.
+2. Descomprimir este ZIP en raíz del proyecto, reemplazando SOLO lib.
+3. No ejecutar flutter pub upgrade ni publicar la app.
+4. Para probar navegación VPS + buscador rápido por SKU, con cuenta B2B de ensayo:
+   flutter run --debug --dart-define=MUNDICAM_VPS_CATEGORY_TREE_QA=true --dart-define=MUNDICAM_FAST_SKU_ENABLED=true --dart-define=MUNDICAM_B2B_CATEGORY_PARITY_AUDIT=true
+5. MUNDICAM_FAST_CATALOG_ENABLED=true SOLO si QA explícita de nombres y visibilidad; resultados públicos necesitan hidratación en WordPress.
+6. MUNDICAM_FAST_FACETS_ONLY=true SOLO en un WordPress STAGING donde esté R19; no lanzar contra www.mundicam.com R17 buscando mejoras.
+7. Confirmar SKU y precios B2B con dos roles, marcas separadas HIKVISION/HiWatch, 144/44/85.
+8. Si hay errores, restaurar lib y eliminar flags.
+
+R19 PHP NO está incluido en esta entrega de GitHub para no distribuir código servidor innecesariamente. La copia PHP R19 y sus tests se entregan en un paquete separado en ChatGPT.
+
+GATES PARA PRODUCCIÓN:
+- Copia del PHP realmente instalado en producción y copia BD recuperable.
+- WordPress staging con PHP/WooCommerce/Flycart/YITH reales (no simulación).
+- Pruebas de inicio de sesión y precios roles, stock, cupones, presupuesto y Redsys.
+- Filtros con R19 full vs facets_only identicos en opciones/IDs/recuentos.
+- Optimización real de /products price_asc aún pendiente, hoy ~15s en cat. 144.
+- Prueba app antigua contra nuevo PHP R19 (compatibilidad hacia atrás).
+- Solo tras todos los PASS desplegar una única versión final bajo aprobación, con rollback.
