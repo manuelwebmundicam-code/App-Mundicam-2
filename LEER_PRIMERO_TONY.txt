@@ -1,0 +1,33 @@
+MundiCam — LIB COMPLETO Flutter (QA VPS / B2B + corrección Firebase)
+Fecha: 09/11/2026
+Archivo: MundiCam_lib_COMPLETO_VPS_QA_B2B_FIREBASE_CORREGIDO_2026-11-09.zip
+Contenido: carpeta lib/ completa (131 archivos Dart).
+
+DIAGNÓSTICO DEL LOG
+- 489/489 categorías WP/VPS iguales en estructura, con rol administrator (NO certifica paridad B2B de productos/precios).
+- Arranque [core/no-app]: NotificationService construía FirebaseMessaging.instance antes de Firebase.initializeApp().
+- Productos categoría 144: 14.830 ms; filtros: 14.534 ms. Siguen dependiendo de WordPress R17, no de la inicialización FCM.
+
+CORRECCIÓN MINIMALISTA EN FLUTTER
+- notification_service.dart: FirebaseMessaging.instance pasa a inicialización diferida con late final.
+- El token FCM ya no se imprime en claro en debug, aunque se sigue guardando y registrando por el procedimiento normal.
+- No se cambia main.dart, el orden de ejecución del arranque, notificaciones enviadas, ni precios/pedidos.
+- Incluye todas las mejoras de lib anteriores (conector VPS y auditoría de categorías).
+- 13 pruebas automatizadas en esta tanda: todas correctas. dart analyze de 5 archivos implicados: sin problemas.
+- AÚN PENDIENTE: prueba real de arranque en emulador Android y en dispositivo iOS/Android, con FCM.
+
+INSTRUCCIONES
+1. Copiar carpeta lib/ actual en un directorio de respaldo fuera del proyecto, especialmente cambios locales.
+2. Extraer el ZIP en la raíz de App-Mundicam-2, reemplazando solo lib/.
+3. No hacer flutter pub upgrade: los avisos de dependencias nuevas no son errores de compilación.
+4. Ejecutar:
+    flutter run --debug --dart-define=MUNDICAM_B2B_CATEGORY_PARITY_AUDIT=true
+5. Confirmar que NO aparece [core/no-app], se abre Home, se registra FCM y el token completo NO se muestra en consola.
+6. Verificar MUNDICAM_B2B_CATEGORY_PARITY_QA con 2 usuarios comerciales de pruebas, no solo administrador.
+7. Comparar cat. 144, 44 y 49 y separadamente HIKVISION vs HiWatch, sin modificar precios y filtros.
+8. Reportar solo resumen anonimizado, redactando tokens/correos/identificadores.
+
+ROLLBACK
+Restaurar carpeta lib/ de la copia anterior si aparece cualquier error. PHP WordPress y VPS no se han tocado.
+
+NO ES PUBLICACIÓN EN STORES. No activar MUNDICAM_VPS_CATEGORY_TREE_QA en release.
