@@ -1,0 +1,11 @@
+--- mundicam-app-api.php@R19-original
++++ mundicam-app-api.php@QA-closure-fix
+@@ -4354,7 +4354,7 @@
+ 
+     private static function resolve_role_filtered_price_data(WC_Product $product, $price_context = 'cliente', $effective_role = '') {
+         $user_for_price = self::current_app_user();
+-        return self::with_effective_price_role($user_for_price, (string) $effective_role, function() use ($product, $price_context, $effective_role) {
++        return self::with_effective_price_role($user_for_price, (string) $effective_role, function() use ($product, $price_context, $effective_role, $user_for_price) {
+             $fresh_product = wc_get_product($product->get_id());
+             if ($fresh_product instanceof WC_Product) {
+                 $product = $fresh_product;
