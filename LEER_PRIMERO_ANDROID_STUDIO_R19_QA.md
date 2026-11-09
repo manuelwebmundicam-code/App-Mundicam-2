@@ -54,3 +54,12 @@ Se debe hacer COPIA de seguridad de lib/, android/app/build.gradle.kts, android/
 - El objetivo inicial es comprobar conexión real, contrato R19 y comparar rendimientos; no confundir esta utilidad de QA con la app comercial completa.
 - Rollback Flutter: restaurar los archivos respaldados y ejecutar Flutter sin `main_qa.dart`.
 - Rollback VPS: `systemctl --user stop mundicam-wordpress-r19-qa-local.service mundicam-wpqa-db-local.service`.
+
+## Crear catálogo ficticio de prueba (una vez Woo y R19 estén activos)
+Ya está preparado en el VPS el script:
+`/home/mundicam-agent/mundicam-lab/wordpress-r19-staging-20261109/tests/qa_seed_catalog.php`
+Se ejecuta exclusivamente contra la BD aislada y **se niega a actuar si el sitio no es localhost o la BD no es mundicam_qa_r19**:
+```bash
+php /home/mundicam-agent/mundicam-lab/wordpress-r19-staging-20261109/downloads/wp-cli.phar eval-file /home/mundicam-agent/mundicam-lab/wordpress-r19-staging-20261109/tests/qa_seed_catalog.php --path=/home/mundicam-agent/mundicam-lab/wordpress-r19-staging-20261109/web
+```
+Produce 3 categorías, 108 productos **inventados**, y atributos de resolución; no crea usuarios ni pedidos ni copia datos reales. Imprime los IDs de categoría que deben introducirse en Android QA. Ejecutarlo una vez, o repetir sin duplicar SKUs. Estos 108 productos no representan carga de 2.867 referencias, por lo que los tiempos serán preliminares. Las tarifas por rol requieren Flycart y reglas de prueba reales.
