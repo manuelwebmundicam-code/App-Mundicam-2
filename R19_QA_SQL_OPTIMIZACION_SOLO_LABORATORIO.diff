@@ -1,0 +1,129 @@
+--- R19-original/mundicam-app-api.php
++++ R19-QA-experimental/mundicam-app-api.php
+@@ -43,6 +43,10 @@
+      * Se usa para resolver precios por rol sin depender de sesiones/cachés de WooCommerce.
+      */
+     private static $current_app_user_id = 0;
++
++    // LAB ONLY: instantánea de metadatos base RAW para ordenar en la petición.
++    // No se reutiliza entre peticiones, usuarios, roles ni sesiones.
++    private static $qa_sort_raw_meta = null;
+ 
+     public static function init() {
+         add_action('rest_api_init', [__CLASS__, 'register_routes']);
+@@ -4074,6 +4078,47 @@
+     }
+ 
+     /**
++     * EXPERIMENTO QA: agrupa las lecturas RAW de _price/_sale_price/_regular_price.
++     * Misma semántica que raw_product_meta(): el último meta_id gana, sin filtros WP.
++     * Vigencia únicamente durante esta petición y únicamente en el sort B2B.
++     */
++    private static function qa_prime_raw_meta_for_sort(array $candidate_ids) {
++        if (!defined('MUNDICAM_QA_BULK_RAW_META') || !MUNDICAM_QA_BULK_RAW_META ||
++            !defined('DB_NAME') || DB_NAME !== 'mundicam_qa_r19' ||
++            home_url() !== 'http://127.0.0.1:8770') {
++            return;
++        }
++        global $wpdb;
++        $meta_by_id = [];
++        $ids = array_values(array_unique(array_filter(array_map('absint', $candidate_ids))));
++        foreach ($ids as $product_id) {
++            $meta_by_id[$product_id] = [];
++        }
++        foreach (array_chunk($ids, 80) as $batch) {
++            $placeholders = implode(',', array_fill(0, count($batch), '%d'));
++            $sql = $wpdb->prepare(
++                "SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} " .
++                "WHERE post_id IN ($placeholders) AND meta_key IN ('_price','_sale_price','_regular_price') " .
++                "ORDER BY meta_id DESC",
++                ...$batch
++            );
++            $rows = $wpdb->get_results($sql, ARRAY_A);
++            if (!is_array($rows)) {
++                throw new RuntimeException('QA bulk RAW meta read failed.');
++            }
++            foreach ($rows as $row) {
++                $product_id = (int) $row['post_id'];
++                $key = (string) $row['meta_key'];
++                if (isset($meta_by_id[$product_id]) &&
++                    !array_key_exists($key, $meta_by_id[$product_id])) {
++                    $meta_by_id[$product_id][$key] = $row['meta_value'];
++                }
++            }
++        }
++        self::$qa_sort_raw_meta = $meta_by_id;
++    }
++
++    /**
+      * Lee postmeta directamente desde la base de datos, sin pasar por get_post_meta().
+      * Algunos plugins B2B filtran get_price()/get_post_meta() según rol y pueden devolver
+      * precio de cliente incluso para admin en REST. Para admin necesitamos el precio base real.
+@@ -4087,11 +4132,18 @@
+             return '';
+         }
+ 
+-        $value = $wpdb->get_var($wpdb->prepare(
+-            "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id DESC LIMIT 1",
+-            $product_id,
+-            $meta_key
+-        ));
++        if (is_array(self::$qa_sort_raw_meta) &&
++            array_key_exists($product_id, self::$qa_sort_raw_meta) &&
++            in_array($meta_key, ['_price', '_sale_price', '_regular_price'], true)) {
++            // Valor RAW idéntico a la última fila por meta_id; ausencia = ''.
++            $value = self::$qa_sort_raw_meta[$product_id][$meta_key] ?? null;
++        } else {
++            $value = $wpdb->get_var($wpdb->prepare(
++                "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id DESC LIMIT 1",
++                $product_id,
++                $meta_key
++            ));
++        }
+ 
+         if ($value === null) {
+             return '';
+@@ -4354,7 +4406,7 @@
+ 
+     private static function resolve_role_filtered_price_data(WC_Product $product, $price_context = 'cliente', $effective_role = '') {
+         $user_for_price = self::current_app_user();
+-        return self::with_effective_price_role($user_for_price, (string) $effective_role, function() use ($product, $price_context, $effective_role) {
++        return self::with_effective_price_role($user_for_price, (string) $effective_role, function() use ($product, $price_context, $effective_role, $user_for_price) {
+             $fresh_product = wc_get_product($product->get_id());
+             if ($fresh_product instanceof WC_Product) {
+                 $product = $fresh_product;
+@@ -4935,6 +4987,10 @@
+             return rest_ensure_response($empty_payload);
+         }
+ 
++        // LAB QA: precarga RAW solo durante esta ordenación, sin sustituir
++        // resolve_product_price_data() ni las reglas B2B/HTML de Flycart.
++        self::qa_prime_raw_meta_for_sort($ids);
++
+         $sortable = [];
+         // R18: el orden B2B por precio NECESITA evaluar cada producto; no usamos
+         // _price ni el PVP del indice WooCommerce para sustituir su tarifa.
+@@ -5020,6 +5076,8 @@
+         if (!$compact) {
+             $payload['data'] = $products;
+         }
++        // No retener el mapa ni siquiera durante el resto de la petición QA.
++        self::$qa_sort_raw_meta = null;
+         return rest_ensure_response($payload);
+     }
+ 
+@@ -14007,7 +14065,13 @@
+     }
+ 
+     if ($count <= 150) {
+-        _prime_post_caches($product_ids, false, true);
++        // SOLO LABORATORIO: comprobar si primar términos para 51..150
++        // candidatos reduce el N+1 sin cambiar el scoring ni los productos.
++        $qa_prime_terms = defined('MUNDICAM_QA_CONTEXT_TERMS')
++            && MUNDICAM_QA_CONTEXT_TERMS
++            && defined('DB_NAME') && DB_NAME === 'mundicam_qa_r19'
++            && home_url() === 'http://127.0.0.1:8770';
++        _prime_post_caches($product_ids, $qa_prime_terms, true);
+     }
+ }
+ 
