@@ -496,7 +496,10 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._();
 
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  // Singleton accesible antes de Firebase.initializeApp(): el inbox local y
+  // los listeners de UI no deben resolver FirebaseMessaging en el constructor.
+  // El SDK se obtiene de forma diferida cuando initialize() ya puede usarlo.
+  late final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
@@ -1113,7 +1116,9 @@ class NotificationService {
       }
 
       final token = await _messaging.getToken();
-      if (kDebugMode) debugPrint('📱 FCM Token $_platform: $token');
+      if (kDebugMode) {
+        debugPrint('📱 Token FCM obtenido para $_platform (valor oculto)');
+      }
 
       if ((token ?? '').trim().isEmpty) {
         if (Platform.isIOS) {

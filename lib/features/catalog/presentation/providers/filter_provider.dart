@@ -1,5 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+// QA A/B: no automatic sorting, preserving manual selection and B2B prices.
+// Release/Profile use the backend default order without an automatic price sort.
+const bool mundicamQaNoDefaultSort =
+    bool.fromEnvironment('MUNDICAM_QA_NO_DEFAULT_SORT', defaultValue: true);
+
 class MundiFilters {
   final String brand;
   final int? brandId;
@@ -217,6 +222,12 @@ class FilterNotifier extends StateNotifier<MundiFilters> {
       attributeLabels: const <String, String>{},
       attributeGroupLabels: const <String, String>{},
     );
+  }
+
+  // Una sola transición al pasar a otra rama principal del catálogo.
+  // Evita reset() + setOrderBy() (dos notificaciones y recargas extra).
+  void resetForCatalogCategory() {
+    state = MundiFilters(orderBy: mundicamQaNoDefaultSort ? '' : 'price_asc');
   }
 
   void reset() {

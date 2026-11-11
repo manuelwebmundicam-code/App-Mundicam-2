@@ -27,12 +27,12 @@ import 'package:mundicam/features/catalog/presentation/widgets/filtro_selector.d
 import 'package:mundicam/features/catalog/presentation/widgets/cross_sell_widgets.dart';
 import 'package:mundicam/shared/theme/app_theme.dart';
 
-
 final _canViewStockDetailsProvider = FutureProvider<bool>((ref) async {
   try {
     // La sesión de negocio válida es WordPress/MundiCam App API.
     // No dependemos de Firebase para decidir permisos de stock.
-    final canViewFromAppSession = await ApiService().currentSessionCanViewStockDetails();
+    final canViewFromAppSession = await ApiService()
+        .currentSessionCanViewStockDetails();
     if (canViewFromAppSession) return true;
 
     final user = FirebaseAuth.instance.currentUser;
@@ -161,11 +161,26 @@ class ProductosPorCategoriaScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProductosPorCategoriaScreen> createState() => _ProductosPorCategoriaScreenState();
+  ConsumerState<ProductosPorCategoriaScreen> createState() =>
+      _ProductosPorCategoriaScreenState();
 }
 
-class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCategoriaScreen> {
+class _ProductosPorCategoriaScreenState
+    extends ConsumerState<ProductosPorCategoriaScreen> {
   static const Duration _suggestionsCacheTtl = Duration(minutes: 3);
+
+  // Se evita competir con la carga comercial de categorías por defecto.
+  // Las sugerencias al escribir siguen intactas; reversible con dart-define.
+  static const bool _categorySearchPrewarmEnabled = bool.fromEnvironment(
+    'MUNDICAM_CATEGORY_SEARCH_PREWARM_ENABLED',
+    defaultValue: false,
+  );
+  // Release candidate: concurrent catalog filters instead of waiting for products
+  // sequence. The B2B price engine stays in PHP; no change to commercial prices.
+  static const bool _qaParallelFilters = bool.fromEnvironment(
+    'MUNDICAM_EAGER_CATEGORY_FILTERS',
+    defaultValue: true,
+  );
   static int? _lastOpenedCategoryId;
   static bool _preserveFiltersForNextCategoryOpen = false;
 
@@ -183,7 +198,10 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   List<_CatalogSearchSuggestion> _searchSuggestions = [];
   String _lastSuccessfulSuggestionsQuery = '';
   late Future<List<CategoryModel>> _subcategoriesFuture;
+  bool _subcategoriesRequested = false;
   bool _subcategoriesExpanded = false;
+  // Durante la primera entrada cargamos productos antes de pedir filtros a PHP.
+  bool _categoryFiltersEnabled = false;
   late int _activeCatalogCategoryId;
   late String _activeCatalogCategoryName;
 
@@ -194,18 +212,16 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   int? get _brandContextId =>
       (widget.initialBrandId ?? 0) > 0 ? widget.initialBrandId : null;
 
-  String get _brandContextName =>
-      (widget.initialBrandName ?? '').trim();
+  String get _brandContextName => (widget.initialBrandName ?? '').trim();
 
   String get _brandContextTaxonomy =>
       (widget.initialBrandTaxonomy ?? '').trim();
 
   void _restoreBrandContext() {
     if (!_isBrandContext) return;
-    ref.read(productFilterProvider.notifier).setBrand(
-      name: _brandContextName,
-      id: _brandContextId ?? 0,
-    );
+    ref
+        .read(productFilterProvider.notifier)
+        .setBrand(name: _brandContextName, id: _brandContextId ?? 0);
   }
 
   // v1.9.93: al salir de una hoja de productos abierta desde MARCAS no dejamos
@@ -234,7 +250,11 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     super.initState();
     _activeCatalogCategoryId = widget.categoryId;
     _activeCatalogCategoryName = widget.categoryName;
-    _subcategoriesFuture = _loadSubcategoriesForCurrentCategory();
+    // No competir con la primera página de productos y filtros B2B:
+    // el panel de Subcategorías está cerrado en el primer frame.
+    _subcategoriesFuture = Future<List<CategoryModel>>.value(
+      const <CategoryModel>[],
+    );
 
     final previousCategoryId = _lastOpenedCategoryId;
     final preserveFilters = _preserveFiltersForNextCategoryOpen;
@@ -265,11 +285,13 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
           ref.read(productFilterProvider.notifier).reset();
           _restoreBrandContext();
-          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+          if (!mundicamQaNoDefaultSort) {
+            ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+          }
           if (hasInitialSearch) {
-            ref.read(productFilterProvider.notifier).update(
-              search: initialSearch,
-            );
+            ref
+                .read(productFilterProvider.notifier)
+                .update(search: initialSearch);
           }
           _reloadCurrentCategory(scrollTop: true);
           _prewarmCategorySearchCache();
@@ -283,44 +305,68 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
           // la última marca que abrió esa misma categoría. Vaciamos el estado y
           // recargamos SIEMPRE con la marca actual para impedir cruces Dahua /
           // Hikvision / HiWatch / cualquier otra marca.
-          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+          if (!mundicamQaNoDefaultSort) {
+            ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+          }
           _reloadCurrentCategory(scrollTop: false);
           _prewarmCategorySearchCache();
         });
       }
     } else {
-      final shouldClearFiltersFromOtherCategory = !preserveFilters &&
+      final shouldClearFiltersFromOtherCategory =
+          !preserveFilters &&
           currentFilters.hasActiveFilters &&
           !hasInitialSearch &&
-          (previousCategoryId == null || previousCategoryId != widget.categoryId);
+          (previousCategoryId == null ||
+              previousCategoryId != widget.categoryId);
 
-      _searchController.text = hasInitialSearch ? initialSearch : currentFilters.search;
+      _searchController.text = hasInitialSearch
+          ? initialSearch
+          : currentFilters.search;
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
 
         if (hasInitialSearch) {
-          ref.read(productFilterProvider.notifier).update(
-            search: initialSearch,
-            orderBy: 'price_asc',
-            brand: '',
-            brandId: null,
-            attributeTermIds: const <String, int>{},
-            attributeLabels: const <String, String>{},
-            attributeGroupLabels: const <String, String>{},
-          );
+          ref
+              .read(productFilterProvider.notifier)
+              .update(
+                search: initialSearch,
+                orderBy: mundicamQaNoDefaultSort ? '' : 'price_asc',
+                brand: '',
+                brandId: null,
+                attributeTermIds: const <String, int>{},
+                attributeLabels: const <String, String>{},
+                attributeGroupLabels: const <String, String>{},
+              );
           _reloadCurrentCategory(scrollTop: true);
         } else if (shouldClearFiltersFromOtherCategory) {
           _searchController.clear();
-          ref.read(productFilterProvider.notifier).reset();
-          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
-          _reloadCurrentCategory(scrollTop: true);
-        } else if (currentFilters.orderBy.trim().isEmpty) {
-          ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
-          _reloadCurrentCategory(scrollTop: false);
+          // Si ya está en el orden por defecto, ref.listen no detecta cambio:
+          // recargamos explícitamente para evitar datos de otra marca previa.
+          final alreadyDefault =
+              currentFilters == MundiFilters(orderBy: mundicamQaNoDefaultSort ? '' : 'price_asc');
+          ref.read(productFilterProvider.notifier).resetForCatalogCategory();
+          if (alreadyDefault) _reloadCurrentCategory(scrollTop: true);
+        } else if (!mundicamQaNoDefaultSort && currentFilters.orderBy.trim().isEmpty) {
+          // El cambio de orden activa ref.listen; no recargar dos veces.
+          if (!mundicamQaNoDefaultSort) {
+            ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+          }
         }
 
         _prewarmCategorySearchCache();
+      });
+    }
+
+    // The initial category may have reset its brand/order in the earlier
+    // post-frame callback. Start filters only AFTER that context is stable.
+    if (_qaParallelFilters) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _categoryFiltersEnabled) return;
+        setState(() => _categoryFiltersEnabled = true);
+        debugPrint('MUNDICAM_PARALLEL_FILTERS_STARTED '
+            'category=$_activeCatalogCategoryId');
       });
     }
 
@@ -382,7 +428,6 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     );
   }
 
-
   List<String> _prewarmTermsForCategory(String categoryName) {
     final compact = _compactForSearch(categoryName);
 
@@ -407,7 +452,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       return const ['ajax', 'sensor', 'mando'];
     }
 
-    if (compact.contains('network') || compact.contains('red') || compact.contains('wifi')) {
+    if (compact.contains('network') ||
+        compact.contains('red') ||
+        compact.contains('wifi')) {
       return const ['switch', 'poe', 'router'];
     }
 
@@ -415,11 +462,13 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   void _prewarmCategorySearchCache() {
+    if (!_categorySearchPrewarmEnabled) return;
     final terms = _prewarmTermsForCategory(widget.categoryName);
     if (terms.isEmpty) return;
 
     final cache = ProductCacheService();
-    final prewarmKey = 'prewarm|cat:${widget.categoryId}|${widget.categoryName.toLowerCase().trim()}';
+    final prewarmKey =
+        'prewarm|cat:${widget.categoryId}|${widget.categoryName.toLowerCase().trim()}';
     if (!cache.shouldPrewarm(prewarmKey)) return;
     cache.markPrewarmRun(prewarmKey);
 
@@ -430,12 +479,12 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         try {
           await ApiService()
               .getProductosCatalogoFiltrado(
-            categoryId: widget.categoryId,
-            search: term,
-            page: 1,
-            perPage: 12,
-            orderBy: 'date',
-          )
+                categoryId: widget.categoryId,
+                search: term,
+                page: 1,
+                perPage: 12,
+                orderBy: 'date',
+              )
               .timeout(const Duration(milliseconds: 1500));
         } catch (_) {
           // Precarga silenciosa: nunca debe afectar al usuario.
@@ -444,18 +493,20 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     });
   }
 
-  void _reloadCurrentCategory({
-    bool scrollTop = true,
-  }) {
+  void _reloadCurrentCategory({bool scrollTop = true}) {
     _isLoadingMore = false;
 
     final notifier = ref.read(
       productsPaginatedProvider(_activeCatalogCategoryId).notifier,
     );
 
-    notifier.clearCacheForCurrentCategory();
+    // Un cambio de filtros no equivale a pulsar «Actualizar». La clave de
+    // caché ya distingue cuenta B2B, categoría, marca, búsqueda, orden y
+    // atributos. Reutilizar la página reciente evita repetir WooCommerce
+    // al volver de VIDEO IP HD a CCTV/COMPLEMENTOS y entre subcategorías.
+    // restartPending evita que el request anterior bloquee el contexto nuevo.
     notifier.showReloadingState();
-    unawaited(notifier.loadFirstPage(forceRefresh: true));
+    unawaited(notifier.loadFirstPage(restartPending: true));
 
     if (scrollTop) {
       unawaited(_scrollToTop());
@@ -521,13 +572,14 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       if (!mounted) return;
 
       try {
-        final suggestions = await _buildSkuProductSuggestions(clean).timeout(
-          const Duration(seconds: 8),
-        );
+        final suggestions = await _buildSkuProductSuggestions(
+          clean,
+        ).timeout(const Duration(seconds: 8));
 
         if (!mounted || token != _suggestionsToken) return;
         setState(() {
-          final keepPrevious = suggestions.isEmpty &&
+          final keepPrevious =
+              suggestions.isEmpty &&
               _searchSuggestions.isNotEmpty &&
               _isExtensionOfSuccessfulSuggestionsQuery(clean);
           if (!keepPrevious) {
@@ -584,7 +636,10 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     return ProductCacheService().getMemory<List<_CatalogSearchSuggestion>>(key);
   }
 
-  void _writeSuggestionsCache(String key, List<_CatalogSearchSuggestion> suggestions) {
+  void _writeSuggestionsCache(
+    String key,
+    List<_CatalogSearchSuggestion> suggestions,
+  ) {
     ProductCacheService().cacheMemory<List<_CatalogSearchSuggestion>>(
       key,
       suggestions,
@@ -592,7 +647,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     );
   }
 
-  Future<List<_CatalogSearchSuggestion>> _buildSkuProductSuggestions(String rawQuery) async {
+  Future<List<_CatalogSearchSuggestion>> _buildSkuProductSuggestions(
+    String rawQuery,
+  ) async {
     final cleanQuery = rawQuery.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (!_looksLikeSku(cleanQuery)) return [];
 
@@ -608,9 +665,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     try {
       addAll(
-        await api.buscarProductosPredictivo(cleanQuery, limit: 12).timeout(
-          const Duration(seconds: 6),
-        ),
+        await api
+            .buscarProductosPredictivo(cleanQuery, limit: 12)
+            .timeout(const Duration(seconds: 6)),
       );
     } catch (_) {
       // Continuamos con la búsqueda estándar de catálogo.
@@ -619,9 +676,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     if (byId.isEmpty) {
       try {
         addAll(
-          await api.buscarProductos(cleanQuery).timeout(
-            const Duration(seconds: 6),
-          ),
+          await api
+              .buscarProductos(cleanQuery)
+              .timeout(const Duration(seconds: 6)),
         );
       } catch (_) {
         // Si falla, no mostramos sugerencias genéricas para no confundir.
@@ -629,42 +686,43 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     }
 
     final tokens = _meaningfulTokens(cleanQuery);
-    final scoredProducts = byId.values
-        .map(
-          (product) => _ScoredProduct(
-        product: product,
-        score: _scoreSuggestionProduct(
-          product,
-          cleanQuery,
-          tokens,
-          const <String>{},
-          true,
-        ),
-      ),
-    )
-        .where((item) => item.score > 0)
-        .toList()
-      ..sort((a, b) {
-        final byScore = b.score.compareTo(a.score);
-        if (byScore != 0) return byScore;
-        return a.product.name.compareTo(b.product.name);
-      });
+    final scoredProducts =
+        byId.values
+            .map(
+              (product) => _ScoredProduct(
+                product: product,
+                score: _scoreSuggestionProduct(
+                  product,
+                  cleanQuery,
+                  tokens,
+                  const <String>{},
+                  true,
+                ),
+              ),
+            )
+            .where((item) => item.score > 0)
+            .toList()
+          ..sort((a, b) {
+            final byScore = b.score.compareTo(a.score);
+            if (byScore != 0) return byScore;
+            return a.product.name.compareTo(b.product.name);
+          });
 
     return scoredProducts
         .take(5)
         .map(
           (item) => _CatalogSearchSuggestion.product(
-        item.product,
-        skuLike: true,
-        global: item.product.id > 0,
-      ),
-    )
+            item.product,
+            skuLike: true,
+            global: item.product.id > 0,
+          ),
+        )
         .toList();
   }
 
   Future<List<_CatalogSearchSuggestion>> _buildSmartSuggestions(
-      String rawQuery,
-      ) async {
+    String rawQuery,
+  ) async {
     final cleanQuery = rawQuery.trim();
     if (cleanQuery.length < 2) return [];
 
@@ -704,8 +762,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       final lockedBrandName = _isBrandContext
           ? _brandContextName
           : activeFilters.brand.trim();
-      final hasLockedBrand = (lockedBrandId ?? 0) > 0 ||
-          lockedBrandName.isNotEmpty;
+      final hasLockedBrand =
+          (lockedBrandId ?? 0) > 0 || lockedBrandName.isNotEmpty;
 
       for (final term in searchTerms.take(3)) {
         try {
@@ -722,15 +780,17 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
             if (target.length >= perPage) continue;
           }
 
-          final result = await ApiService().getProductosCatalogoFiltrado(
-            categoryId: categoryId,
-            brandId: lockedBrandId,
-            brandName: lockedBrandName.isEmpty ? null : lockedBrandName,
-            search: term,
-            page: 1,
-            perPage: perPage,
-            orderBy: 'date',
-          ).timeout(timeout);
+          final result = await ApiService()
+              .getProductosCatalogoFiltrado(
+                categoryId: categoryId,
+                brandId: lockedBrandId,
+                brandName: lockedBrandName.isEmpty ? null : lockedBrandName,
+                search: term,
+                page: 1,
+                perPage: perPage,
+                orderBy: 'date',
+              )
+              .timeout(timeout);
           for (final product in result.products) {
             target[product.id] = product;
           }
@@ -746,24 +806,26 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       perPage: 10,
     );
 
-    final localScoredProducts = localProductsById.values
-        .map(
-          (product) => _ScoredProduct(
-        product: product,
-        score: _scoreSuggestionProduct(
-          product,
-          cleanQuery,
-          tokens,
-          queryIntents,
-          skuLike,
-        ),
-      ),
-    )
-        .where((item) => item.score > 0)
-        .toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
+    final localScoredProducts =
+        localProductsById.values
+            .map(
+              (product) => _ScoredProduct(
+                product: product,
+                score: _scoreSuggestionProduct(
+                  product,
+                  cleanQuery,
+                  tokens,
+                  queryIntents,
+                  skuLike,
+                ),
+              ),
+            )
+            .where((item) => item.score > 0)
+            .toList()
+          ..sort((a, b) => b.score.compareTo(a.score));
 
-    final shouldSearchGlobal = localScoredProducts.length < 3 ||
+    final shouldSearchGlobal =
+        localScoredProducts.length < 3 ||
         _hasClearExternalIntent(
           queryIntents: queryIntents,
           categoryIntents: categoryIntents,
@@ -783,30 +845,32 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       }
     }
 
-    final globalScoredProducts = globalProductsById.values
-        .map(
-          (product) => _ScoredProduct(
-        product: product,
-        score: _scoreSuggestionProduct(
-          product,
-          cleanQuery,
-          tokens,
-          queryIntents,
-          skuLike,
-        ) +
-            8,
-      ),
-    )
-        .where((item) => item.score > 0)
-        .toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
+    final globalScoredProducts =
+        globalProductsById.values
+            .map(
+              (product) => _ScoredProduct(
+                product: product,
+                score:
+                    _scoreSuggestionProduct(
+                      product,
+                      cleanQuery,
+                      tokens,
+                      queryIntents,
+                      skuLike,
+                    ) +
+                    8,
+              ),
+            )
+            .where((item) => item.score > 0)
+            .toList()
+          ..sort((a, b) => b.score.compareTo(a.score));
 
     final redirectTarget = shouldSearchGlobal
         ? await _resolveRedirectCategoryForQuery(cleanQuery, queryIntents)
         : null;
 
-    final suggestionTarget = redirectTarget != null &&
-        redirectTarget.id != _activeCatalogCategoryId
+    final suggestionTarget =
+        redirectTarget != null && redirectTarget.id != _activeCatalogCategoryId
         ? redirectTarget
         : null;
 
@@ -820,7 +884,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       suggestions.add(suggestion);
     }
 
-    final externalAccessorySearch = queryIntents.contains('accessory') &&
+    final externalAccessorySearch =
+        queryIntents.contains('accessory') &&
         suggestionTarget != null &&
         suggestionTarget.id != _activeCatalogCategoryId;
 
@@ -844,15 +909,14 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     if (!externalAccessorySearch) {
       for (final scored in localScoredProducts.take(3)) {
         addSuggestion(
-          _CatalogSearchSuggestion.product(
-            scored.product,
-            skuLike: skuLike,
-          ),
+          _CatalogSearchSuggestion.product(scored.product, skuLike: skuLike),
         );
       }
 
       if (globalScoredProducts.isNotEmpty) {
-        for (final scored in globalScoredProducts.take(localScoredProducts.isEmpty ? 4 : 2)) {
+        for (final scored in globalScoredProducts.take(
+          localScoredProducts.isEmpty ? 4 : 2,
+        )) {
           addSuggestion(
             _CatalogSearchSuggestion.product(
               scored.product,
@@ -869,7 +933,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       addSuggestion(brandSuggestion);
     }
 
-    final suggestionsCategoryName = suggestionTarget?.name ?? widget.categoryName;
+    final suggestionsCategoryName =
+        suggestionTarget?.name ?? widget.categoryName;
 
     for (final text in _technicalCompletionsFor(
       cleanQuery,
@@ -933,7 +998,10 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       );
     }
 
-    for (final text in _technicalCompletionsFor(cleanQuery, widget.categoryName)) {
+    for (final text in _technicalCompletionsFor(
+      cleanQuery,
+      widget.categoryName,
+    )) {
       addQuery(text);
       if (suggestions.length >= 6) break;
     }
@@ -945,7 +1013,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     return suggestions.take(6).toList();
   }
 
-  Future<List<_CatalogSearchSuggestion>> _buildBrandSuggestions(String rawQuery) async {
+  Future<List<_CatalogSearchSuggestion>> _buildBrandSuggestions(
+    String rawQuery,
+  ) async {
     final cleanQuery = rawQuery.trim();
     if (cleanQuery.length < 3) return [];
 
@@ -990,11 +1060,11 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
           .take(4)
           .map(
             (brand) => _CatalogSearchSuggestion.brand(
-          brandName: brand.name,
-          brandId: brand.id,
-          categoryName: widget.categoryName,
-        ),
-      )
+              brandName: brand.name,
+              brandId: brand.id,
+              categoryName: widget.categoryName,
+            ),
+          )
           .toList();
     } catch (_) {
       return [];
@@ -1019,7 +1089,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     // (por ejemplo VIDEO IP HD), no debe quedarse ahí mostrando cámaras solo
     // porque la ficha mencione RJ45, batería o fuente en la descripción.
     if (queryIntents.contains('accessory')) {
-      final isAlreadyAccessoryContext = categoryIntents.contains('accessory') ||
+      final isAlreadyAccessoryContext =
+          categoryIntents.contains('accessory') ||
           normalizedCategory.contains('complement') ||
           normalizedCategory.contains('accesorio') ||
           normalizedCategory.contains('energia') ||
@@ -1036,7 +1107,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     final overlap = queryIntents.intersection(categoryIntents);
     if (overlap.isNotEmpty) return false;
 
-    if (normalizedCategory.contains('video') || normalizedCategory.contains('iphd')) {
+    if (normalizedCategory.contains('video') ||
+        normalizedCategory.contains('iphd')) {
       return false;
     }
 
@@ -1044,15 +1116,15 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   Future<_SearchRedirectTarget?> _resolveRedirectCategoryForQuery(
-      String query,
-      Set<String> intents,
-      ) async {
+    String query,
+    Set<String> intents,
+  ) async {
     if (intents.isEmpty) return null;
 
     try {
-      final categories = await ref.read(categoriesProvider.future).timeout(
-        const Duration(seconds: 4),
-      );
+      final categories = await ref
+          .read(categoriesProvider.future)
+          .timeout(const Duration(seconds: 4));
       if (categories.isEmpty) return null;
 
       final ordered = [...categories];
@@ -1066,34 +1138,51 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         int score = 0;
 
         if (intents.contains('accessory')) {
-          if (compact.contains('complement') || compact.contains('accesorio')) score += 120;
+          if (compact.contains('complement') || compact.contains('accesorio'))
+            score += 120;
           if (compact.contains('energia') || compact.contains('alimentacion')) {
             score += powerAccessory ? 115 : 55;
           }
-          if (compact.contains('networking') || compact.contains('redes') || compact.contains('net')) {
+          if (compact.contains('networking') ||
+              compact.contains('redes') ||
+              compact.contains('net')) {
             score += connectivityAccessory ? 110 : 55;
           }
-          if (compact.contains('cable') || compact.contains('conector')) score += 90;
-          if (compact.contains('intrusion') && (queryCompact.contains('pila') || queryCompact.contains('bateria'))) score += 45;
-          if (compact.contains('video') || compact.contains('iphd') || compact.contains('cctv')) score -= 80;
+          if (compact.contains('cable') || compact.contains('conector'))
+            score += 90;
+          if (compact.contains('intrusion') &&
+              (queryCompact.contains('pila') ||
+                  queryCompact.contains('bateria')))
+            score += 45;
+          if (compact.contains('video') ||
+              compact.contains('iphd') ||
+              compact.contains('cctv'))
+            score -= 80;
         }
 
         if (intents.contains('video')) {
-          if (compact.contains('videoip') || compact.contains('iphd')) score += 100;
-          if (compact.contains('cctv') || compact.contains('video')) score += 70;
+          if (compact.contains('videoip') || compact.contains('iphd'))
+            score += 100;
+          if (compact.contains('cctv') || compact.contains('video'))
+            score += 70;
         }
         if (intents.contains('software')) {
-          if (compact.contains('videoip') || compact.contains('iphd')) score += 90;
+          if (compact.contains('videoip') || compact.contains('iphd'))
+            score += 90;
           if (compact.contains('software')) score += 80;
         }
         if (intents.contains('incendio')) {
           if (compact.contains('incendio')) score += 100;
         }
         if (intents.contains('intrusion')) {
-          if (compact.contains('intrusion') || compact.contains('alarma')) score += 100;
+          if (compact.contains('intrusion') || compact.contains('alarma'))
+            score += 100;
         }
         if (intents.contains('networking')) {
-          if (compact.contains('networking') || compact.contains('redes') || compact.contains('net')) score += 100;
+          if (compact.contains('networking') ||
+              compact.contains('redes') ||
+              compact.contains('net'))
+            score += 100;
         }
 
         return score;
@@ -1170,9 +1259,10 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     _hideSearchSuggestions();
     FocusScope.of(context).unfocus();
 
-    final cleanValue = suggestion.type == _CatalogSearchSuggestionType.brand &&
-        suggestion.brandName != null &&
-        suggestion.brandName!.trim().isNotEmpty
+    final cleanValue =
+        suggestion.type == _CatalogSearchSuggestionType.brand &&
+            suggestion.brandName != null &&
+            suggestion.brandName!.trim().isNotEmpty
         ? suggestion.brandName!.trim()
         : suggestion.value.trim();
 
@@ -1183,17 +1273,21 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     final targetCategoryId = suggestion.targetCategoryId;
     final targetCategoryName = suggestion.targetCategoryName?.trim() ?? '';
-    if (targetCategoryId != null && targetCategoryId > 0 && targetCategoryName.isNotEmpty) {
+    if (targetCategoryId != null &&
+        targetCategoryId > 0 &&
+        targetCategoryName.isNotEmpty) {
       _preserveFiltersForNextCategoryOpen = true;
-      ref.read(productFilterProvider.notifier).update(
-        search: cleanValue,
-        orderBy: 'price_asc',
-        brand: '',
-        brandId: null,
-        attributeTermIds: const <String, int>{},
-        attributeLabels: const <String, String>{},
-        attributeGroupLabels: const <String, String>{},
-      );
+      ref
+          .read(productFilterProvider.notifier)
+          .update(
+            search: cleanValue,
+            orderBy: mundicamQaNoDefaultSort ? '' : 'price_asc',
+            brand: '',
+            brandId: null,
+            attributeTermIds: const <String, int>{},
+            attributeLabels: const <String, String>{},
+            attributeGroupLabels: const <String, String>{},
+          );
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => ProductosPorCategoriaScreen(
@@ -1239,13 +1333,13 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   String _compactForSearch(String value) {
-    return _normalizeForSearch(value)
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    return _normalizeForSearch(value).replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
   List<String> _meaningfulTokens(String value) {
-    final normalized = _normalizeForSearch(value)
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ');
+    final normalized = _normalizeForSearch(
+      value,
+    ).replaceAll(RegExp(r'[^a-z0-9]+'), ' ');
     final stopWords = <String>{
       'de',
       'del',
@@ -1274,7 +1368,8 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     final hasSkuSeparator = RegExp(r'[-_/()]').hasMatch(compact);
     final hasUpperPrefix = RegExp(r'^[A-Za-z]{2,}[-_]').hasMatch(compact);
     return compact.length >= 4 &&
-        (hasDigit && (hasSkuSeparator || hasUpperPrefix || compact.length >= 7));
+        (hasDigit &&
+            (hasSkuSeparator || hasUpperPrefix || compact.length >= 7));
   }
 
   Set<String> _detectSearchIntents(String value) {
@@ -1442,13 +1537,26 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         break;
       case 'rj45':
       case 'rj':
-        variants.addAll(['rj45', 'rj 45', 'rj-45', 'conectorrj45', 'latiguillorj45']);
+        variants.addAll([
+          'rj45',
+          'rj 45',
+          'rj-45',
+          'conectorrj45',
+          'latiguillorj45',
+        ]);
         break;
       case 'cable':
       case 'cables':
       case 'latiguillo':
       case 'latiguillos':
-        variants.addAll(['cable', 'cables', 'latiguillo', 'latiguillos', 'utp', 'ftp']);
+        variants.addAll([
+          'cable',
+          'cables',
+          'latiguillo',
+          'latiguillos',
+          'utp',
+          'ftp',
+        ]);
         break;
       case 'conector':
       case 'conectores':
@@ -1458,13 +1566,27 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       case 'pilas':
       case 'bateria':
       case 'baterias':
-        variants.addAll(['pila', 'pilas', 'bateria', 'baterias', 'batería', 'baterías']);
+        variants.addAll([
+          'pila',
+          'pilas',
+          'bateria',
+          'baterias',
+          'batería',
+          'baterías',
+        ]);
         break;
       case 'fuente':
       case 'fuentes':
       case 'alimentador':
       case 'alimentacion':
-        variants.addAll(['fuente', 'fuentes', 'alimentador', 'alimentacion', 'alimentación', 'transformador']);
+        variants.addAll([
+          'fuente',
+          'fuentes',
+          'alimentador',
+          'alimentacion',
+          'alimentación',
+          'transformador',
+        ]);
         break;
       case '8':
       case '8mp':
@@ -1489,17 +1611,23 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
   bool _isConnectivityAccessoryQuery(String value) {
     final compact = _compactForSearch(value);
-    return RegExp(r'(cable|cables|rj45|latiguillo|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|conector)').hasMatch(compact);
+    return RegExp(
+      r'(cable|cables|rj45|latiguillo|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|conector)',
+    ).hasMatch(compact);
   }
 
   bool _isPowerAccessoryQuery(String value) {
     final compact = _compactForSearch(value);
-    return RegExp(r'(pila|pilas|bateria|baterias|fuente|fuentes|alimentador|alimentacion|transformador|adaptador|cargador)').hasMatch(compact);
+    return RegExp(
+      r'(pila|pilas|bateria|baterias|fuente|fuentes|alimentador|alimentacion|transformador|adaptador|cargador)',
+    ).hasMatch(compact);
   }
 
   bool _isAccessoryWord(String value) {
     final compact = _compactForSearch(value);
-    return RegExp(r'(cable|latiguillo|conector|rj45|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|pila|pilas|bateria|baterias|fuente|alimentador|alimentacion|transformador|adaptador|cargador)').hasMatch(compact);
+    return RegExp(
+      r'(cable|latiguillo|conector|rj45|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|pila|pilas|bateria|baterias|fuente|alimentador|alimentacion|transformador|adaptador|cargador)',
+    ).hasMatch(compact);
   }
 
   bool _isMainDeviceAccessoryName(String productName) {
@@ -1523,21 +1651,19 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   bool _hasStrongAccessoryProductMatch(
-      Product product,
-      String rawQuery,
-      List<String> tokens,
-      ) {
+    Product product,
+    String rawQuery,
+    List<String> tokens,
+  ) {
     final compactQuery = _compactForSearch(rawQuery);
 
     // Para componentes/accesorios NO usamos descripción ni atributos técnicos
     // como coincidencia principal. Una cámara puede mencionar RJ45, cable o
     // alimentación en la ficha, pero eso no significa que sea un cable, pila o
     // fuente. La coincidencia fuerte debe estar en nombre/SKU/marca.
-    final strongText = _compactForSearch([
-      product.name,
-      product.sku,
-      product.brandName ?? '',
-    ].join(' '));
+    final strongText = _compactForSearch(
+      [product.name, product.sku, product.brandName ?? ''].join(' '),
+    );
 
     if (_isMainDeviceAccessoryName(product.name)) {
       return false;
@@ -1562,7 +1688,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     final specificTokens = accessoryTokens.where((token) {
       final compact = _compactForSearch(token);
-      return RegExp(r'(rj45|cat5|cat6|cat7|bnc|coaxial|utp|ftp|pila|bateria|baterias|fuente|alimentador)').hasMatch(compact);
+      return RegExp(
+        r'(rj45|cat5|cat6|cat7|bnc|coaxial|utp|ftp|pila|bateria|baterias|fuente|alimentador)',
+      ).hasMatch(compact);
     }).toList();
 
     for (final token in specificTokens) {
@@ -1572,7 +1700,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         // “cable rj45” puede coincidir con “latiguillo cable red” aunque no
         // escriba RJ45 literalmente, pero no con una cámara o monitor.
         if (_isConnectivityAccessoryQuery(rawQuery) &&
-            RegExp(r'(cable|latiguillo|conector|bobina)').hasMatch(strongText)) {
+            RegExp(
+              r'(cable|latiguillo|conector|bobina)',
+            ).hasMatch(strongText)) {
           continue;
         }
         return false;
@@ -1580,7 +1710,9 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     }
 
     return strongText.contains(compactQuery) ||
-        accessoryTokens.any((token) => _textContainsTokenVariant(strongText, token));
+        accessoryTokens.any(
+          (token) => _textContainsTokenVariant(strongText, token),
+        );
   }
 
   bool _textContainsTokenVariant(String compactText, String token) {
@@ -1588,12 +1720,12 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   int _scoreSuggestionProduct(
-      Product product,
-      String rawQuery,
-      List<String> tokens,
-      Set<String> intents,
-      bool skuLike,
-      ) {
+    Product product,
+    String rawQuery,
+    List<String> tokens,
+    Set<String> intents,
+    bool skuLike,
+  ) {
     final compactQuery = _compactForSearch(rawQuery);
     final compactSku = _compactForSearch(product.sku);
     final compactName = _compactForSearch(product.name);
@@ -1608,20 +1740,24 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       return 0;
     }
 
-    final compactStrongText = _compactForSearch([
-      product.name,
-      product.sku,
-      product.brandName ?? '',
-      ...product.attributes.expand((attr) => [attr.name, ...attr.options]),
-    ].join(' '));
-    final compactText = _compactForSearch([
-      product.name,
-      product.sku,
-      product.shortDescription,
-      product.description,
-      product.brandName ?? '',
-      ...product.attributes.expand((attr) => [attr.name, ...attr.options]),
-    ].join(' '));
+    final compactStrongText = _compactForSearch(
+      [
+        product.name,
+        product.sku,
+        product.brandName ?? '',
+        ...product.attributes.expand((attr) => [attr.name, ...attr.options]),
+      ].join(' '),
+    );
+    final compactText = _compactForSearch(
+      [
+        product.name,
+        product.sku,
+        product.shortDescription,
+        product.description,
+        product.brandName ?? '',
+        ...product.attributes.expand((attr) => [attr.name, ...attr.options]),
+      ].join(' '),
+    );
 
     if (intents.contains('accessory') && !skuLike) {
       if (!_hasStrongAccessoryProductMatch(product, rawQuery, tokens)) {
@@ -1645,10 +1781,14 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     int matchedTokens = 0;
     for (final token in tokens) {
-      final targetText = intents.contains('accessory') ? compactStrongText : compactText;
+      final targetText = intents.contains('accessory')
+          ? compactStrongText
+          : compactText;
       if (_textContainsTokenVariant(targetText, token)) {
         matchedTokens++;
-        score += intents.contains('accessory') && _isAccessoryWord(token) ? 22 : 14;
+        score += intents.contains('accessory') && _isAccessoryWord(token)
+            ? 22
+            : 14;
       }
     }
 
@@ -1662,17 +1802,23 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     }
 
     if (intents.contains('accessory') &&
-        RegExp(r'(cable|latiguillo|conector|rj45|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|pila|bateria|fuente|alimentador|transformador|adaptador)').hasMatch(compactStrongText)) {
+        RegExp(
+          r'(cable|latiguillo|conector|rj45|utp|ftp|cat5|cat6|cat7|bnc|coaxial|patch|pila|bateria|fuente|alimentador|transformador|adaptador)',
+        ).hasMatch(compactStrongText)) {
       score += 35;
     }
 
     if (intents.contains('video') &&
-        RegExp(r'(camara|camera|cctv|video|domo|dome|turret|bullet|nvr|xvr|dvr|ptz|anpr|lpr|mp)').hasMatch(compactText)) {
+        RegExp(
+          r'(camara|camera|cctv|video|domo|dome|turret|bullet|nvr|xvr|dvr|ptz|anpr|lpr|mp)',
+        ).hasMatch(compactText)) {
       score += 18;
     }
 
     if (intents.contains('software') &&
-        RegExp(r'(software|licencia|hikcentral|dss|dmss|ivss)').hasMatch(compactText)) {
+        RegExp(
+          r'(software|licencia|hikcentral|dss|dmss|ivss)',
+        ).hasMatch(compactText)) {
       score += 18;
     }
 
@@ -1711,7 +1857,11 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         } else if (hasCat6) {
           addAll(['cable UTP Cat6', 'bobina Cat6', 'latiguillo Cat6']);
         } else if (hasLatiguillo) {
-          addAll(['latiguillo RJ45', 'latiguillo Cat6', 'latiguillo cable red']);
+          addAll([
+            'latiguillo RJ45',
+            'latiguillo Cat6',
+            'latiguillo cable red',
+          ]);
         } else if (hasCable) {
           addAll(['cable de red', 'cable UTP Cat6', 'cable coaxial']);
         } else {
@@ -1721,7 +1871,11 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
         if (compact.contains('pila') || compact.contains('bateria')) {
           addAll(['pila litio', 'batería', 'pila para detector']);
         } else if (compact.contains('fuente') || compact.contains('aliment')) {
-          addAll(['fuente alimentación 12V', 'alimentador CCTV', 'transformador 12V']);
+          addAll([
+            'fuente alimentación 12V',
+            'alimentador CCTV',
+            'transformador 12V',
+          ]);
         } else {
           addAll(['pila litio', 'batería', 'fuente alimentación 12V']);
         }
@@ -1866,17 +2020,21 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
     final previousFilters = ref.read(productFilterProvider);
 
     _searchController.clear();
-    ref.read(productFilterProvider.notifier).update(
-      brand: '',
-      search: '',
-      orderBy: previousFilters.orderBy,
-      attributeTermIds: const <String, int>{},
-      attributeLabels: const <String, String>{},
-      attributeGroupLabels: const <String, String>{},
-    );
+    ref
+        .read(productFilterProvider.notifier)
+        .update(
+          brand: '',
+          search: '',
+          orderBy: previousFilters.orderBy,
+          attributeTermIds: const <String, int>{},
+          attributeLabels: const <String, String>{},
+          attributeGroupLabels: const <String, String>{},
+        );
     _restoreBrandContext();
 
-    if (!(previousFilters.hasBrand || previousFilters.hasSearch || previousFilters.hasAttributes)) {
+    if (!(previousFilters.hasBrand ||
+        previousFilters.hasSearch ||
+        previousFilters.hasAttributes)) {
       _reloadCurrentCategory();
     }
 
@@ -1895,6 +2053,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
   }
 
   Future<List<CategoryModel>> _loadSubcategoriesForCurrentCategory() async {
+    final watch = Stopwatch()..start();
     try {
       final subcategories = _isBrandContext
           ? await ApiService().getCategoriasPorMarca(
@@ -1907,20 +2066,32 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       // v1.9.54: el PHP devuelve las categorías en `menu_order` de
       // WooCommerce. No volvemos a ordenarlas alfabéticamente en Flutter porque
       // rompería la prioridad comercial definida en la web.
-      return subcategories
-          .where((category) => category.id > 0)
-          .toList();
+      return subcategories.where((category) => category.id > 0).toList();
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('❌ Error cargando subcategorías de ${widget.categoryName}: $e');
+        debugPrint(
+          '❌ Error cargando subcategorías de ${widget.categoryName}: $e',
+        );
       }
       return const <CategoryModel>[];
+    } finally {
+      watch.stop();
+      if (kDebugMode) {
+        debugPrint(
+          'MUNDICAM_SUBCATEGORIES_TIMING '
+          'category=${widget.categoryId} elapsed_ms=${watch.elapsedMilliseconds}',
+        );
+      }
     }
   }
 
   void _toggleSubcategories() {
     setState(() {
       _subcategoriesExpanded = !_subcategoriesExpanded;
+      if (_subcategoriesExpanded && !_subcategoriesRequested) {
+        _subcategoriesRequested = true;
+        _subcategoriesFuture = _loadSubcategoriesForCurrentCategory();
+      }
     });
   }
 
@@ -1941,17 +2112,25 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       _activeCatalogCategoryId = category.id;
       _activeCatalogCategoryName = category.name;
       _subcategoriesExpanded = false;
+      _categoryFiltersEnabled = false;
     });
 
     // Los filtros de una categoría anterior no deben contaminar la nueva rama.
     // El drawer se reconstruye usando el ID activo y recarga sus filtros reales.
     ref.read(productFilterProvider.notifier).reset();
     _restoreBrandContext();
-    ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+    if (!mundicamQaNoDefaultSort) {
+            ref.read(productFilterProvider.notifier).setOrderBy('price_asc');
+          }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _reloadCurrentCategory(scrollTop: true);
+      if (_qaParallelFilters && !_categoryFiltersEnabled) {
+        setState(() => _categoryFiltersEnabled = true);
+        debugPrint('MUNDICAM_PARALLEL_FILTERS_STARTED '
+            'category=$_activeCatalogCategoryId');
+      }
     });
   }
 
@@ -1971,7 +2150,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
     final notifier = ref.read(productFilterProvider.notifier);
     notifier.setOrderBy(
-      selectedOrder.trim().isEmpty ? 'price_asc' : selectedOrder,
+      selectedOrder.trim().isEmpty ? (mundicamQaNoDefaultSort ? '' : 'price_asc') : selectedOrder,
     );
   }
 
@@ -1991,6 +2170,20 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 
   @override
   Widget build(BuildContext context) {
+    final activeId = _activeCatalogCategoryId;
+    ref.listen<List<Product>>(productsPaginatedProvider(activeId), (
+      previous,
+      next,
+    ) {
+      if (!mounted || _categoryFiltersEnabled || next.isEmpty) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            _categoryFiltersEnabled ||
+            _activeCatalogCategoryId != activeId)
+          return;
+        setState(() => _categoryFiltersEnabled = true);
+      });
+    });
     ref.listen(productFilterProvider, (previous, next) {
       if (previous != next) {
         _onFiltersChanged(next);
@@ -2016,107 +2209,107 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
       },
       child: Scaffold(
         key: _scaffoldKey,
-      backgroundColor: const Color(0xFFF5F6F8),
-      endDrawer: FiltroSelector(
-        key: ValueKey('catalog_filters_$_activeCatalogCategoryId'),
-        parentCategoryId: _activeCatalogCategoryId,
-        categoryName: _activeCatalogCategoryName,
-        productosEnPantalla: productosState,
-        lockedBrandId: _brandContextId,
-        lockedBrandName: _isBrandContext ? _brandContextName : null,
-        onApplyFilters: () => _reloadCurrentCategory(scrollTop: true),
-      ),
-      appBar: _CatalogCategoryAppBar(
-        title: widget.categoryName,
-        onBack: _handleBack,
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 180),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, animation) {
-          return ScaleTransition(
-            scale: animation,
-            child: FadeTransition(
-              opacity: animation,
-              child: child,
-            ),
-          );
+        backgroundColor: const Color(0xFFF5F6F8),
+        onEndDrawerChanged: (opened) {
+          if (opened && mounted && !_categoryFiltersEnabled) {
+            setState(() => _categoryFiltersEnabled = true);
+          }
         },
-        child: _showScrollTopButton
-            ? _ScrollToTopButton(
-          key: const ValueKey('scroll_top_button'),
-          onTap: _scrollToTop,
-        )
-            : const SizedBox.shrink(
-          key: ValueKey('scroll_top_button_hidden'),
+        endDrawer: FiltroSelector(
+          key: ValueKey('catalog_filters_$_activeCatalogCategoryId'),
+          parentCategoryId: _activeCatalogCategoryId,
+          categoryName: _activeCatalogCategoryName,
+          productosEnPantalla: productosState,
+          loadEnabled: _categoryFiltersEnabled,
+          lockedBrandId: _brandContextId,
+          lockedBrandName: _isBrandContext ? _brandContextName : null,
+          onApplyFilters: () => _reloadCurrentCategory(scrollTop: true),
         ),
-      ),
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        onRefresh: _refreshProducts,
-        child: CustomScrollView(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(
-            parent: BouncingScrollPhysics(),
-          ),
-          slivers: [
-            SliverToBoxAdapter(
-              child: _CatalogControls(
-                controller: _searchController,
-                categoryName: widget.categoryName,
-                activeSubcategoryName: _activeCatalogCategoryId != widget.categoryId
-                    ? _activeCatalogCategoryName
-                    : '',
-                filters: filters,
-                totalItems: totalItems,
-                loadedItems: loadedItems,
-                isLoading: notifier.isLoading || !notifier.hasLoadedFirstPage,
-                suggestions: _searchSuggestions,
-                isLoadingSuggestions: _isLoadingSuggestions,
-                onChanged: _onSearchChanged,
-                onSubmitted: _applySearchNow,
-                onClearSearch: _clearSearch,
-                onOpenSort: _openSort,
-                onOpenFilters: _openFilters,
-                subcategoriesFuture: _subcategoriesFuture,
-                subcategoriesExpanded: _subcategoriesExpanded,
-                onToggleSubcategories: _toggleSubcategories,
-                onSubcategoryTap: _openSubcategory,
-                onSuggestionTap: _handleSuggestionTap,
-                brandContextId: _brandContextId,
-                brandContextName: _brandContextName,
-                brandContextTaxonomy: _brandContextTaxonomy,
-              ),
+        appBar: _CatalogCategoryAppBar(
+          title: widget.categoryName,
+          onBack: _handleBack,
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        floatingActionButton: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            return ScaleTransition(
+              scale: animation,
+              child: FadeTransition(opacity: animation, child: child),
+            );
+          },
+          child: _showScrollTopButton
+              ? _ScrollToTopButton(
+                  key: const ValueKey('scroll_top_button'),
+                  onTap: _scrollToTop,
+                )
+              : const SizedBox.shrink(
+                  key: ValueKey('scroll_top_button_hidden'),
+                ),
+        ),
+        body: RefreshIndicator(
+          color: AppColors.primary,
+          onRefresh: _refreshProducts,
+          child: CustomScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
             ),
-            if (hasVisibleFilters)
+            slivers: [
               SliverToBoxAdapter(
-                child: _ActiveFiltersBar(
-                  categoryName: _activeCatalogCategoryName,
+                child: _CatalogControls(
+                  controller: _searchController,
+                  categoryName: widget.categoryName,
+                  activeSubcategoryName:
+                      _activeCatalogCategoryId != widget.categoryId
+                      ? _activeCatalogCategoryName
+                      : '',
                   filters: filters,
-                  onClearAll: _resetFilters,
+                  totalItems: totalItems,
+                  loadedItems: loadedItems,
+                  isLoading: notifier.isLoading || !notifier.hasLoadedFirstPage,
+                  suggestions: _searchSuggestions,
+                  isLoadingSuggestions: _isLoadingSuggestions,
+                  onChanged: _onSearchChanged,
+                  onSubmitted: _applySearchNow,
+                  onClearSearch: _clearSearch,
+                  onOpenSort: _openSort,
+                  onOpenFilters: _openFilters,
+                  subcategoriesFuture: _subcategoriesFuture,
+                  subcategoriesExpanded: _subcategoriesExpanded,
+                  onToggleSubcategories: _toggleSubcategories,
+                  onSubcategoryTap: _openSubcategory,
+                  onSuggestionTap: _handleSuggestionTap,
+                  brandContextId: _brandContextId,
+                  brandContextName: _brandContextName,
+                  brandContextTaxonomy: _brandContextTaxonomy,
                 ),
               ),
-            if (productosState.isEmpty &&
-                (!notifier.hasLoadedFirstPage || notifier.isLoading))
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: _InitialProductsLoadingState(),
-              )
-            else if (productosState.isEmpty && notifier.lastError != null)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: _ProductsErrorState(
-                  onRetry: _refreshProducts,
+              if (hasVisibleFilters)
+                SliverToBoxAdapter(
+                  child: _ActiveFiltersBar(
+                    categoryName: _activeCatalogCategoryName,
+                    filters: filters,
+                    onClearAll: _resetFilters,
+                  ),
                 ),
-              )
-            else if (productosState.isEmpty)
+              if (productosState.isEmpty &&
+                  (!notifier.hasLoadedFirstPage || notifier.isLoading))
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _InitialProductsLoadingState(),
+                )
+              else if (productosState.isEmpty && notifier.lastError != null)
                 SliverFillRemaining(
                   hasScrollBody: false,
-                  child: _EmptyProductsState(
-                    onReset: _resetFilters,
-                  ),
+                  child: _ProductsErrorState(onRetry: _refreshProducts),
+                )
+              else if (productosState.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyProductsState(onReset: _resetFilters),
                 )
               else
                 SliverPadding(
@@ -2136,42 +2329,42 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
                     },
                   ),
                 ),
-            if (productosState.isNotEmpty && notifier.hasMore)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(20, 6, 20, 24),
-                  child: Center(
-                    child: SizedBox(
-                      height: 30,
-                      width: 30,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.primary,
+              if (productosState.isNotEmpty && notifier.hasMore)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(20, 6, 20, 24),
+                    child: Center(
+                      child: SizedBox(
+                        height: 30,
+                        width: 30,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else if (productosState.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 26),
+                    child: Text(
+                      totalItems > 0
+                          ? 'Mostrando $loadedItems de $totalItems productos'
+                          : 'Mostrando $loadedItems productos',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF8A8A8A),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
-              )
-            else if (productosState.isNotEmpty)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 26),
-                  child: Text(
-                    totalItems > 0
-                        ? 'Mostrando $loadedItems de $totalItems productos'
-                        : 'Mostrando $loadedItems productos',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF8A8A8A),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -2180,10 +2373,7 @@ class _ProductosPorCategoriaScreenState extends ConsumerState<ProductosPorCatego
 class _ScrollToTopButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _ScrollToTopButton({
-    super.key,
-    required this.onTap,
-  });
+  const _ScrollToTopButton({super.key, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -2213,14 +2403,12 @@ class _ScrollToTopButton extends StatelessWidget {
   }
 }
 
-class _CatalogCategoryAppBar extends StatelessWidget implements PreferredSizeWidget {
+class _CatalogCategoryAppBar extends StatelessWidget
+    implements PreferredSizeWidget {
   final String title;
   final VoidCallback onBack;
 
-  const _CatalogCategoryAppBar({
-    required this.title,
-    required this.onBack,
-  });
+  const _CatalogCategoryAppBar({required this.title, required this.onBack});
 
   @override
   Size get preferredSize => const Size.fromHeight(86);
@@ -2400,21 +2588,21 @@ class _CatalogControls extends StatelessWidget {
                 ),
                 suffixIcon: controller.text.trim().isNotEmpty
                     ? IconButton(
-                  icon: const Icon(
-                    Icons.close_rounded,
-                    color: Colors.white70,
-                    size: 20,
-                  ),
-                  onPressed: onClearSearch,
-                )
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white70,
+                          size: 20,
+                        ),
+                        onPressed: onClearSearch,
+                      )
                     : IconButton(
-                  icon: const Icon(
-                    Icons.arrow_forward_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                  onPressed: onSubmitted,
-                ),
+                        icon: const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                        onPressed: onSubmitted,
+                      ),
                 filled: true,
                 fillColor: Colors.transparent,
                 border: OutlineInputBorder(
@@ -2559,12 +2747,18 @@ class _CatalogControls extends StatelessWidget {
                     vertical: 9,
                   ),
                   decoration: BoxDecoration(
-                    color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
+                    color:
+                        (filters.hasBrand ||
+                            filters.hasSearch ||
+                            filters.hasAttributes)
                         ? AppColors.primary
                         : const Color(0xFFF0F2F5),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
+                      color:
+                          (filters.hasBrand ||
+                              filters.hasSearch ||
+                              filters.hasAttributes)
                           ? AppColors.primary
                           : const Color(0xFFD9DEE7),
                     ),
@@ -2575,7 +2769,10 @@ class _CatalogControls extends StatelessWidget {
                       Icon(
                         Icons.tune_rounded,
                         size: 17,
-                        color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
+                        color:
+                            (filters.hasBrand ||
+                                filters.hasSearch ||
+                                filters.hasAttributes)
                             ? Colors.white
                             : AppColors.textPrimary,
                       ),
@@ -2585,7 +2782,10 @@ class _CatalogControls extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 12.2,
                           fontWeight: FontWeight.w900,
-                          color: (filters.hasBrand || filters.hasSearch || filters.hasAttributes)
+                          color:
+                              (filters.hasBrand ||
+                                  filters.hasSearch ||
+                                  filters.hasAttributes)
                               ? Colors.white
                               : AppColors.textPrimary,
                         ),
@@ -2611,7 +2811,8 @@ class _CatalogControls extends StatelessWidget {
                     return const _SubcategoriesLoadingPanel();
                   }
 
-                  final subcategories = snapshot.data ?? const <CategoryModel>[];
+                  final subcategories =
+                      snapshot.data ?? const <CategoryModel>[];
                   if (subcategories.isEmpty) {
                     return const _NoSubcategoriesPanel();
                   }
@@ -2637,10 +2838,7 @@ class _CatalogControls extends StatelessWidget {
       ),
     );
   }
-
 }
-
-
 
 class _SubcategoriesLoadingPanel extends StatelessWidget {
   const _SubcategoriesLoadingPanel();
@@ -2738,7 +2936,8 @@ class _CatalogSubcategoryRowState extends State<_CatalogSubcategoryRow> {
       widget.category.hasChildren == true || widget.category.childrenCount > 0;
 
   bool get _backendConfirmsLeaf =>
-      widget.category.hasChildren == false && widget.category.childrenCount <= 0;
+      widget.category.hasChildren == false &&
+      widget.category.childrenCount <= 0;
 
   bool get _canExpand =>
       _backendConfirmsChildren || (_childrenResolved && _children.isNotEmpty);
@@ -2765,7 +2964,9 @@ class _CatalogSubcategoryRowState extends State<_CatalogSubcategoryRow> {
         // de una categoría que el servidor identifica como contenedora.
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No se pudieron mostrar las subcategorías de este apartado.'),
+            content: Text(
+              'No se pudieron mostrar las subcategorías de este apartado.',
+            ),
           ),
         );
         return;
@@ -2796,11 +2997,7 @@ class _CatalogSubcategoryRowState extends State<_CatalogSubcategoryRow> {
             )
           : await ApiService().getSubcategoriasDe(widget.category.id);
       final cleanChildren = children
-          .where(
-            (child) =>
-                child.id > 0 &&
-                child.id != widget.category.id,
-          )
+          .where((child) => child.id > 0 && child.id != widget.category.id)
           .toList();
 
       if (!mounted) return;
@@ -2815,7 +3012,9 @@ class _CatalogSubcategoryRowState extends State<_CatalogSubcategoryRow> {
         if (_backendConfirmsChildren && (widget.brandId ?? 0) <= 0) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('No se pudieron mostrar las subcategorías de este apartado.'),
+              content: Text(
+                'No se pudieron mostrar las subcategorías de este apartado.',
+              ),
             ),
           );
           return;
@@ -2853,10 +3052,7 @@ class _CatalogSubcategoryRowState extends State<_CatalogSubcategoryRow> {
     final leftIndent = (widget.depth * 10.0).clamp(0.0, 30.0).toDouble();
 
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: 7,
-        left: leftIndent,
-      ),
+      padding: EdgeInsets.only(bottom: 7, left: leftIndent),
       child: Column(
         children: [
           Material(
@@ -2906,23 +3102,23 @@ class _CatalogSubcategoryRowState extends State<_CatalogSubcategoryRow> {
                               ),
                             )
                           : _canExpand
-                              ? AnimatedRotation(
-                                  // Chevron a la derecha = cerrado; hacia abajo = abierto.
-                                  // Así el usuario entiende que hay otro nivel, igual
-                                  // que en el menú de categorías de la web.
-                                  turns: _expanded ? 0.25 : 0.0,
-                                  duration: const Duration(milliseconds: 180),
-                                  child: const Icon(
-                                    Icons.chevron_right_rounded,
-                                    size: 22,
-                                    color: AppColors.primary,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.chevron_right_rounded,
-                                  size: 21,
-                                  color: Color(0xFF9CA3AF),
-                                ),
+                          ? AnimatedRotation(
+                              // Chevron a la derecha = cerrado; hacia abajo = abierto.
+                              // Así el usuario entiende que hay otro nivel, igual
+                              // que en el menú de categorías de la web.
+                              turns: _expanded ? 0.25 : 0.0,
+                              duration: const Duration(milliseconds: 180),
+                              child: const Icon(
+                                Icons.chevron_right_rounded,
+                                size: 22,
+                                color: AppColors.primary,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.chevron_right_rounded,
+                              size: 21,
+                              color: Color(0xFF9CA3AF),
+                            ),
                     ),
                   ],
                 ),
@@ -2999,10 +3195,10 @@ class _CatalogSearchSuggestion {
   });
 
   factory _CatalogSearchSuggestion.product(
-      Product product, {
-        bool skuLike = false,
-        bool global = false,
-      }) {
+    Product product, {
+    bool skuLike = false,
+    bool global = false,
+  }) {
     final sku = product.sku.trim();
     final brand = product.brandName?.trim();
     final subtitleParts = <String>[
@@ -3077,7 +3273,8 @@ class _CatalogSearchSuggestion {
   String get uniqueKey {
     if (product != null) return 'product:${product!.id}';
     if (brandId != null) return 'brand:$brandId';
-    if (targetCategoryId != null) return 'redirect:$targetCategoryId:${value.toLowerCase().trim()}';
+    if (targetCategoryId != null)
+      return 'redirect:$targetCategoryId:${value.toLowerCase().trim()}';
     return 'query:${value.toLowerCase().trim()}';
   }
 }
@@ -3093,10 +3290,7 @@ class _ScoredProduct {
   final Product product;
   final int score;
 
-  const _ScoredProduct({
-    required this.product,
-    required this.score,
-  });
+  const _ScoredProduct({required this.product, required this.score});
 }
 
 class _ScoredBrand {
@@ -3142,89 +3336,93 @@ class _SearchSuggestionsPanel extends StatelessWidget {
         constraints: const BoxConstraints(maxHeight: 360),
         child: isLoading && suggestions.isEmpty
             ? const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.primary,
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'Buscando sugerencias...',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF6B7280),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              SizedBox(width: 10),
-              Text(
-                'Buscando sugerencias...',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: Color(0xFF6B7280),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        )
+              )
             : SingleChildScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (suggestions.any(
-                    (item) => item.type == _CatalogSearchSuggestionType.redirect,
-              ))
-                const _SuggestionSectionLabel('APARTADO'),
-              ...suggestions
-                  .where(
-                    (item) =>
-                item.type == _CatalogSearchSuggestionType.redirect,
-              )
-                  .map((item) => _SuggestionTile(
-                suggestion: item,
-                onTap: onTap,
-              )),
-              if (suggestions.any(
-                    (item) => item.type == _CatalogSearchSuggestionType.product,
-              ))
-                const _SuggestionSectionLabel('PRODUCTOS'),
-              ...suggestions
-                  .where(
-                    (item) =>
-                item.type == _CatalogSearchSuggestionType.product,
-              )
-                  .map((item) => _SuggestionTile(
-                suggestion: item,
-                onTap: onTap,
-              )),
-              if (suggestions.any(
-                    (item) => item.type == _CatalogSearchSuggestionType.brand,
-              ))
-                const _SuggestionSectionLabel('MARCAS'),
-              ...suggestions
-                  .where(
-                    (item) =>
-                item.type == _CatalogSearchSuggestionType.brand,
-              )
-                  .map((item) => _SuggestionTile(
-                suggestion: item,
-                onTap: onTap,
-              )),
-              if (suggestions.any(
-                    (item) => item.type == _CatalogSearchSuggestionType.query,
-              ))
-                const _SuggestionSectionLabel('SUGERENCIAS'),
-              ...suggestions
-                  .where(
-                    (item) =>
-                item.type == _CatalogSearchSuggestionType.query,
-              )
-                  .map((item) => _SuggestionTile(
-                suggestion: item,
-                onTap: onTap,
-              )),
-            ],
-          ),
-        ),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (suggestions.any(
+                      (item) =>
+                          item.type == _CatalogSearchSuggestionType.redirect,
+                    ))
+                      const _SuggestionSectionLabel('APARTADO'),
+                    ...suggestions
+                        .where(
+                          (item) =>
+                              item.type ==
+                              _CatalogSearchSuggestionType.redirect,
+                        )
+                        .map(
+                          (item) =>
+                              _SuggestionTile(suggestion: item, onTap: onTap),
+                        ),
+                    if (suggestions.any(
+                      (item) =>
+                          item.type == _CatalogSearchSuggestionType.product,
+                    ))
+                      const _SuggestionSectionLabel('PRODUCTOS'),
+                    ...suggestions
+                        .where(
+                          (item) =>
+                              item.type == _CatalogSearchSuggestionType.product,
+                        )
+                        .map(
+                          (item) =>
+                              _SuggestionTile(suggestion: item, onTap: onTap),
+                        ),
+                    if (suggestions.any(
+                      (item) => item.type == _CatalogSearchSuggestionType.brand,
+                    ))
+                      const _SuggestionSectionLabel('MARCAS'),
+                    ...suggestions
+                        .where(
+                          (item) =>
+                              item.type == _CatalogSearchSuggestionType.brand,
+                        )
+                        .map(
+                          (item) =>
+                              _SuggestionTile(suggestion: item, onTap: onTap),
+                        ),
+                    if (suggestions.any(
+                      (item) => item.type == _CatalogSearchSuggestionType.query,
+                    ))
+                      const _SuggestionSectionLabel('SUGERENCIAS'),
+                    ...suggestions
+                        .where(
+                          (item) =>
+                              item.type == _CatalogSearchSuggestionType.query,
+                        )
+                        .map(
+                          (item) =>
+                              _SuggestionTile(suggestion: item, onTap: onTap),
+                        ),
+                  ],
+                ),
+              ),
       ),
     );
   }
@@ -3256,10 +3454,7 @@ class _SuggestionTile extends StatelessWidget {
   final _CatalogSearchSuggestion suggestion;
   final ValueChanged<_CatalogSearchSuggestion> onTap;
 
-  const _SuggestionTile({
-    required this.suggestion,
-    required this.onTap,
-  });
+  const _SuggestionTile({required this.suggestion, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -3280,9 +3475,8 @@ class _SuggestionTile extends StatelessWidget {
                   height: 38,
                   fit: BoxFit.contain,
                   cacheManager: ImageCacheService.cacheManager,
-                  placeholder: (_, _) => Container(
-                    color: const Color(0xFFF0F2F5),
-                  ),
+                  placeholder: (_, _) =>
+                      Container(color: const Color(0xFFF0F2F5)),
                   errorWidget: (_, _, _) => const Icon(
                     Icons.broken_image_outlined,
                     color: Color(0xFF9CA3AF),
@@ -3375,7 +3569,8 @@ class _ActiveFiltersBar extends StatelessWidget {
     final chips = <String>[
       categoryName,
       if (filters.brand.trim().isNotEmpty) 'Marca: ${filters.brand.trim()}',
-      if (filters.search.trim().isNotEmpty) 'Búsqueda: ${filters.search.trim()}',
+      if (filters.search.trim().isNotEmpty)
+        'Búsqueda: ${filters.search.trim()}',
     ];
 
     return Container(
@@ -3550,11 +3745,26 @@ class _CatalogSortSheet extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            _option(context, 'Más recientes', 'date', Icons.access_time_rounded),
+            _option(
+              context,
+              'Más recientes',
+              'date',
+              Icons.access_time_rounded,
+            ),
             const SizedBox(height: 8),
-            _option(context, 'Precio bajo primero', 'price_asc', Icons.trending_up_rounded),
+            _option(
+              context,
+              'Precio bajo primero',
+              'price_asc',
+              Icons.trending_up_rounded,
+            ),
             const SizedBox(height: 8),
-            _option(context, 'Precio alto primero', 'price_desc', Icons.trending_down_rounded),
+            _option(
+              context,
+              'Precio alto primero',
+              'price_desc',
+              Icons.trending_down_rounded,
+            ),
           ],
         ),
       ),
@@ -3575,9 +3785,7 @@ class _CatalogSortSheet extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withOpacity(0.08)
-              : Colors.white,
+          color: selected ? AppColors.primary.withOpacity(0.08) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: selected
@@ -3615,7 +3823,9 @@ class _CatalogSortSheet extends StatelessWidget {
               ),
             ),
             Icon(
-              selected ? Icons.check_circle_rounded : Icons.chevron_right_rounded,
+              selected
+                  ? Icons.check_circle_rounded
+                  : Icons.chevron_right_rounded,
               size: 21,
               color: selected ? AppColors.primary : const Color(0xFF9CA3AF),
             ),
@@ -3860,16 +4070,15 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         .replaceAll(RegExp(r'&[^;]+;'), ' ')
         .split('\n')
         .map((line) {
-      return line
-          .replaceAll(RegExp(r'^\s*[•\-*–—·]+\s*'), '')
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
-    })
+          return line
+              .replaceAll(RegExp(r'^\s*[•\-*–—·]+\s*'), '')
+              .replaceAll(RegExp(r'\s+'), ' ')
+              .trim();
+        })
         .where((line) => line.isNotEmpty)
         .join('\n')
         .trim();
   }
-
 
   bool get _bajoConsulta => widget.p.isUnderConsultation;
   bool get _tieneStock => widget.p.hasStock;
@@ -3882,7 +4091,8 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
   int get _cantidadPresupuestoSegura {
     final selectedQty = cantidad < 1 ? 1 : cantidad;
-    final internalQty = widget.p.generalStockQuantity + widget.p.murciaStockQuantity;
+    final internalQty =
+        widget.p.generalStockQuantity + widget.p.murciaStockQuantity;
 
     // El botón de presupuesto no debe fallar solo porque el stock interno
     // General/Murcia venga a 0 si el producto viene marcado como presupuestable.
@@ -3898,9 +4108,12 @@ class _ProductTileState extends ConsumerState<ProductTile> {
 
     return selectedQty;
   }
+
   bool get _puedeComprar => widget.p.canAddToCart && _cantidadSegura > 0;
-  bool get _puedeAnadirPresupuesto => widget.p.canRequestQuote && !_isAddingToQuote;
-  bool get _puedeCambiarCantidad => widget.p.canAddToCart || widget.p.canRequestQuote;
+  bool get _puedeAnadirPresupuesto =>
+      widget.p.canRequestQuote && !_isAddingToQuote;
+  bool get _puedeCambiarCantidad =>
+      widget.p.canAddToCart || widget.p.canRequestQuote;
 
   void _goToQuotesKeepingTabs() {
     if (widget.onGoQuotes != null) {
@@ -3920,10 +4133,9 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   @override
   Widget build(BuildContext context) {
     final precio = _precioDouble(widget.p);
-    final canViewStockDetails = ref.watch(_canViewStockDetailsProvider).maybeWhen(
-      data: (value) => value,
-      orElse: () => false,
-    );
+    final canViewStockDetails = ref
+        .watch(_canViewStockDetailsProvider)
+        .maybeWhen(data: (value) => value, orElse: () => false);
     final descripcionTarjeta = _descripcionTarjeta(widget.p);
 
     return RepaintBoundary(
@@ -4033,8 +4245,9 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                                   children: [
                                     Text(
                                       descripcionTarjeta,
-                                      maxLines:
-                                          _descripcionExpandida ? null : 2,
+                                      maxLines: _descripcionExpandida
+                                          ? null
+                                          : 2,
                                       overflow: _descripcionExpandida
                                           ? TextOverflow.visible
                                           : TextOverflow.ellipsis,
@@ -4159,37 +4372,43 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                       child: ElevatedButton.icon(
                         onPressed: _puedeComprar
                             ? () async {
-                          final qty = _cantidadSegura;
-                          ref
-                              .read(cartProvider.notifier)
-                              .addProduct(widget.p, qty);
-                          ScaffoldMessenger.of(context).clearSnackBars();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '$qty x ${widget.p.name} añadido al carrito',
-                              ),
-                              backgroundColor: AppColors.primary,
-                              duration: const Duration(seconds: 1),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
+                                final qty = _cantidadSegura;
+                                ref
+                                    .read(cartProvider.notifier)
+                                    .addProduct(widget.p, qty);
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      '$qty x ${widget.p.name} añadido al carrito',
+                                    ),
+                                    backgroundColor: AppColors.primary,
+                                    duration: const Duration(seconds: 1),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
 
-                          await showMundicamCrossSellSheet(
-                            context: context,
-                            ref: ref,
-                            sourceProduct: widget.p,
-                            onGoCart: widget.onGoCart,
-                          );
-                        }
+                                await showMundicamCrossSellSheet(
+                                  context: context,
+                                  ref: ref,
+                                  sourceProduct: widget.p,
+                                  onGoCart: widget.onGoCart,
+                                );
+                              }
                             : null,
                         icon: Icon(
-                          _puedeComprar ? Icons.shopping_cart_outlined : Icons.block_rounded,
+                          _puedeComprar
+                              ? Icons.shopping_cart_outlined
+                              : Icons.block_rounded,
                           size: 17,
                           color: Colors.white,
                         ),
                         label: Text(
-                          _bajoConsulta ? 'BAJO CONSULTA' : (_tieneStock ? 'AÑADIR CARRITO' : 'SIN EXISTENCIAS'),
+                          _bajoConsulta
+                              ? 'BAJO CONSULTA'
+                              : (_tieneStock
+                                    ? 'AÑADIR CARRITO'
+                                    : 'SIN EXISTENCIAS'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -4201,7 +4420,9 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           ),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _puedeComprar ? AppColors.primary : Colors.grey.shade400,
+                          backgroundColor: _puedeComprar
+                              ? AppColors.primary
+                              : Colors.grey.shade400,
                           foregroundColor: Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
@@ -4224,19 +4445,19 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                       : null,
                   icon: _isAddingToQuote
                       ? const SizedBox(
-                    width: 15,
-                    height: 15,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.primary,
-                    ),
-                  )
+                          width: 15,
+                          height: 15,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
                       : Icon(
-                    _puedeAnadirPresupuesto
-                        ? Icons.description_outlined
-                        : Icons.block_rounded,
-                    size: 17,
-                  ),
+                          _puedeAnadirPresupuesto
+                              ? Icons.description_outlined
+                              : Icons.block_rounded,
+                          size: 17,
+                        ),
                   label: Text(
                     _isAddingToQuote
                         ? 'AÑADIENDO...'
@@ -4253,8 +4474,9 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     ),
                   ),
                   style: OutlinedButton.styleFrom(
-                    backgroundColor:
-                    _puedeAnadirPresupuesto ? Colors.white : Colors.grey.shade100,
+                    backgroundColor: _puedeAnadirPresupuesto
+                        ? Colors.white
+                        : Colors.grey.shade100,
                     foregroundColor: AppColors.textPrimary,
                     disabledForegroundColor: Colors.grey.shade500,
                     side: BorderSide(
@@ -4302,14 +4524,17 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w900,
-                  color: _puedeCambiarCantidad ? AppColors.textPrimary : Colors.grey,
+                  color: _puedeCambiarCantidad
+                      ? AppColors.textPrimary
+                      : Colors.grey,
                 ),
               ),
             ),
             _qtyBtn(
               Icons.add,
-              _puedeCambiarCantidad && (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra),
-                  () {
+              _puedeCambiarCantidad &&
+                  (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra),
+              () {
                 if (_maxCantidadCompra <= 0 || cantidad < _maxCantidadCompra) {
                   setState(() => cantidad++);
                 }
@@ -4352,10 +4577,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
           Container(
             width: 5,
             height: 5,
-            decoration: BoxDecoration(
-              color: textColor,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: textColor, shape: BoxShape.circle),
           ),
           const SizedBox(width: 5),
           Text(
@@ -4404,11 +4626,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
   }
 
   Widget _qtyBtn(
-      IconData icon,
-      bool enabled,
-      VoidCallback onTap, {
-        bool isPrimary = false,
-      }) {
+    IconData icon,
+    bool enabled,
+    VoidCallback onTap, {
+    bool isPrimary = false,
+  }) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: SizedBox(
@@ -4473,12 +4695,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       if (action == 'crear_y_anadir') {
         final nombre = result['nombre']?.toString().trim() ?? '';
         final orderId = DateTime.now().millisecondsSinceEpoch.toString();
-        final nombreFinal = nombre.isNotEmpty ? nombre : 'Presupuesto #$orderId';
+        final nombreFinal = nombre.isNotEmpty
+            ? nombre
+            : 'Presupuesto #$orderId';
 
-        await notifier.crearPresupuesto(
-          orderId: orderId,
-          nombre: nombreFinal,
-        );
+        await notifier.crearPresupuesto(orderId: orderId, nombre: nombreFinal);
 
         await notifier.anadirItem(
           orderId: orderId,
@@ -4496,7 +4717,9 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         final nombre = result['nombre']?.toString() ?? 'presupuesto';
 
         if (orderId.isEmpty) {
-          throw Exception('No se pudo identificar el presupuesto seleccionado.');
+          throw Exception(
+            'No se pudo identificar el presupuesto seleccionado.',
+          );
         }
 
         await notifier.anadirItem(
@@ -4552,19 +4775,13 @@ class _ProductTileState extends ConsumerState<ProductTile> {
       }
     }
   }
-
 }
-
-
 
 class _StockDetailsText extends StatelessWidget {
   final Product product;
   final bool hasStock;
 
-  const _StockDetailsText({
-    required this.product,
-    required this.hasStock,
-  });
+  const _StockDetailsText({required this.product, required this.hasStock});
 
   @override
   Widget build(BuildContext context) {
@@ -4586,11 +4803,7 @@ class _StockDetailsText extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.inventory_2_outlined,
-            size: 13,
-            color: textColor,
-          ),
+          Icon(Icons.inventory_2_outlined, size: 13, color: textColor),
           const SizedBox(width: 5),
           Expanded(
             child: Text(
@@ -4611,13 +4824,10 @@ class _StockDetailsText extends StatelessWidget {
   }
 }
 
-
 class _ProductBrandLogo extends StatelessWidget {
   final Product product;
 
-  const _ProductBrandLogo({
-    required this.product,
-  });
+  const _ProductBrandLogo({required this.product});
 
   @override
   Widget build(BuildContext context) {
@@ -4693,7 +4903,11 @@ String _productCanonicalBrandKey(String value) {
   if (key == 'zkteko') return 'zkteco';
   if (key == 'mci') return 'mci';
   if (key == 'mcipro') return 'mcipro';
-  if (key == 'evolveextended' || key == 'evolve' || key == 'evolvextender' || key == 'evolvextendermobilesecuritybox') return 'evolveextended';
+  if (key == 'evolveextended' ||
+      key == 'evolve' ||
+      key == 'evolvextender' ||
+      key == 'evolvextendermobilesecuritybox')
+    return 'evolveextended';
   if (key == 'assaabloy' || key == 'tesaassaabloy') return 'tesaassaabloy';
   if (key == 'uniview') return 'unv';
   return key;
@@ -4779,11 +4993,7 @@ class ProductImage extends StatelessWidget {
   final Product p;
   final FirebaseService firebase;
 
-  const ProductImage({
-    super.key,
-    required this.p,
-    required this.firebase,
-  });
+  const ProductImage({super.key, required this.p, required this.firebase});
 
   @override
   Widget build(BuildContext context) {
@@ -4813,8 +5023,7 @@ class ProductImage extends StatelessWidget {
                   memCacheWidth: 192,
                   memCacheHeight: 192,
                   cacheKey: p.imageUrl,
-                  placeholder: (_, _) =>
-                      const ColoredBox(color: Colors.white),
+                  placeholder: (_, _) => const ColoredBox(color: Colors.white),
                   errorWidget: (_, _, _) => const Icon(
                     Icons.broken_image,
                     color: Colors.grey,

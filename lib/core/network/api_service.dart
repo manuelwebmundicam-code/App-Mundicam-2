@@ -7,6 +7,10 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mundicam/core/cache/product_cache_service.dart';
+import 'package:mundicam/core/network/vps_brand_audit.dart';
+import 'package:mundicam/core/network/vps_category_parity_audit.dart';
+import 'package:mundicam/core/network/vps_catalog_service.dart';
+import 'package:mundicam/core/network/catalog_filter_request.dart';
 import 'package:mundicam/core/analytics/mundicam_analytics_service.dart';
 import 'package:mundicam/features/catalog/data/models/category_model.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
@@ -17,7 +21,6 @@ import 'package:mundicam/features/quotes/data/models/quote_model.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/promotions/data/models/promotion_model.dart';
 import 'package:mundicam/features/training/data/models/cursos_model.dart';
-
 
 Map<String, dynamic> _asMap(dynamic value) {
   if (value is Map) return Map<String, dynamic>.from(value);
@@ -62,7 +65,6 @@ List<dynamic> _firstList(List<dynamic> values) {
   }
   return <dynamic>[];
 }
-
 
 class PasswordResetRequestResult {
   final bool success;
@@ -142,7 +144,6 @@ class OrderCreateResult {
   }
 }
 
-
 class QuoteAcceptPayResult {
   final bool success;
   final int quoteId;
@@ -176,12 +177,11 @@ class QuoteAcceptPayResult {
       quoteId: _parseInt(json['quote_id'] ?? json['id']),
       pendingOrderId: _parseInt(json['pending_order_id'] ?? json['order_id']),
       status: (json['status'] ?? '').toString().trim(),
-      statusLabel: _firstNonEmptyString([
-            json['status_label'],
-            json['statusLabel'],
-          ]) ??
+      statusLabel:
+          _firstNonEmptyString([json['status_label'], json['statusLabel']]) ??
           '',
-      paymentUrl: _firstNonEmptyString([
+      paymentUrl:
+          _firstNonEmptyString([
             json['payment_url'],
             json['checkout_payment_url'],
             json['redirect_url'],
@@ -217,16 +217,22 @@ class QuoteCreateResult {
     return QuoteCreateResult(
       success: json['success'] != false,
       quoteId: _parseInt(
-        json['quote_id'] ?? json['id'] ?? quoteData['id'] ?? quoteData['order_id'],
+        json['quote_id'] ??
+            json['id'] ??
+            quoteData['id'] ??
+            quoteData['order_id'],
       ),
-      status: (_firstNonEmptyString([
-            json['status'],
-            quoteData['status'],
-            quoteData['order_status'],
-          ]) ??
-          '')
-          .replaceFirst(RegExp(r'^wc-'), ''),
-      total: _parseDouble(json['total'] ?? quoteData['total'] ?? quoteData['amount']),
+      status:
+          (_firstNonEmptyString([
+                    json['status'],
+                    quoteData['status'],
+                    quoteData['order_status'],
+                  ]) ??
+                  '')
+              .replaceFirst(RegExp(r'^wc-'), ''),
+      total: _parseDouble(
+        json['total'] ?? quoteData['total'] ?? quoteData['amount'],
+      ),
       message: _firstNonEmptyString([json['message']]) ?? '',
       rawData: json,
     );
@@ -260,15 +266,16 @@ class AccountDeleteRequestResult {
       requestId: (json['request_id'] ?? '').toString().trim(),
       accessBlocked: json['access_blocked'] == true,
       alreadyRequested: json['already_requested'] == true,
-      rgpdEmailSent: json['support_email_sent'] == true || json['rgpd_email_sent'] == true,
+      rgpdEmailSent:
+          json['support_email_sent'] == true || json['rgpd_email_sent'] == true,
       emailRetryScheduled: json['email_retry_scheduled'] == true,
-      message: _firstNonEmptyString([json['message']]) ??
+      message:
+          _firstNonEmptyString([json['message']]) ??
           'Solicitud de inhabilitación registrada.',
       rawData: json,
     );
   }
 }
-
 
 class ShippingOption {
   final String id;
@@ -303,14 +310,16 @@ class ShippingOption {
     final cost = _parseDouble(json['total']);
     final tax = _parseDouble(json['tax']);
     return ShippingOption(
-      id: _firstNonEmptyString([
+      id:
+          _firstNonEmptyString([
             json['id'],
             json['rate_id'],
             json['method_rate_id'],
           ]) ??
           '',
       type: json['type']?.toString().trim() ?? 'delivery',
-      title: _firstNonEmptyString([
+      title:
+          _firstNonEmptyString([
             json['title'],
             json['label'],
             json['method_title'],
@@ -323,8 +332,11 @@ class ShippingOption {
       total: cost,
       tax: tax,
       totalWithTax: _parseDouble(json['total_with_tax'], fallback: cost + tax),
-      displayTotal: json['display_total']?.toString().trim() ??
-          ((cost + tax) <= 0 ? 'Gratis' : '${(cost + tax).toStringAsFixed(2)} €'),
+      displayTotal:
+          json['display_total']?.toString().trim() ??
+          ((cost + tax) <= 0
+              ? 'Gratis'
+              : '${(cost + tax).toStringAsFixed(2)} €'),
     );
   }
 }
@@ -393,10 +405,10 @@ class OrderPreviewResult {
       shippingHash: json['shipping_hash']?.toString().trim() ?? '',
       selectedShippingMethodId:
           _firstNonEmptyString([
-                shipping['selected_method_id'],
-                shipping['selected_option_id'],
-              ]) ??
-              '',
+            shipping['selected_method_id'],
+            shipping['selected_option_id'],
+          ]) ??
+          '',
       shippingLabel: shipping['label']?.toString().trim() ?? '',
       destinationLabel: json['destination_label']?.toString().trim() ?? '',
       destination: _asMap(json['destination']),
@@ -465,12 +477,12 @@ class CatalogFilterOption {
   });
 
   Map<String, dynamic> toMap() => {
-        'id': id,
-        'name': name,
-        'slug': slug,
-        'count': count,
-        'available_count': count,
-      };
+    'id': id,
+    'name': name,
+    'slug': slug,
+    'count': count,
+    'available_count': count,
+  };
 }
 
 class CatalogFilterGroup {
@@ -552,7 +564,7 @@ class ApiService {
       'Pedido Generado desde APP MundiCam';
 
   // Sensación de velocidad del buscador:
-  // primera pantalla pequeña y páginas siguientes precargadas en segundo plano.
+  // primera pantalla pequeña y siguientes páginas solo a petición del usuario.
   static const int _fastSearchFirstPageSize = 10;
   static const int _fastSearchNextPageSize = 10;
   static const int _fastSearchMaxBackgroundPages = 3;
@@ -577,11 +589,27 @@ class ApiService {
   Map<String, dynamic> _currentUser = <String, dynamic>{};
   Map<String, dynamic> _currentPermissions = <String, dynamic>{};
   DateTime? _lastSessionContextRefresh;
+  Future<void>? _sessionContextRefreshInFlight;
 
   List<Map<String, dynamic>>? _cachedBrandTerms;
   bool? _cachedBrandTermsHideEmpty;
   final Map<String, _CatalogFiltersCacheEntry> _catalogFiltersCache = {};
   final Map<int, CategoryModel> _knownCategories = <int, CategoryModel>{};
+
+  // Prueba opt-in de árbol público completo. Nunca selecciona
+  // productos comerciales ni calcula descuentos/precios/stock.
+  static const bool _useCompleteVpsCategoriesQa = bool.fromEnvironment(
+    'MUNDICAM_VPS_CATEGORY_TREE_QA',
+    defaultValue: false,
+  );
+
+  // Solo QA con R19 previamente validado: sin activar en apps publicadas.
+  // Al faltar soporte, el servidor antiguo sigue usando el modo histórico.
+  static const bool _useFastFacetsOnlyQa = bool.fromEnvironment(
+    'MUNDICAM_FAST_FACETS_ONLY',
+    defaultValue: false,
+  );
+  final VpsCatalogService _vpsCompleteCategories = VpsCatalogService();
   final Set<String> _backgroundSearchPrefetchRunning = <String>{};
 
   ApiService._internal() {
@@ -645,7 +673,8 @@ class ApiService {
   }
 
   String get catalogCacheIdentity {
-    final userId = _firstNonEmptyString([
+    final userId =
+        _firstNonEmptyString([
           _currentUser['wordpress_id'],
           _currentUser['woocommerce_id'],
           _currentUser['id'],
@@ -661,8 +690,9 @@ class ApiService {
     }
 
     final normalizedRoles = _normalizeText(roles);
-    final stockFlag = _currentPermissions['can_view_stock_details'] == true ||
-        _currentPermissions['can_view_stock'] == true
+    final stockFlag =
+        _currentPermissions['can_view_stock_details'] == true ||
+            _currentPermissions['can_view_stock'] == true
         ? 'stock1'
         : 'stock0';
 
@@ -694,9 +724,8 @@ class ApiService {
       final statusCode = response.statusCode ?? 0;
       final data = _responseMap(response.data);
 
-      final valid = statusCode >= 200 &&
-          statusCode < 300 &&
-          data['success'] != false;
+      final valid =
+          statusCode >= 200 && statusCode < 300 && data['success'] != false;
 
       if (!valid && (statusCode == 401 || statusCode == 403)) {
         await clearWordPressSession();
@@ -710,10 +739,10 @@ class ApiService {
           data['permissions'] ?? nestedData['permissions'],
         );
         if (user.isNotEmpty || permissions.isNotEmpty) {
-          await saveWordPressSession(
-            user: user,
-            permissions: permissions,
-          );
+          await saveWordPressSession(user: user, permissions: permissions);
+          // /me se acaba de validar con el servidor real. Evitamos un segundo
+          // /me inmediato en la primera categoría; tras 25 s vuelve a comprobar.
+          _lastSessionContextRefresh = DateTime.now();
         }
       }
 
@@ -838,7 +867,8 @@ class ApiService {
     if (normalized.isEmpty) return false;
 
     final prefs = await SharedPreferences.getInstance();
-    final blocked = prefs
+    final blocked =
+        prefs
             .getStringList(_localDeletionBlockedIdentifiersPrefsKey)
             ?.map(_normalizeAccountIdentifier)
             .toSet() ??
@@ -850,9 +880,8 @@ class ApiService {
   /// confirmaron una solicitud de eliminación.
   Future<void> clearLocalAppDataPreservingDeletionBlocks() async {
     final prefs = await SharedPreferences.getInstance();
-    final blocked = prefs.getStringList(
-          _localDeletionBlockedIdentifiersPrefsKey,
-        ) ??
+    final blocked =
+        prefs.getStringList(_localDeletionBlockedIdentifiersPrefsKey) ??
         const <String>[];
 
     await clearWordPressSession();
@@ -875,13 +904,24 @@ class ApiService {
   Map<String, dynamic> _userFromMeResponse(Map<String, dynamic> root) {
     final nestedData = _asMap(root['data']);
     final user = _asMap(root['user'] ?? nestedData['user']);
-    _mergeManagerFieldsIntoUser(<String, dynamic>{...nestedData, ...root}, user);
+    _mergeManagerFieldsIntoUser(<String, dynamic>{
+      ...nestedData,
+      ...root,
+    }, user);
     return user;
   }
 
   Future<void> refreshSessionContextFromBackend({bool force = false}) async {
     await _ensureInitialized();
     if (_appToken.trim().isEmpty) return;
+
+    // Una consulta /me compartida, incluso al entrar en el catálogo mientras
+    // Home la está comprobando. No usar una identidad B2B todavía pendiente.
+    final pending = _sessionContextRefreshInFlight;
+    if (pending != null) {
+      await pending;
+      if (!force) return;
+    }
 
     final lastRefresh = _lastSessionContextRefresh;
     if (!force &&
@@ -890,32 +930,72 @@ class ApiService {
       return;
     }
 
-    _lastSessionContextRefresh = DateTime.now();
-
+    final tokenAtStart = _appToken;
+    final future = _refreshSessionContextOnce(tokenAtStart);
+    _sessionContextRefreshInFlight = future;
     try {
+      await future;
+    } finally {
+      if (identical(_sessionContextRefreshInFlight, future)) {
+        _sessionContextRefreshInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _refreshSessionContextOnce(String tokenAtStart) async {
+    _lastSessionContextRefresh = DateTime.now();
+    try {
+      final watch = Stopwatch()..start();
       final response = await _appGet('/me');
+      watch.stop();
+      // Una sesión antigua no puede sobrescribir los permisos de la nueva.
+      if (_appToken != tokenAtStart) return;
+      if (kDebugMode) {
+        debugPrint(
+          'MUNDICAM_SESSION_TIMING endpoint=/me elapsed_ms=${watch.elapsedMilliseconds}',
+        );
+      }
       final root = _responseMap(response.data);
       final nestedData = _asMap(root['data']);
       final user = _userFromMeResponse(root);
-      final permissions = _asMap(root['permissions'] ?? nestedData['permissions']);
+      final permissions = _asMap(
+        root['permissions'] ?? nestedData['permissions'],
+      );
+
+      // No esperar a SharedPreferences después de mutar _currentUser.
+      // Si otro login sustituyó el token durante ese await, descartamos
+      // completamente la respuesta antigua sin tocar permisos.
+      final prefs = await SharedPreferences.getInstance();
+      if (_appToken != tokenAtStart) return;
 
       var sessionChanged = false;
 
       if (user.isNotEmpty) {
-        final oldIdentity = _sessionIdentityForCache(_currentUser, _currentPermissions);
+        final oldIdentity = _sessionIdentityForCache(
+          _currentUser,
+          _currentPermissions,
+        );
         _currentUser = Map<String, dynamic>.from(user);
-        final newIdentity = _sessionIdentityForCache(_currentUser, _currentPermissions);
+        final newIdentity = _sessionIdentityForCache(
+          _currentUser,
+          _currentPermissions,
+        );
         sessionChanged = sessionChanged || oldIdentity != newIdentity;
       }
 
       if (permissions.isNotEmpty) {
-        final oldIdentity = _sessionIdentityForCache(_currentUser, _currentPermissions);
+        final oldIdentity = _sessionIdentityForCache(
+          _currentUser,
+          _currentPermissions,
+        );
         _currentPermissions = Map<String, dynamic>.from(permissions);
-        final newIdentity = _sessionIdentityForCache(_currentUser, _currentPermissions);
+        final newIdentity = _sessionIdentityForCache(
+          _currentUser,
+          _currentPermissions,
+        );
         sessionChanged = sessionChanged || oldIdentity != newIdentity;
       }
 
-      final prefs = await SharedPreferences.getInstance();
       if (user.isNotEmpty) {
         await prefs.setString(_userPayloadPrefsKey, jsonEncode(_currentUser));
         final email = _currentUser['email']?.toString().trim();
@@ -924,7 +1004,10 @@ class ApiService {
         }
       }
       if (permissions.isNotEmpty) {
-        await prefs.setString(_permissionsPrefsKey, jsonEncode(_currentPermissions));
+        await prefs.setString(
+          _permissionsPrefsKey,
+          jsonEncode(_currentPermissions),
+        );
       }
 
       if (sessionChanged) {
@@ -933,12 +1016,15 @@ class ApiService {
         _cachedBrandTerms = null;
         _cachedBrandTermsHideEmpty = null;
         if (kDebugMode) {
-          debugPrint('🧹 Caché limpiada por roles/permisos actualizados desde PHP v1.8.0');
+          debugPrint(
+            '🧹 Caché limpiada por roles/permisos actualizados desde PHP v1.8.0',
+          );
         }
       }
     } catch (e) {
       // No bloqueamos catálogo ni login si /me falla puntualmente.
-      if (kDebugMode) debugPrint('⚠️ No se pudo refrescar contexto de sesión: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudo refrescar contexto de sesión: $e');
     }
   }
 
@@ -950,7 +1036,8 @@ class ApiService {
     final roles = rolesValue is List
         ? rolesValue.map((role) => role.toString()).join(',')
         : user['role']?.toString() ?? '';
-    final stockFlag = permissions['can_view_stock_details'] == true ||
+    final stockFlag =
+        permissions['can_view_stock_details'] == true ||
             permissions['can_view_stock'] == true ||
             permissions['can_view_internal_stock'] == true
         ? 'stock1'
@@ -1011,6 +1098,10 @@ class ApiService {
     }
 
     if (cleanAppToken.isNotEmpty) {
+      if (_appToken != cleanAppToken) {
+        _sessionContextRefreshInFlight = null;
+        _lastSessionContextRefresh = null;
+      }
       _appToken = cleanAppToken;
       await prefs.setString(_appTokenPrefsKey, cleanAppToken);
     }
@@ -1094,7 +1185,6 @@ class ApiService {
     );
   }
 
-
   Future<bool> registerFcmToken({
     required String token,
     required String platform,
@@ -1127,7 +1217,8 @@ class ApiService {
       try {
         final response = await _appPost(endpoint, data: payload);
         final data = _responseMap(response.data);
-        final ok = response.statusCode != null &&
+        final ok =
+            response.statusCode != null &&
             response.statusCode! >= 200 &&
             response.statusCode! < 300 &&
             data['success'] != false;
@@ -1178,7 +1269,8 @@ class ApiService {
       try {
         final response = await _appPost(endpoint, data: payload);
         final data = _responseMap(response.data);
-        final ok = response.statusCode != null &&
+        final ok =
+            response.statusCode != null &&
             response.statusCode! >= 200 &&
             response.statusCode! < 300 &&
             data['success'] != false;
@@ -1235,6 +1327,8 @@ class ApiService {
     _wpNonce = '';
     _wpCartToken = '';
     _appToken = '';
+    _sessionContextRefreshInFlight = null;
+    _lastSessionContextRefresh = null;
     _currentUser = <String, dynamic>{};
     _currentPermissions = <String, dynamic>{};
     _sessionLoaded = true;
@@ -1321,19 +1415,22 @@ class ApiService {
   // PERFIL / CLIENTE
   // ================================================================
 
-
   Future<PasswordResetRequestResult> requestPasswordReset({
     required String email,
   }) async {
     final cleanEmail = email.trim();
 
     if (cleanEmail.isEmpty) {
-      return PasswordResetRequestResult.failure('Introduce tu correo electrónico.');
+      return PasswordResetRequestResult.failure(
+        'Introduce tu correo electrónico.',
+      );
     }
 
     final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
     if (!emailRegex.hasMatch(cleanEmail)) {
-      return PasswordResetRequestResult.failure('Introduce un correo electrónico válido.');
+      return PasswordResetRequestResult.failure(
+        'Introduce un correo electrónico válido.',
+      );
     }
 
     // 1) Endpoint propio recomendado en PHP. No requiere sesión porque el usuario
@@ -1372,12 +1469,15 @@ class ApiService {
         }
 
         final data = response.data;
-        final body = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+        final body = data is Map
+            ? Map<String, dynamic>.from(data)
+            : <String, dynamic>{};
 
         if (statusCode >= 200 && statusCode < 300 && body['success'] != false) {
           return PasswordResetRequestResult(
             success: true,
-            message: _firstNonEmptyString([
+            message:
+                _firstNonEmptyString([
                   body['message'],
                   body['data'] is Map ? (body['data'] as Map)['message'] : null,
                 ]) ??
@@ -1419,7 +1519,8 @@ class ApiService {
         options: Options(
           responseType: ResponseType.plain,
           headers: const <String, dynamic>{
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept':
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Cache-Control': 'no-store',
             'User-Agent': 'MundiCam-App/PasswordReset',
           },
@@ -1429,13 +1530,13 @@ class ApiService {
       );
 
       final html = getResponse.data ?? '';
-      final nonce = _extractHtmlInputValue(
-            html,
-            'woocommerce-lost-password-nonce',
-          ) ??
+      final nonce =
+          _extractHtmlInputValue(html, 'woocommerce-lost-password-nonce') ??
           _extractHtmlInputValue(html, '_wpnonce');
 
-      if ((getResponse.statusCode ?? 0) >= 400 || nonce == null || nonce.isEmpty) {
+      if ((getResponse.statusCode ?? 0) >= 400 ||
+          nonce == null ||
+          nonce.isEmpty) {
         return PasswordResetRequestResult.failure(
           'No se pudo preparar la recuperación de contraseña. Inténtalo de nuevo en unos minutos.',
         );
@@ -1455,7 +1556,8 @@ class ApiService {
           contentType: Headers.formUrlEncodedContentType,
           followRedirects: true,
           headers: const <String, dynamic>{
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept':
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Cache-Control': 'no-store',
             'User-Agent': 'MundiCam-App/PasswordReset',
           },
@@ -1575,7 +1677,37 @@ class ApiService {
     bool hideEmpty = false,
     bool parentOnly = false,
     int? parent,
+    bool forceWordPress = false,
   }) async {
+    // Solo QA de navegación; hideEmpty=true sigue en PHP porque
+    // los recuentos públicos NO equivalen a la visibilidad comercial.
+    if (_useCompleteVpsCategoriesQa && !hideEmpty && !forceWordPress) {
+      final publicTree = await _vpsCompleteCategories.completeCategoryTree();
+      if (publicTree != null) {
+        final terms = publicTree
+            .map(CategoryModel.fromJson)
+            .where((cat) => cat.id > 0 && !_isForbiddenCategory(cat.name))
+            .where(
+              (cat) => parent != null
+                  ? cat.parent == parent
+                  : (!parentOnly || cat.parent == 0),
+            )
+            .toList();
+        for (final term in terms) {
+          _knownCategories[term.id] = term;
+        }
+        if (kDebugMode) {
+          debugPrint(
+            'MUNDICAM_VPS_CATEGORY_TREE_QA '
+            'parent=${parent ?? -1} terms=${terms.length} source=public_only',
+          );
+        }
+        return terms;
+      }
+      if (kDebugMode) {
+        debugPrint('MUNDICAM_VPS_CATEGORY_TREE_QA fallback=authenticated_php');
+      }
+    }
     final queryParameters = <String, dynamic>{
       'hide_empty': hideEmpty ? 1 : 0,
       if (parentOnly) 'parent_only': 1,
@@ -1584,14 +1716,13 @@ class ApiService {
       queryParameters['parent'] = parent;
     }
 
-    final response = await _appGet('/categories', queryParameters: queryParameters);
+    final response = await _appGet(
+      '/categories',
+      queryParameters: queryParameters,
+    );
 
     final data = _responseMap(response.data);
-    final raw = _firstList([
-      data['categories'],
-      data['data'],
-      response.data,
-    ]);
+    final raw = _firstList([data['categories'], data['data'], response.data]);
 
     final categories = raw
         .whereType<Map>()
@@ -1608,7 +1739,16 @@ class ApiService {
 
   Future<List<CategoryModel>> getSubcategoriasDe(int? parentId) async {
     if (parentId == null || parentId <= 0) return [];
-    return getCategorias(parent: parentId, hideEmpty: false);
+
+    // Evita repetir /categories al ir de VIDEO IP HD a CCTV/COMPLEMENTOS
+    // y volver. La identidad comercial impide compartir cache entre clientes.
+    // El backend autenticado sigue controlando orden, visibilidad y nombres.
+    final cacheKey = 'app_subcategories|$catalogCacheIdentity|cat:$parentId';
+    return ProductCacheService().getOrLoadMemory<List<CategoryModel>>(
+      cacheKey,
+      ttl: const Duration(minutes: 3),
+      loader: () => getCategorias(parent: parentId, hideEmpty: false),
+    );
   }
 
   Future<List<CategoryModel>> getSubcategoriasDisponiblesCatalogo({
@@ -1637,6 +1777,38 @@ class ApiService {
     return disponibles;
   }
 
+  /// Solo QA: compara categorías con la sesión B2B real frente al VPS.
+  /// Fuerza WordPress aunque el flag de navegación pública esté habilitado;
+  /// nunca cambia lo que se muestra, la caché comercial ni ningún pedido.
+  Future<VpsCategoryParityResult> auditarCategoriasVps() async {
+    try {
+      await _ensureInitialized();
+      if (_appToken.trim().isEmpty) {
+        return const VpsCategoryParityResult.unavailable();
+      }
+      final authenticated = await getCategorias(
+        hideEmpty: false,
+        forceWordPress: true,
+      );
+      final publicTree = await _vpsCompleteCategories.completeCategoryTree();
+      return VpsCategoryParityAudit.compare(
+        authenticated: authenticated,
+        publicTree: publicTree
+            ?.where((item) => !_isForbiddenCategory(item['name']?.toString() ?? ''))
+            .toList(),
+      );
+    } catch (_) {
+      // No registrar tokens, identidad, respuesta comercial ni errores HTTP.
+      return const VpsCategoryParityResult.unavailable();
+    }
+  }
+
+  /// Diagnóstico opcional de marcas, sin modificar su presentación ni precios.
+  Future<BrandAuditResult> auditarMarcasVps() async {
+    final appBrands = await getMarcas(hideEmpty: false, forceRefresh: true);
+    return VpsBrandAudit().compare(appBrands);
+  }
+
   Future<List<Map<String, dynamic>>> getMarcas({
     bool hideEmpty = true,
     bool forceRefresh = false,
@@ -1659,48 +1831,53 @@ class ApiService {
       }
     }
 
-    final response = await _appGet('/brands', queryParameters: {
-      'hide_empty': hideEmpty ? 1 : 0,
-    });
+    final response = await _appGet(
+      '/brands',
+      queryParameters: {'hide_empty': hideEmpty ? 1 : 0},
+    );
 
     final data = _responseMap(response.data);
     final raw = _firstList([data['brands'], data['data'], response.data]);
 
-    final brands = raw.whereType<Map>().map((item) {
-      final map = Map<String, dynamic>.from(item);
+    final brands = raw
+        .whereType<Map>()
+        .map((item) {
+          final map = Map<String, dynamic>.from(item);
 
-      // MundiCam App Extensions 1.0.1 amplía /brands de forma aditiva:
-      // - image_full: original/full para cuentas habilitadas en pruebas;
-      // - image_thumbnail: miniatura anterior para compatibilidad;
-      // - image_attachment_id: attachment real de WordPress.
-      // Para versiones sin Extensions seguimos usando "image" exactamente igual.
-      final imageFull = map['image_full']?.toString().trim() ?? '';
-      final image = imageFull.isNotEmpty
-          ? imageFull
-          : (map['image']?.toString().trim() ?? '');
+          // MundiCam App Extensions 1.0.1 amplía /brands de forma aditiva:
+          // - image_full: original/full para cuentas habilitadas en pruebas;
+          // - image_thumbnail: miniatura anterior para compatibilidad;
+          // - image_attachment_id: attachment real de WordPress.
+          // Para versiones sin Extensions seguimos usando "image" exactamente igual.
+          final imageFull = map['image_full']?.toString().trim() ?? '';
+          final image = imageFull.isNotEmpty
+              ? imageFull
+              : (map['image']?.toString().trim() ?? '');
 
-      return {
-        'id': _parseInt(map['id']),
-        'name': map['name']?.toString() ?? '',
-        'slug': map['slug']?.toString() ?? '',
-        'count': _parseInt(map['count']),
-        'taxonomy': map['taxonomy']?.toString() ?? 'pa_marcas',
-        'image': image,
-        'image_full': imageFull,
-        'image_thumbnail': map['image_thumbnail']?.toString().trim() ?? '',
-        'image_attachment_id': _parseInt(map['image_attachment_id']),
-      };
-    }).where((item) {
-      final id = _parseInt(item['id']);
-      final name = item['name']?.toString().trim() ?? '';
-      final slug = item['slug']?.toString().trim() ?? '';
+          return {
+            'id': _parseInt(map['id']),
+            'name': map['name']?.toString() ?? '',
+            'slug': map['slug']?.toString() ?? '',
+            'count': _parseInt(map['count']),
+            'taxonomy': map['taxonomy']?.toString() ?? 'pa_marcas',
+            'image': image,
+            'image_full': imageFull,
+            'image_thumbnail': map['image_thumbnail']?.toString().trim() ?? '',
+            'image_attachment_id': _parseInt(map['image_attachment_id']),
+          };
+        })
+        .where((item) {
+          final id = _parseInt(item['id']);
+          final name = item['name']?.toString().trim() ?? '';
+          final slug = item['slug']?.toString().trim() ?? '';
 
-      if (id <= 0 || name.isEmpty) {
-        return false;
-      }
+          if (id <= 0 || name.isEmpty) {
+            return false;
+          }
 
-      return true;
-    }).toList();
+          return true;
+        })
+        .toList();
 
     _cachedBrandTerms = brands;
     _cachedBrandTermsHideEmpty = hideEmpty;
@@ -1734,16 +1911,17 @@ class ApiService {
       );
 
       final data = _responseMap(response.data);
-      final raw = _firstList([
-        data['categories'],
-        data['data'],
-        response.data,
-      ]);
+      final raw = _firstList([data['categories'], data['data'], response.data]);
 
       final categories = raw
           .whereType<Map>()
-          .map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)))
-          .where((category) => category.id > 0 && !_isForbiddenCategory(category.name))
+          .map(
+            (item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .where(
+            (category) =>
+                category.id > 0 && !_isForbiddenCategory(category.name),
+          )
           .toList();
 
       for (final category in categories) {
@@ -1762,7 +1940,9 @@ class ApiService {
       // Es más lento, pero evita dejar la navegación de marcas rota durante una
       // actualización escalonada de Flutter/PHP.
       if (kDebugMode) {
-        debugPrint('⚠️ /brands/categories no disponible, usando fallback: $error');
+        debugPrint(
+          '⚠️ /brands/categories no disponible, usando fallback: $error',
+        );
       }
 
       final candidates = parent == null
@@ -1791,9 +1971,7 @@ class ApiService {
           final total = _parseInt(root['total']);
           if (total > 0 || products.isNotEmpty) {
             available.add(
-              category.copyWith(
-                count: total > 0 ? total : products.length,
-              ),
+              category.copyWith(count: total > 0 ? total : products.length),
             );
           }
         } catch (_) {
@@ -1941,8 +2119,9 @@ class ApiService {
         : await getMarcaIdPorNombre(brandName);
 
     // Si la búsqueda es amplia, no bloqueamos la pantalla esperando 60/80/100 productos.
-    // Devolvemos 10 rápido y dejamos preparadas las páginas siguientes en caché.
-    final useFastFirstPage = cleanSearch.isNotEmpty &&
+    // Devolvemos 10 rápido; las páginas siguientes se cargarán al desplazarse.
+    final useFastFirstPage =
+        cleanSearch.isNotEmpty &&
         requestedPage == 1 &&
         requestedPerPage > _fastSearchFirstPageSize &&
         !_looksLikeSku(cleanSearch);
@@ -1965,36 +2144,24 @@ class ApiService {
         ? ProductCacheService.searchTtl
         : ProductCacheService.defaultTtl;
 
-    final result = await ProductCacheService().getOrLoadMemory<CatalogProductsResult>(
-      cacheKey,
-      ttl: ttl,
-      loader: () {
-        return _requestCatalogProductsPage(
-          categoryId: categoryId,
-          brandId: effectiveBrandId,
-          brandName: cleanBrandName,
-          search: cleanSearch,
-          page: requestedPage,
-          perPage: effectivePerPage,
-          orderBy: mappedOrderBy,
-          attributeTermIds: attributeTermIds,
-          attributeLabels: attributeLabels,
+    final result = await ProductCacheService()
+        .getOrLoadMemory<CatalogProductsResult>(
+          cacheKey,
+          ttl: ttl,
+          loader: () {
+            return _requestCatalogProductsPage(
+              categoryId: categoryId,
+              brandId: effectiveBrandId,
+              brandName: cleanBrandName,
+              search: cleanSearch,
+              page: requestedPage,
+              perPage: effectivePerPage,
+              orderBy: mappedOrderBy,
+              attributeTermIds: attributeTermIds,
+              attributeLabels: attributeLabels,
+            );
+          },
         );
-      },
-    );
-
-    if (useFastFirstPage && result.hasNextPage) {
-      _startBackgroundSearchPrefetch(
-        categoryId: categoryId,
-        brandId: effectiveBrandId,
-        brandName: cleanBrandName,
-        search: cleanSearch,
-        orderBy: mappedOrderBy,
-        attributeTermIds: attributeTermIds,
-        attributeLabels: attributeLabels,
-        startPage: 2,
-      );
-    }
 
     // Defensa final de catálogo: si el backend devuelve explícitamente un
     // producto de otra marca, nunca lo mostramos dentro de una marca bloqueada.
@@ -2247,16 +2414,10 @@ class ApiService {
   }
 
   static String _normalizeSkuForCompare(String value) {
-    return value
-        .trim()
-        .toUpperCase()
-        .replaceAll(RegExp(r'\s+'), '');
+    return value.trim().toUpperCase().replaceAll(RegExp(r'\s+'), '');
   }
 
-  static Product _withWebsiteResolvedBrand(
-    Product product,
-    String brandName,
-  ) {
+  static Product _withWebsiteResolvedBrand(Product product, String brandName) {
     final cleanBrand = brandName.trim();
     if (cleanBrand.isEmpty) return product;
 
@@ -2265,7 +2426,8 @@ class ApiService {
 
     for (final attribute in product.attributes) {
       final key = _normalizeText(attribute.name);
-      final isBrandAttribute = key == 'marca' ||
+      final isBrandAttribute =
+          key == 'marca' ||
           key == 'marcas' ||
           key == 'fabricante' ||
           key == 'fabricantes' ||
@@ -2289,10 +2451,7 @@ class ApiService {
 
     if (!replaced) {
       nextAttributes.add(
-        ProductAttribute(
-          name: 'Fabricante',
-          options: <String>[cleanBrand],
-        ),
+        ProductAttribute(name: 'Fabricante', options: <String>[cleanBrand]),
       );
     }
 
@@ -2317,7 +2476,10 @@ class ApiService {
         ..._buildSmartSearchParams(clean),
       };
 
-      final response = await _appGet('/context-search', queryParameters: params);
+      final response = await _appGet(
+        '/context-search',
+        queryParameters: params,
+      );
       final result = _catalogResultFromResponse(
         response.data,
         requestedPage: 1,
@@ -2360,7 +2522,8 @@ class ApiService {
     required Map<String, String>? attributeLabels,
   }) async {
     final smartSearchParams = _buildSmartSearchParams(search);
-    final canUseContextSearch = search.trim().isNotEmpty &&
+    final canUseContextSearch =
+        search.trim().isNotEmpty &&
         !_looksLikeSku(search) &&
         page <= 1 &&
         (categoryId == null || categoryId <= 0) &&
@@ -2404,7 +2567,16 @@ class ApiService {
       params['attributeTerms'] = encodedAttributes;
     }
 
+    final watch = Stopwatch()..start();
     final response = await _appGet('/products', queryParameters: params);
+    watch.stop();
+    if (kDebugMode) {
+      debugPrint(
+        'MUNDICAM_API_PRODUCTS_TIMING '
+        'category=${categoryId ?? 0} page=$page size=$perPage '
+        'elapsed_ms=${watch.elapsedMilliseconds}',
+      );
+    }
     final result = _catalogResultFromResponse(
       response.data,
       requestedPage: page,
@@ -2420,11 +2592,7 @@ class ApiService {
       return result;
     }
 
-    return _applyClientSearchRanking(
-      result,
-      search,
-      requestedPerPage: perPage,
-    );
+    return _applyClientSearchRanking(result, search, requestedPerPage: perPage);
   }
 
   String _catalogProductsCacheKey({
@@ -2485,58 +2653,61 @@ class ApiService {
     _backgroundSearchPrefetchRunning.add(prefetchKey);
     cache.markPrewarmRun(prefetchKey);
 
-    unawaited(Future<void>(() async {
-      try {
-        for (var page = startPage;
+    unawaited(
+      Future<void>(() async {
+        try {
+          for (
+            var page = startPage;
             page < startPage + _fastSearchMaxBackgroundPages;
-            page++) {
-          final cacheKey = _catalogProductsCacheKey(
-            categoryId: categoryId,
-            brandId: brandId,
-            brandName: brandName,
-            search: cleanSearch,
-            page: page,
-            perPage: _fastSearchNextPageSize,
-            orderBy: orderBy,
-            attributeTermIds: attributeTermIds,
-          );
-
-          final result = await cache.getOrLoadMemory<CatalogProductsResult>(
-            cacheKey,
-            ttl: ProductCacheService.searchTtl,
-            loader: () {
-              return _requestCatalogProductsPage(
-                categoryId: categoryId,
-                brandId: brandId,
-                brandName: brandName,
-                search: cleanSearch,
-                page: page,
-                perPage: _fastSearchNextPageSize,
-                orderBy: orderBy,
-                attributeTermIds: attributeTermIds,
-                attributeLabels: attributeLabels,
-              );
-            },
-          );
-
-          if (kDebugMode) {
-            debugPrint(
-              '⚡ Precarga buscador "$cleanSearch": page=$page · ${result.products.length} productos',
+            page++
+          ) {
+            final cacheKey = _catalogProductsCacheKey(
+              categoryId: categoryId,
+              brandId: brandId,
+              brandName: brandName,
+              search: cleanSearch,
+              page: page,
+              perPage: _fastSearchNextPageSize,
+              orderBy: orderBy,
+              attributeTermIds: attributeTermIds,
             );
+
+            final result = await cache.getOrLoadMemory<CatalogProductsResult>(
+              cacheKey,
+              ttl: ProductCacheService.searchTtl,
+              loader: () {
+                return _requestCatalogProductsPage(
+                  categoryId: categoryId,
+                  brandId: brandId,
+                  brandName: brandName,
+                  search: cleanSearch,
+                  page: page,
+                  perPage: _fastSearchNextPageSize,
+                  orderBy: orderBy,
+                  attributeTermIds: attributeTermIds,
+                  attributeLabels: attributeLabels,
+                );
+              },
+            );
+
+            if (kDebugMode) {
+              debugPrint(
+                '⚡ Precarga buscador "$cleanSearch": page=$page · ${result.products.length} productos',
+              );
+            }
+
+            if (!result.hasNextPage || result.products.isEmpty) break;
           }
-
-          if (!result.hasNextPage || result.products.isEmpty) break;
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Precarga buscador "$cleanSearch" cancelada: $e');
+          }
+        } finally {
+          _backgroundSearchPrefetchRunning.remove(prefetchKey);
         }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('⚠️ Precarga buscador "$cleanSearch" cancelada: $e');
-        }
-      } finally {
-        _backgroundSearchPrefetchRunning.remove(prefetchKey);
-      }
-    }));
+      }),
+    );
   }
-
 
   Map<String, dynamic> _buildSmartSearchParams(String search) {
     final clean = search.trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -2555,7 +2726,8 @@ class ApiService {
       'prioritize_sku': 1,
       'include_relevance': 1,
       'stock_authority': 'woocommerce',
-      'search_fields': 'sku,title,excerpt,content,brand,categories,attributes,tags',
+      'search_fields':
+          'sku,title,excerpt,content,brand,categories,attributes,tags',
       'token_operator': 'and_or',
       'allow_partial_tokens': 1,
       'normalize_accents': 1,
@@ -2634,9 +2806,9 @@ class ApiService {
       'con',
     };
 
-    final rawTokens = query
-        .toLowerCase()
-        .split(RegExp(r'[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+'));
+    final rawTokens = query.toLowerCase().split(
+      RegExp(r'[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+'),
+    );
 
     final tokens = <String>[];
     for (final raw in rawTokens) {
@@ -2774,7 +2946,10 @@ class ApiService {
         page: 1,
         perPage: perPage,
       );
-      return _sortSuggestionsForQuery(result.products, clean).take(perPage).toList();
+      return _sortSuggestionsForQuery(
+        result.products,
+        clean,
+      ).take(perPage).toList();
     } catch (e) {
       if (kDebugMode) {
         debugPrint('⚠️ Predictivo rápido falló: $e');
@@ -2823,8 +2998,26 @@ class ApiService {
 
   List<String> _looseSearchTokens(String query) {
     const ignored = <String>{
-      'de', 'del', 'la', 'el', 'los', 'las', 'para', 'por', 'con', 'sin',
-      'un', 'una', 'unos', 'unas', 'y', 'o', 'a', 'al', 'the', 'and',
+      'de',
+      'del',
+      'la',
+      'el',
+      'los',
+      'las',
+      'para',
+      'por',
+      'con',
+      'sin',
+      'un',
+      'una',
+      'unos',
+      'unas',
+      'y',
+      'o',
+      'a',
+      'al',
+      'the',
+      'and',
     };
 
     final normalized = query
@@ -2978,11 +3171,18 @@ class ApiService {
     final haystack = _productSearchHaystack(product);
     final sku = _normalizeText(product.sku);
     final name = _normalizeText(product.name);
-    final categories = _normalizeText('${product.categoryNames.join(' ')} ${product.categorySlugs.join(' ')}');
-    final attributes = _normalizeText(product.attributes.map((a) => '${a.name} ${a.options.join(' ')}').join(' '));
+    final categories = _normalizeText(
+      '${product.categoryNames.join(' ')} ${product.categorySlugs.join(' ')}',
+    );
+    final attributes = _normalizeText(
+      product.attributes
+          .map((a) => '${a.name} ${a.options.join(' ')}')
+          .join(' '),
+    );
     final primary = '$sku $name $categories $attributes';
 
-    final hasCameraSignal = primary.contains('camara') ||
+    final hasCameraSignal =
+        primary.contains('camara') ||
         primary.contains('camera') ||
         primary.contains('cctv') ||
         primary.contains('videovigilancia') ||
@@ -3002,7 +3202,8 @@ class ApiService {
 
     if (!hasCameraSignal) return false;
 
-    final looksLikeRecorder = haystack.contains('grabador') ||
+    final looksLikeRecorder =
+        haystack.contains('grabador') ||
         haystack.contains('videograbador') ||
         sku.startsWith('nvr') ||
         sku.startsWith('xvr') ||
@@ -3016,13 +3217,18 @@ class ApiService {
       return false;
     }
 
-    final looksLikeAlarmOnly = haystack.contains('alarma') ||
+    final looksLikeAlarmOnly =
+        haystack.contains('alarma') ||
         haystack.contains('hub') ||
         haystack.contains('detector') ||
         haystack.contains('sirena') ||
         haystack.contains('teclado');
-    if (looksLikeAlarmOnly && !sku.startsWith('ipc') && !sku.startsWith('hac')) {
-      return name.contains('camara') || name.contains('camera') || categories.contains('camara');
+    if (looksLikeAlarmOnly &&
+        !sku.startsWith('ipc') &&
+        !sku.startsWith('hac')) {
+      return name.contains('camara') ||
+          name.contains('camera') ||
+          categories.contains('camara');
     }
 
     return true;
@@ -3034,7 +3240,8 @@ class ApiService {
 
     final rawQuery = _normalizeText(cleanQuery);
     final sku = _normalizeText(product.sku);
-    if (sku.isNotEmpty && (sku == rawQuery || sku.contains(rawQuery))) return true;
+    if (sku.isNotEmpty && (sku == rawQuery || sku.contains(rawQuery)))
+      return true;
 
     if (_queryHasCameraIntent(cleanQuery) && !_isCameraProduct(product)) {
       return false;
@@ -3074,8 +3281,10 @@ class ApiService {
   bool _shouldRunExpandedSearch(String query, List<Product> primary) {
     if (query.trim().length < 3) return false;
     if (_looksLikeSku(query)) return false;
-    if (_queryHasCameraIntent(query) && _knownBrandInSearch(query) != null) return true;
-    if (primary.length < 8 && _looseSearchTokens(query).length >= 2) return true;
+    if (_queryHasCameraIntent(query) && _knownBrandInSearch(query) != null)
+      return true;
+    if (primary.length < 8 && _looseSearchTokens(query).length >= 2)
+      return true;
     return false;
   }
 
@@ -3118,7 +3327,14 @@ class ApiService {
 
     for (final token in tokens) {
       if (token.length >= 4 &&
-          !<String>{'camara', 'camaras', 'camera', 'cameras', 'video', 'seguridad'}.contains(token)) {
+          !<String>{
+            'camara',
+            'camaras',
+            'camera',
+            'cameras',
+            'video',
+            'seguridad',
+          }.contains(token)) {
         add(token);
       }
     }
@@ -3137,8 +3353,14 @@ class ApiService {
       final name = _normalizeText(product.name);
       final brandName = _normalizeText(product.brandName ?? '');
       final description = _normalizeText(product.shortDescription);
-      final categories = _normalizeText('${product.categoryNames.join(' ')} ${product.categorySlugs.join(' ')}');
-      final attributes = _normalizeText(product.attributes.map((a) => '${a.name} ${a.options.join(' ')}').join(' '));
+      final categories = _normalizeText(
+        '${product.categoryNames.join(' ')} ${product.categorySlugs.join(' ')}',
+      );
+      final attributes = _normalizeText(
+        product.attributes
+            .map((a) => '${a.name} ${a.options.join(' ')}')
+            .join(' '),
+      );
       final text = '$sku $name $brandName $description $categories $attributes';
       var value = 0;
 
@@ -3157,7 +3379,11 @@ class ApiService {
       }
 
       if (cameraIntent && _isCameraProduct(product)) value += 850;
-      if (_queryHasRecorderIntent(query) && (sku.startsWith('nvr') || sku.startsWith('xvr') || text.contains('grabador'))) value += 750;
+      if (_queryHasRecorderIntent(query) &&
+          (sku.startsWith('nvr') ||
+              sku.startsWith('xvr') ||
+              text.contains('grabador')))
+        value += 750;
 
       for (final token in queryTokens) {
         final compactToken = _normalizeText(token);
@@ -3170,9 +3396,17 @@ class ApiService {
         if (description.contains(compactToken)) value += 55;
       }
 
-      if (q.contains('dom') && (text.contains('domo') || text.contains('dome') || text.contains('minidomo'))) value += 420;
-      if ((q.contains('turret') || q.contains('turet')) && text.contains('turret')) value += 420;
-      if ((q.contains('bullet') || q.contains('tubular')) && (text.contains('bullet') || text.contains('tubular'))) value += 420;
+      if (q.contains('dom') &&
+          (text.contains('domo') ||
+              text.contains('dome') ||
+              text.contains('minidomo')))
+        value += 420;
+      if ((q.contains('turret') || q.contains('turet')) &&
+          text.contains('turret'))
+        value += 420;
+      if ((q.contains('bullet') || q.contains('tubular')) &&
+          (text.contains('bullet') || text.contains('tubular')))
+        value += 420;
       if (q.contains('ptz') && text.contains('ptz')) value += 380;
       if (q.contains('poe') && text.contains('poe')) value += 240;
       if (q.contains('wifi') && text.contains('wifi')) value += 240;
@@ -3235,7 +3469,6 @@ class ApiService {
     return const <Product>[];
   }
 
-
   Future<List<Product>> _hydrateInternalStockDetailsIfAllowed(
     List<Product> products,
   ) async {
@@ -3283,7 +3516,9 @@ class ApiService {
     try {
       final response = await _appGet('/products/$id');
       final data = _responseMap(response.data);
-      final productMap = _asMap(data['product'] ?? data['data'] ?? response.data);
+      final productMap = _asMap(
+        data['product'] ?? data['data'] ?? response.data,
+      );
       if (productMap.isEmpty) return null;
       return Product.fromJson(productMap);
     } catch (e) {
@@ -3301,30 +3536,80 @@ class ApiService {
     int? brandId,
     String? search,
     bool forceRefresh = false,
+    bool reportErrors = false,
   }) async {
     if (categoryId <= 0) return [];
 
-    final cacheKey = '$catalogCacheIdentity|cat:$categoryId|brandId:${brandId ?? 0}|search:${search?.trim().toLowerCase() ?? ''}';
+    final cacheKey =
+        '$catalogCacheIdentity|cat:$categoryId|brandId:${brandId ?? 0}|search:${search?.trim().toLowerCase() ?? ''}';
     final cached = _catalogFiltersCache[cacheKey];
     if (!forceRefresh && cached != null && cached.isValid) {
       return cached.groups;
     }
 
     try {
-      final response = await _dio.get(
-        '$_filtersNamespace/catalog-filters',
-        queryParameters: _cleanQuery({
-          'category_id': categoryId,
-          'include_subcategories': 1,
-          if (brandId != null && brandId > 0) 'brand_id': brandId,
-          if (brandId != null && brandId > 0) 'brandId': brandId,
-          if ((search ?? '').trim().isNotEmpty) 'search': search!.trim(),
-        }),
-        options: _appOptions,
+      final watch = Stopwatch()..start();
+      final legacyQuery = CatalogFilterRequest.params(
+        categoryId: categoryId,
+        brandId: brandId,
+        search: search,
+      );
+      final fastQuery = CatalogFilterRequest.params(
+        categoryId: categoryId,
+        brandId: brandId,
+        search: search,
+        fastFacetsOnly: _useFastFacetsOnlyQa,
       );
 
-      final root = _responseMap(response.data);
-      final data = _asMap(root['data']);
+      // Nunca probar el modo rápido si el flag está desactivado.
+      // Solo un error explícito HTTP 4xx por incompatibilidad del modo
+      // activa una segunda consulta histórica, siempre autenticada.
+      var usedLegacyFallback = false;
+      Response<dynamic> response;
+      try {
+        response = await _dio.get(
+          '$_filtersNamespace/catalog-filters',
+          queryParameters: _cleanQuery(fastQuery),
+          options: _appOptions,
+        );
+      } on DioException catch (error) {
+        final status = error.response?.statusCode ?? 0;
+        if (!_useFastFacetsOnlyQa || status != 400 && status != 422) {
+          rethrow;
+        }
+        usedLegacyFallback = true;
+        response = await _dio.get(
+          '$_filtersNamespace/catalog-filters',
+          queryParameters: _cleanQuery(legacyQuery),
+          options: _appOptions,
+        );
+      }
+
+      // Si algún PHP antiguo acepta el parámetro pero no ofrece un contrato
+      // de facetas válido, usar la respuesta histórica sin inventar filtros.
+      var root = _responseMap(response.data);
+      var data = _asMap(root['data']);
+      if (_useFastFacetsOnlyQa &&
+          !usedLegacyFallback &&
+          !CatalogFilterResponseContract.isUsable(root)) {
+        usedLegacyFallback = true;
+        response = await _dio.get(
+          '$_filtersNamespace/catalog-filters',
+          queryParameters: _cleanQuery(legacyQuery),
+          options: _appOptions,
+        );
+        root = _responseMap(response.data);
+        data = _asMap(root['data']);
+      }
+
+      watch.stop();
+      if (kDebugMode) {
+        debugPrint(
+          'MUNDICAM_API_FILTERS_TIMING '
+          'category=$categoryId elapsed_ms=${watch.elapsedMilliseconds} '
+          'facets_qa=$_useFastFacetsOnlyQa fallback=$usedLegacyFallback',
+        );
+      }
       final rawGroups = _firstList([data['filters'], root['filters']]);
       final groups = <CatalogFilterGroup>[];
 
@@ -3333,7 +3618,9 @@ class ApiService {
         final taxonomy = group['taxonomy']?.toString().trim() ?? '';
         final options = <CatalogFilterOption>[];
 
-        for (final rawOption in _firstList([group['options']]).whereType<Map>()) {
+        for (final rawOption in _firstList([
+          group['options'],
+        ]).whereType<Map>()) {
           final option = Map<String, dynamic>.from(rawOption);
           final id = _parseInt(option['id']);
           final name = option['name']?.toString().trim() ?? '';
@@ -3369,6 +3656,9 @@ class ApiService {
       return groups;
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ Error cargando filtros catálogo: $e');
+      // El drawer distingue un catálogo legítimamente sin filtros de una
+      // caída de red. Otros consumidores conservan el fallback anterior.
+      if (reportErrors) rethrow;
       return [];
     }
   }
@@ -3391,9 +3681,10 @@ class ApiService {
 
         return raw
             .whereType<Map>()
-            .map((item) => PromotionModel.fromJson(
-                  Map<String, dynamic>.from(item),
-                ))
+            .map(
+              (item) =>
+                  PromotionModel.fromJson(Map<String, dynamic>.from(item)),
+            )
             .where((item) => item.id > 0 && item.title.isNotEmpty)
             .toList();
       } on DioException catch (error) {
@@ -3459,15 +3750,10 @@ class ApiService {
           if (raw is! Map) continue;
           final item = Map<String, dynamic>.from(raw);
           final url = item['url']?.toString().trim() ?? '';
-          final title = _promotionPlainText(
-            item['title']?.toString() ?? '',
-          );
+          final title = _promotionPlainText(item['title']?.toString() ?? '');
 
           if (url.isNotEmpty && title.isNotEmpty) {
-            candidates.add(<String, String>{
-              'title': title,
-              'url': url,
-            });
+            candidates.add(<String, String>{'title': title, 'url': url});
           }
         }
       }
@@ -3480,15 +3766,10 @@ class ApiService {
       }
     }
 
-    final restMatch = _bestPromotionWebCandidate(
-      promotion.title,
-      candidates,
-    );
+    final restMatch = _bestPromotionWebCandidate(promotion.title, candidates);
     if (restMatch != null) {
       if (kDebugMode) {
-        debugPrint(
-          '✅ Promoción web resuelta por WordPress REST: $restMatch',
-        );
+        debugPrint('✅ Promoción web resuelta por WordPress REST: $restMatch');
       }
       return restMatch;
     }
@@ -3776,10 +4057,7 @@ class ApiService {
       if (root['success'] == false) return const <Product>[];
 
       final data = _asMap(root['data']);
-      final rawProducts = _firstList([
-        root['products'],
-        data['products'],
-      ]);
+      final rawProducts = _firstList([root['products'], data['products']]);
 
       final products = <Product>[];
       for (final raw in rawProducts.whereType<Map>()) {
@@ -3820,10 +4098,7 @@ class ApiService {
       final root = _responseMap(response.data);
       if (root['success'] == false) return null;
 
-      final raw = _firstList([
-        root['cart_items'],
-        root['items'],
-      ]);
+      final raw = _firstList([root['cart_items'], root['items']]);
 
       return raw
           .whereType<Map>()
@@ -3843,11 +4118,14 @@ class ApiService {
     int variationId = 0,
   }) async {
     try {
-      final response = await _appPost('/cart/update', data: {
-        'product_id': productId,
-        if (variationId > 0) 'variation_id': variationId,
-        'quantity': quantity,
-      });
+      final response = await _appPost(
+        '/cart/update',
+        data: {
+          'product_id': productId,
+          if (variationId > 0) 'variation_id': variationId,
+          'quantity': quantity,
+        },
+      );
       return _responseMap(response.data)['success'] != false;
     } catch (error) {
       if (kDebugMode) {
@@ -3862,10 +4140,13 @@ class ApiService {
     int variationId = 0,
   }) async {
     try {
-      final response = await _appPost('/cart/remove', data: {
-        'product_id': productId,
-        if (variationId > 0) 'variation_id': variationId,
-      });
+      final response = await _appPost(
+        '/cart/remove',
+        data: {
+          'product_id': productId,
+          if (variationId > 0) 'variation_id': variationId,
+        },
+      );
       return _responseMap(response.data)['success'] != false;
     } catch (error) {
       if (kDebugMode) {
@@ -3884,17 +4165,20 @@ class ApiService {
     required int quantity,
   }) async {
     try {
-      final response = await _appPost('/cart/add', data: {
-        'product_id': productId,
-        'quantity': quantity <= 0 ? 1 : quantity,
-      });
+      final response = await _appPost(
+        '/cart/add',
+        data: {
+          'product_id': productId,
+          'quantity': quantity <= 0 ? 1 : quantity,
+        },
+      );
       return _responseMap(response.data)['success'] != false;
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudo sincronizar carrito remoto: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudo sincronizar carrito remoto: $e');
       return false;
     }
   }
-
 
   Future<bool> clearRemoteCart() async {
     try {
@@ -3905,8 +4189,6 @@ class ApiService {
       return false;
     }
   }
-
-
 
   /// Valida el código contra el carrito real en WooCommerce.
   /// El resultado se conserva en Flutter solo para la cesta actual; el servidor
@@ -3928,10 +4210,10 @@ class ApiService {
     }
 
     try {
-      final response = await _appPost('/cart/coupon/validate', data: {
-        'coupon_code': cleanCode,
-        'line_items': cleanItems,
-      });
+      final response = await _appPost(
+        '/cart/coupon/validate',
+        data: {'coupon_code': cleanCode, 'line_items': cleanItems},
+      );
 
       final root = _responseMap(response.data);
       if (root['success'] == false || root['valid'] == false) {
@@ -3970,10 +4252,10 @@ class ApiService {
     if (cleanItems.isEmpty) return <ShippingOption>[];
 
     try {
-      final response = await _appPost('/shipping/methods', data: {
-        'line_items': cleanItems,
-        'shipping_address': shippingAddress,
-      });
+      final response = await _appPost(
+        '/shipping/methods',
+        data: {'line_items': cleanItems, 'shipping_address': shippingAddress},
+      );
       final root = _responseMap(response.data);
       final nested = _asMap(root['data']);
       final rawOptions = _firstList([
@@ -3992,7 +4274,9 @@ class ApiService {
       if (kDebugMode) {
         final rootDestination = _asMap(root['destination']);
         final nestedDestination = _asMap(nested['destination']);
-        final destination = rootDestination.isNotEmpty ? rootDestination : nestedDestination;
+        final destination = rootDestination.isNotEmpty
+            ? rootDestination
+            : nestedDestination;
         debugPrint(
           '🚚 Métodos de envío recibidos: ${options.length}. Destino: $destination',
         );
@@ -4000,10 +4284,14 @@ class ApiService {
 
       return options;
     } on DioException catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudieron cargar métodos de envío: ${_mapDioError(e)}');
+      if (kDebugMode)
+        debugPrint(
+          '⚠️ No se pudieron cargar métodos de envío: ${_mapDioError(e)}',
+        );
       return <ShippingOption>[];
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudieron cargar métodos de envío: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudieron cargar métodos de envío: $e');
       return <ShippingOption>[];
     }
   }
@@ -4018,26 +4306,35 @@ class ApiService {
     if (cleanItems.isEmpty) return null;
 
     try {
-      final response = await _appPost('/order/preview', data: {
-        'line_items': cleanItems,
-        'shipping_address': shippingAddress,
-        if ((shippingMethodId ?? '').trim().isNotEmpty) ...{
-          'shipping_method_id': shippingMethodId!.trim(),
-          'shipping_option_id': shippingMethodId!.trim(),
+      final response = await _appPost(
+        '/order/preview',
+        data: {
+          'line_items': cleanItems,
+          'shipping_address': shippingAddress,
+          if ((shippingMethodId ?? '').trim().isNotEmpty) ...{
+            'shipping_method_id': shippingMethodId!.trim(),
+            'shipping_option_id': shippingMethodId!.trim(),
+          },
+          if ((couponCode ?? '').trim().isNotEmpty)
+            'coupon_code': couponCode!.trim(),
         },
-        if ((couponCode ?? '').trim().isNotEmpty)
-          'coupon_code': couponCode!.trim(),
-      });
+      );
       final root = _responseMap(response.data);
       final nested = _asMap(root['data']);
-      final data = nested.isNotEmpty && nested.containsKey('totals') ? nested : root;
+      final data = nested.isNotEmpty && nested.containsKey('totals')
+          ? nested
+          : root;
       if (data['success'] == false) return null;
       return OrderPreviewResult.fromJson(data);
     } on DioException catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudo calcular resumen de pedido: ${_mapDioError(e)}');
+      if (kDebugMode)
+        debugPrint(
+          '⚠️ No se pudo calcular resumen de pedido: ${_mapDioError(e)}',
+        );
       return null;
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudo calcular resumen de pedido: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudo calcular resumen de pedido: $e');
       return null;
     }
   }
@@ -4050,9 +4347,9 @@ class ApiService {
     }
 
     // Evita duplicar el marcador si un flujo futuro ya lo hubiera añadido.
-    if (additionalNote
-        .toLowerCase()
-        .contains(_appOrderCustomerNotePrefix.toLowerCase())) {
+    if (additionalNote.toLowerCase().contains(
+      _appOrderCustomerNotePrefix.toLowerCase(),
+    )) {
       return additionalNote;
     }
 
@@ -4066,19 +4363,22 @@ class ApiService {
     try {
       final lineItems = _sanitizeLineItems(orderData['line_items']);
       if (lineItems.isEmpty) {
-        return OrderCreateResult.failure('No hay productos válidos para crear el pedido.');
+        return OrderCreateResult.failure(
+          'No hay productos válidos para crear el pedido.',
+        );
       }
 
       final appOrderData = Map<String, dynamic>.from(orderData);
-      appOrderData['customer_note'] =
-          _withAppOrderCustomerNote(appOrderData['customer_note']);
+      appOrderData['customer_note'] = _withAppOrderCustomerNote(
+        appOrderData['customer_note'],
+      );
 
-      final enrichedOrderData =
-          await MundicamAnalyticsService.instance.enrichPayload(appOrderData);
-      final response = await _appPost('/order/create', data: {
-        ...enrichedOrderData,
-        'line_items': lineItems,
-      });
+      final enrichedOrderData = await MundicamAnalyticsService.instance
+          .enrichPayload(appOrderData);
+      final response = await _appPost(
+        '/order/create',
+        data: {...enrichedOrderData, 'line_items': lineItems},
+      );
 
       final data = _responseMap(response.data);
       if (data['success'] == false) {
@@ -4091,7 +4391,9 @@ class ApiService {
     } on DioException catch (e) {
       return OrderCreateResult.failure(_mapDioError(e));
     } catch (e) {
-      return OrderCreateResult.failure(e.toString().replaceFirst('Exception: ', ''));
+      return OrderCreateResult.failure(
+        e.toString().replaceFirst('Exception: ', ''),
+      );
     }
   }
 
@@ -4107,10 +4409,10 @@ class ApiService {
     if (orderId <= 0 || orderKey.trim().isEmpty) return null;
 
     try {
-      final response = await _appPost('/order/payment-url', data: {
-        'order_id': orderId,
-        'order_key': orderKey.trim(),
-      });
+      final response = await _appPost(
+        '/order/payment-url',
+        data: {'order_id': orderId, 'order_key': orderKey.trim()},
+      );
       final data = _responseMap(response.data);
       if (data['success'] == false) return null;
       return _firstNonEmptyString([
@@ -4119,7 +4421,8 @@ class ApiService {
         data['redirect_url'],
       ]);
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudo obtener URL segura de pago: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudo obtener URL segura de pago: $e');
       return null;
     }
   }
@@ -4174,11 +4477,14 @@ class ApiService {
 
       for (final item in cleanItems) {
         final variationId = _parseInt(item['variation_id']);
-        final addResponse = await _appPost('/quote/add', data: {
-          'product_id': item['product_id'],
-          if (variationId > 0) 'variation_id': variationId,
-          'quantity': item['quantity'],
-        });
+        final addResponse = await _appPost(
+          '/quote/add',
+          data: {
+            'product_id': item['product_id'],
+            if (variationId > 0) 'variation_id': variationId,
+            'quantity': item['quantity'],
+          },
+        );
         final addData = _responseMap(addResponse.data);
         if (addData['success'] == false) {
           return QuoteCreateResult(
@@ -4186,35 +4492,44 @@ class ApiService {
             quoteId: 0,
             status: '',
             total: 0,
-            message: _firstNonEmptyString([addData['message']]) ??
+            message:
+                _firstNonEmptyString([addData['message']]) ??
                 'No se pudo añadir un producto al presupuesto.',
             rawData: addData,
           );
         }
       }
 
-      final analyticsContext =
-          await MundicamAnalyticsService.instance.requestContext();
-      final createResponse = await _appPost('/quote/create', data: {
-        if ((customerNote ?? '').trim().isNotEmpty)
-          'customer_note': customerNote!.trim(),
-        if ((sourceLocalQuoteUuid ?? '').trim().isNotEmpty)
-          'source_local_quote_uuid': sourceLocalQuoteUuid!.trim(),
-        ...analyticsContext,
-      });
+      final analyticsContext = await MundicamAnalyticsService.instance
+          .requestContext();
+      final createResponse = await _appPost(
+        '/quote/create',
+        data: {
+          if ((customerNote ?? '').trim().isNotEmpty)
+            'customer_note': customerNote!.trim(),
+          if ((sourceLocalQuoteUuid ?? '').trim().isNotEmpty)
+            'source_local_quote_uuid': sourceLocalQuoteUuid!.trim(),
+          ...analyticsContext,
+        },
+      );
       final createData = _responseMap(createResponse.data);
       final result = QuoteCreateResult.fromJson(createData);
       if (kDebugMode) {
-        debugPrint('✅ Presupuesto creado en servidor. ID: ${result.quoteId} · Estado: ${result.status.isEmpty ? 'sin estado' : result.status}');
+        debugPrint(
+          '✅ Presupuesto creado en servidor. ID: ${result.quoteId} · Estado: ${result.status.isEmpty ? 'sin estado' : result.status}',
+        );
         if (result.status == 'pending') {
-          debugPrint('⚠️ El servidor ha devuelto pending. Comprueba que el PHP 1.9.27 esté activo.');
+          debugPrint(
+            '⚠️ El servidor ha devuelto pending. Comprueba que el PHP 1.9.27 esté activo.',
+          );
         }
       }
       return result;
     } on DioException catch (e) {
       throw Exception(_mapDioError(e));
     } catch (e) {
-      if (kDebugMode) debugPrint('❌ Error crearPresupuestoConProductosDetalle: $e');
+      if (kDebugMode)
+        debugPrint('❌ Error crearPresupuestoConProductosDetalle: $e');
       return QuoteCreateResult(
         success: false,
         quoteId: 0,
@@ -4237,10 +4552,13 @@ class ApiService {
     if (productId <= 0) return false;
 
     try {
-      final addResponse = await _appPost('/quote/add', data: {
-        'product_id': productId,
-        'quantity': quantity <= 0 ? 1 : quantity,
-      });
+      final addResponse = await _appPost(
+        '/quote/add',
+        data: {
+          'product_id': productId,
+          'quantity': quantity <= 0 ? 1 : quantity,
+        },
+      );
 
       final addData = _responseMap(addResponse.data);
       if (addData['success'] == false) return false;
@@ -4258,26 +4576,31 @@ class ApiService {
           dedupeWindow: const Duration(seconds: 2),
         ),
       );
-      final analyticsContext =
-          await MundicamAnalyticsService.instance.requestContext();
-      final createResponse = await _appPost('/quote/create', data: {
-        if ((customerNote ?? '').trim().isNotEmpty)
-          'customer_note': customerNote!.trim(),
-        ...analyticsContext,
-      });
+      final analyticsContext = await MundicamAnalyticsService.instance
+          .requestContext();
+      final createResponse = await _appPost(
+        '/quote/create',
+        data: {
+          if ((customerNote ?? '').trim().isNotEmpty)
+            'customer_note': customerNote!.trim(),
+          ...analyticsContext,
+        },
+      );
 
       final createData = _responseMap(createResponse.data);
       final quoteData = _asMap(createData['quote']);
-      final status = (_firstNonEmptyString([
-            createData['status'],
-            quoteData['status'],
-          ]) ??
-          '')
-          .replaceFirst(RegExp(r'^wc-'), '');
+      final status =
+          (_firstNonEmptyString([createData['status'], quoteData['status']]) ??
+                  '')
+              .replaceFirst(RegExp(r'^wc-'), '');
       if (kDebugMode) {
-        debugPrint('✅ Presupuesto creado en servidor. Estado: ${status.isEmpty ? 'sin estado' : status}');
+        debugPrint(
+          '✅ Presupuesto creado en servidor. Estado: ${status.isEmpty ? 'sin estado' : status}',
+        );
         if (status == 'pending') {
-          debugPrint('⚠️ El servidor ha devuelto pending. Comprueba que el PHP 1.9.26 esté activo.');
+          debugPrint(
+            '⚠️ El servidor ha devuelto pending. Comprueba que el PHP 1.9.26 esté activo.',
+          );
         }
       }
       return createData['success'] != false;
@@ -4297,13 +4620,16 @@ class ApiService {
     int lineItemId = 0,
   }) async {
     try {
-      final response = await _appPost('/quote/update', data: {
-        'order_id': orderId,
-        'product_id': productId,
-        'variation_id': variationId,
-        if (lineItemId > 0) 'line_item_id': lineItemId,
-        'quantity': quantity <= 0 ? 1 : quantity,
-      });
+      final response = await _appPost(
+        '/quote/update',
+        data: {
+          'order_id': orderId,
+          'product_id': productId,
+          'variation_id': variationId,
+          if (lineItemId > 0) 'line_item_id': lineItemId,
+          'quantity': quantity <= 0 ? 1 : quantity,
+        },
+      );
       return _responseMap(response.data)['success'] != false;
     } catch (_) {
       return false;
@@ -4315,9 +4641,10 @@ class ApiService {
     required int productId,
   }) async {
     try {
-      final response = await _appPost('/quote/remove', data: {
-        'product_id': productId,
-      });
+      final response = await _appPost(
+        '/quote/remove',
+        data: {'product_id': productId},
+      );
       return _responseMap(response.data)['success'] != false;
     } catch (_) {
       return false;
@@ -4379,14 +4706,17 @@ class ApiService {
 
   Future<List<OrderMundicam>> getOrders(String customerEmail) async {
     try {
-      final response = await _appGet('/orders', queryParameters: {
-        'per_page': 50,
-      });
+      final response = await _appGet(
+        '/orders',
+        queryParameters: {'per_page': 50},
+      );
       final data = _responseMap(response.data);
       final raw = _firstList([data['orders'], data['data']]);
       return raw
           .whereType<Map>()
-          .map((item) => OrderMundicam.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) => OrderMundicam.fromJson(Map<String, dynamic>.from(item)),
+          )
           .toList();
     } catch (e) {
       if (kDebugMode) debugPrint('❌ Error getOrders: $e');
@@ -4401,13 +4731,18 @@ class ApiService {
     if (orderId <= 0) return null;
 
     try {
-      final response = await _appGet('/order/status', queryParameters: {
-        'order_id': orderId,
-        if ((orderKey ?? '').trim().isNotEmpty) 'order_key': orderKey!.trim(),
-      });
+      final response = await _appGet(
+        '/order/status',
+        queryParameters: {
+          'order_id': orderId,
+          if ((orderKey ?? '').trim().isNotEmpty) 'order_key': orderKey!.trim(),
+        },
+      );
       final root = _responseMap(response.data);
       final nested = _asMap(root['data']);
-      final data = nested.isNotEmpty && nested.containsKey('status') ? nested : root;
+      final data = nested.isNotEmpty && nested.containsKey('status')
+          ? nested
+          : root;
       if (data['success'] == false) return null;
       return data;
     } catch (e) {
@@ -4423,10 +4758,13 @@ class ApiService {
     if (orderId <= 0) return null;
 
     try {
-      final response = await _appGet('/order/detail', queryParameters: {
-        'order_id': orderId,
-        if ((orderKey ?? '').trim().isNotEmpty) 'order_key': orderKey!.trim(),
-      });
+      final response = await _appGet(
+        '/order/detail',
+        queryParameters: {
+          'order_id': orderId,
+          if ((orderKey ?? '').trim().isNotEmpty) 'order_key': orderKey!.trim(),
+        },
+      );
       final root = _responseMap(response.data);
       final nested = _asMap(root['order']);
       final data = nested.isNotEmpty ? nested : _asMap(root['data']);
@@ -4443,9 +4781,10 @@ class ApiService {
     if (cleanOrderId.isEmpty) return null;
 
     try {
-      final response = await _appGet('/order/detail', queryParameters: {
-        'order_id': cleanOrderId,
-      });
+      final response = await _appGet(
+        '/order/detail',
+        queryParameters: {'order_id': cleanOrderId},
+      );
       final root = _responseMap(response.data);
       final nested = _asMap(root['order']);
       final data = nested.isNotEmpty ? nested : _asMap(root['data']);
@@ -4453,7 +4792,8 @@ class ApiService {
         return data;
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudo buscar detalle en /order/detail: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudo buscar detalle en /order/detail: $e');
     }
 
     // Para presupuestos web necesitamos las líneas de producto. /order/status
@@ -4475,11 +4815,15 @@ class ApiService {
         }
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudo buscar presupuesto completo en /quotes: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudo buscar presupuesto completo en /quotes: $e');
     }
 
     try {
-      final response = await _appGet('/orders', queryParameters: {'per_page': 50});
+      final response = await _appGet(
+        '/orders',
+        queryParameters: {'per_page': 50},
+      );
       final data = _responseMap(response.data);
       final raw = _firstList([data['orders'], data['data']]);
       for (final item in raw.whereType<Map>()) {
@@ -4489,7 +4833,8 @@ class ApiService {
         }
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ No se pudo buscar pedido completo en /orders: $e');
+      if (kDebugMode)
+        debugPrint('⚠️ No se pudo buscar pedido completo en /orders: $e');
     }
 
     final status = await getOrderStatus(orderId: _parseInt(cleanOrderId));
@@ -4505,14 +4850,15 @@ class ApiService {
       final raw = _firstList([data['quotes'], data['data']]);
       return raw
           .whereType<Map>()
-          .map((item) => QuoteMundicam.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) => QuoteMundicam.fromJson(Map<String, dynamic>.from(item)),
+          )
           .toList();
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ Presupuestos App API no disponibles: $e');
       return [];
     }
   }
-
 
   Future<Map<String, dynamic>> prepararPresupuestoEnCarrito({
     required int quoteId,
@@ -4522,9 +4868,10 @@ class ApiService {
     }
 
     try {
-      final response = await _appPost('/quote/prepare-cart', data: {
-        'quote_id': quoteId,
-      });
+      final response = await _appPost(
+        '/quote/prepare-cart',
+        data: {'quote_id': quoteId},
+      );
       final data = _responseMap(response.data);
       if (data['success'] == false || data['cart_ready'] != true) {
         throw Exception(
@@ -4546,15 +4893,18 @@ class ApiService {
     }
 
     try {
-      final response = await _appPost('/quote/accept-and-pay', data: {
-        'quote_id': quoteId,
-      });
+      final response = await _appPost(
+        '/quote/accept-and-pay',
+        data: {'quote_id': quoteId},
+      );
       final data = _responseMap(response.data);
       final result = QuoteAcceptPayResult.fromJson(data);
       if (!result.success) {
-        throw Exception(result.message.isNotEmpty
-            ? result.message
-            : 'No se pudo preparar el pago del presupuesto.');
+        throw Exception(
+          result.message.isNotEmpty
+              ? result.message
+              : 'No se pudo preparar el pago del presupuesto.',
+        );
       }
       return result;
     } on DioException catch (e) {
@@ -4571,10 +4921,10 @@ class ApiService {
     }
 
     try {
-      final response = await _appPost('/quote/cancel-checkout', data: {
-        'order_id': orderId,
-        'order_key': orderKey.trim(),
-      });
+      final response = await _appPost(
+        '/quote/cancel-checkout',
+        data: {'order_id': orderId, 'order_key': orderKey.trim()},
+      );
       final data = _responseMap(response.data);
       if (data['success'] == false) {
         throw Exception(
@@ -4597,10 +4947,10 @@ class ApiService {
     }
 
     try {
-      final response = await _appPost('/order/cancel', data: {
-        'order_id': orderId,
-        'order_key': orderKey.trim(),
-      });
+      final response = await _appPost(
+        '/order/cancel',
+        data: {'order_id': orderId, 'order_key': orderKey.trim()},
+      );
       final data = _responseMap(response.data);
       final orderData = _asMap(data['order']);
       if (data['success'] == false || orderData.isEmpty) {
@@ -4615,17 +4965,16 @@ class ApiService {
     }
   }
 
-  Future<LocalQuote> devolverPresupuestoALocal({
-    required int quoteId,
-  }) async {
+  Future<LocalQuote> devolverPresupuestoALocal({required int quoteId}) async {
     if (quoteId <= 0) {
       throw Exception('No se pudo identificar el presupuesto.');
     }
 
     try {
-      final response = await _appPost('/quote/return-local', data: {
-        'quote_id': quoteId,
-      });
+      final response = await _appPost(
+        '/quote/return-local',
+        data: {'quote_id': quoteId},
+      );
       final data = _responseMap(response.data);
       final localData = _asMap(data['local_quote']);
       if (data['success'] == false || localData.isEmpty) {
@@ -4651,9 +5000,7 @@ class ApiService {
     try {
       final response = await _appPost(
         '/account/data-change-request',
-        data: {
-          'requested_changes': clean,
-        },
+        data: {'requested_changes': clean},
       );
       final data = _responseMap(response.data);
       final message = data['message']?.toString().trim() ?? '';
@@ -4672,9 +5019,10 @@ class ApiService {
 
   Future<AccountDeleteRequestResult> solicitarInhabilitacionCuenta() async {
     try {
-      final response = await _appPost('/account/disable-request', data: {
-        'confirm': true,
-      });
+      final response = await _appPost(
+        '/account/disable-request',
+        data: {'confirm': true},
+      );
       final data = _responseMap(response.data);
       final result = AccountDeleteRequestResult.fromJson(data);
       final serverConfirmedBlock =
@@ -4780,27 +5128,36 @@ class ApiService {
   }) async {
     try {
       final safeQuantity = quantity < 1 ? 1 : quantity;
-      final response = await _appPost('/rma', data: {
-        // El servidor valida siempre la identidad real del app_token.
-        // email se mantiene únicamente por compatibilidad con versiones anteriores.
-        'email': email,
-        'order_id': orderId,
-        'product_id': productId,
-        if (lineItemId > 0) 'line_item_id': lineItemId,
-        if (variationId > 0) 'variation_id': variationId,
-        'quantity': safeQuantity,
-        if (serialNumber.trim().isNotEmpty) 'sn': serialNumber.trim(),
-        'reason': motivo,
-        'motivo': motivo,
-        'description': descripcion,
-        'descripcion': descripcion,
-      });
+      final response = await _appPost(
+        '/rma',
+        data: {
+          // El servidor valida siempre la identidad real del app_token.
+          // email se mantiene únicamente por compatibilidad con versiones anteriores.
+          'email': email,
+          'order_id': orderId,
+          'product_id': productId,
+          if (lineItemId > 0) 'line_item_id': lineItemId,
+          if (variationId > 0) 'variation_id': variationId,
+          'quantity': safeQuantity,
+          if (serialNumber.trim().isNotEmpty) 'sn': serialNumber.trim(),
+          'reason': motivo,
+          'motivo': motivo,
+          'description': descripcion,
+          'descripcion': descripcion,
+        },
+      );
       final data = _responseMap(response.data);
       if (data['success'] == false) {
         final message = data['message']?.toString().trim();
-        throw Exception(message?.isNotEmpty == true ? message : 'No se pudo crear la solicitud RMA.');
+        throw Exception(
+          message?.isNotEmpty == true
+              ? message
+              : 'No se pudo crear la solicitud RMA.',
+        );
       }
-      if (response.statusCode != 200 && response.statusCode != 201 && data['success'] != true) {
+      if (response.statusCode != 200 &&
+          response.statusCode != 201 &&
+          data['success'] != true) {
         throw Exception('El servidor no confirmó la solicitud RMA.');
       }
       return data;
@@ -4840,14 +5197,27 @@ class ApiService {
     return data['success'] != false;
   }
 
-  Future<List<Map<String, dynamic>>> getRmaRequests(String customerEmail) async {
+  Future<List<Map<String, dynamic>>> getRmaRequests(
+    String customerEmail,
+  ) async {
     try {
-      final response = await _appGet('/rma', queryParameters: {
-        if (customerEmail.trim().isNotEmpty) 'email': customerEmail.trim(),
-      });
+      final response = await _appGet(
+        '/rma',
+        queryParameters: {
+          if (customerEmail.trim().isNotEmpty) 'email': customerEmail.trim(),
+        },
+      );
       final data = _responseMap(response.data);
-      final raw = _firstList([data['rma'], data['requests'], data['data'], response.data]);
-      return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      final raw = _firstList([
+        data['rma'],
+        data['requests'],
+        data['data'],
+        response.data,
+      ]);
+      return raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     } on DioException catch (e) {
       final message = _mapDioError(e);
       if (kDebugMode) debugPrint('⚠️ Error getRmaRequests: $message');
@@ -4860,12 +5230,15 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> getTickets(String customerEmail) async {
     try {
-      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {
-        'search': customerEmail,
-        'per_page': 20,
-      });
+      final response = await _dio.get(
+        '/wp-json/wp/v2/posts',
+        queryParameters: {'search': customerEmail, 'per_page': 20},
+      );
       final raw = response.data is List ? response.data as List : <dynamic>[];
-      return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      return raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     } catch (_) {
       return [];
     }
@@ -4877,11 +5250,14 @@ class ApiService {
 
   Future<List<CourseModel>> getAcademyCourses() async {
     try {
-      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {
-        'per_page': 10,
-        '_embed': 'true',
-        'search': 'academy',
-      });
+      final response = await _dio.get(
+        '/wp-json/wp/v2/posts',
+        queryParameters: {
+          'per_page': 10,
+          '_embed': 'true',
+          'search': 'academy',
+        },
+      );
       final raw = response.data is List ? response.data as List : <dynamic>[];
       return raw.map((post) => CourseModel.fromWordPress(post)).toList();
     } catch (_) {
@@ -4891,10 +5267,10 @@ class ApiService {
 
   Future<List<Noticia>> getNoticias() async {
     try {
-      final response = await _dio.get('/wp-json/wp/v2/posts', queryParameters: {
-        'per_page': 4,
-        '_embed': 'true',
-      });
+      final response = await _dio.get(
+        '/wp-json/wp/v2/posts',
+        queryParameters: {'per_page': 4, '_embed': 'true'},
+      );
       final raw = response.data is List ? response.data as List : <dynamic>[];
       return raw.map((item) => Noticia.fromJson(item)).toList();
     } catch (_) {
@@ -4920,7 +5296,9 @@ class ApiService {
     if (raw == null || raw.trim().isEmpty) return <String, dynamic>{};
     try {
       final decoded = jsonDecode(raw);
-      return decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+      return decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
     } catch (_) {
       return <String, dynamic>{};
     }
@@ -4959,7 +5337,6 @@ class ApiService {
     return int.tryParse(raw) ?? double.tryParse(raw)?.toInt() ?? fallback;
   }
 
-
   static Map<String, dynamic> _cleanQuery(Map<String, dynamic>? input) {
     final output = <String, dynamic>{};
     if (input == null) return output;
@@ -4986,7 +5363,8 @@ class ApiService {
 
   static bool _isForbiddenCategory(String value) {
     final normalized = _normalizeText(value);
-    return normalized.contains('sincategoria') || normalized.contains('uncategorized');
+    return normalized.contains('sincategoria') ||
+        normalized.contains('uncategorized');
   }
 
   static String _normalizeText(String value) {
@@ -5052,8 +5430,7 @@ class ApiService {
 
     // MCI y MCI PRO son dos marcas distintas. Sin esta protección, la
     // comparación por inclusión posterior haría que "mcipro" contuviese "mci".
-    if ((a == 'mci' || a == 'mcipro') ||
-        (b == 'mci' || b == 'mcipro')) {
+    if ((a == 'mci' || a == 'mcipro') || (b == 'mci' || b == 'mcipro')) {
       return false;
     }
 
@@ -5116,15 +5493,33 @@ class ApiService {
 
     final compact = raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
     if (compact.length < 5) return false;
-    if (!RegExp(r'[A-Z]').hasMatch(compact) || !RegExp(r'\d').hasMatch(compact)) {
+    if (!RegExp(r'[A-Z]').hasMatch(compact) ||
+        !RegExp(r'\d').hasMatch(compact)) {
       return false;
     }
 
     if (raw.contains('-') || raw.contains('_')) return true;
 
     const knownPrefixes = <String>[
-      'IPC', 'HAC', 'NVR', 'XVR', 'DHI', 'DH', 'MC', 'PFA', 'PFM', 'PFH',
-      'HIK', 'DS', 'AJ', 'AX', 'NVS', 'HDBW', 'HDW', 'TIOC', 'KIT',
+      'IPC',
+      'HAC',
+      'NVR',
+      'XVR',
+      'DHI',
+      'DH',
+      'MC',
+      'PFA',
+      'PFM',
+      'PFH',
+      'HIK',
+      'DS',
+      'AJ',
+      'AX',
+      'NVS',
+      'HDBW',
+      'HDW',
+      'TIOC',
+      'KIT',
     ];
     return knownPrefixes.any(compact.startsWith);
   }
@@ -5157,7 +5552,8 @@ class ApiService {
       items.add({
         'product_id': productId,
         'quantity': quantity,
-        if (_parseInt(item['variation_id']) > 0) 'variation_id': _parseInt(item['variation_id']),
+        if (_parseInt(item['variation_id']) > 0)
+          'variation_id': _parseInt(item['variation_id']),
       });
     }
 
@@ -5228,70 +5624,74 @@ class ApiService {
       return text.contains('@') ? null : text;
     }
 
-    final managerEmail = <dynamic>[
-      rootManager['email'],
-      userManager['email'],
-      root['manager_email'],
-      nestedData['manager_email'],
-      user['manager_email'],
-      billing['manager_email'],
-      shipping['manager_email'],
-      metaValue('manager_email'),
-      user['assigned_manager_email'],
-      user['gestor_email'],
-      user['technical_manager_email'],
-    ].map((value) => cleanValue(value, email: true)).firstWhere(
-          (value) => value != null,
-          orElse: () => null,
-        );
+    final managerEmail =
+        <dynamic>[
+              rootManager['email'],
+              userManager['email'],
+              root['manager_email'],
+              nestedData['manager_email'],
+              user['manager_email'],
+              billing['manager_email'],
+              shipping['manager_email'],
+              metaValue('manager_email'),
+              user['assigned_manager_email'],
+              user['gestor_email'],
+              user['technical_manager_email'],
+            ]
+            .map((value) => cleanValue(value, email: true))
+            .firstWhere((value) => value != null, orElse: () => null);
 
-    final managerName = <dynamic>[
-      rootManager['name'],
-      userManager['name'],
-      root['manager_name'],
-      root['wpuef_cid_c30'],
-      root['gestor_asignado'],
-      root['assigned_manager'],
-      nestedData['manager_name'],
-      nestedData['wpuef_cid_c30'],
-      nestedData['gestor_asignado'],
-      nestedData['assigned_manager'],
-      user['manager_name'],
-      user['wpuef_cid_c30'],
-      user['gestor_asignado'],
-      user['assigned_manager'],
-      user['commercial_manager'],
-      user['sales_manager'],
-      metaValue('manager_name'),
-      metaValue('wpuef_cid_c30'),
-      metaValue('gestor_asignado'),
-      metaValue('assigned_manager'),
-    ].map((value) => cleanValue(value)).firstWhere(
-          (value) => value != null,
-          orElse: () => null,
-        );
+    final managerName =
+        <dynamic>[
+              rootManager['name'],
+              userManager['name'],
+              root['manager_name'],
+              root['wpuef_cid_c30'],
+              root['gestor_asignado'],
+              root['assigned_manager'],
+              nestedData['manager_name'],
+              nestedData['wpuef_cid_c30'],
+              nestedData['gestor_asignado'],
+              nestedData['assigned_manager'],
+              user['manager_name'],
+              user['wpuef_cid_c30'],
+              user['gestor_asignado'],
+              user['assigned_manager'],
+              user['commercial_manager'],
+              user['sales_manager'],
+              metaValue('manager_name'),
+              metaValue('wpuef_cid_c30'),
+              metaValue('gestor_asignado'),
+              metaValue('assigned_manager'),
+            ]
+            .map((value) => cleanValue(value))
+            .firstWhere((value) => value != null, orElse: () => null);
 
-    final managerPhone = <dynamic>[
-      rootManager['phone'],
-      userManager['phone'],
-      root['manager_phone'],
-      nestedData['manager_phone'],
-      user['manager_phone'],
-      billing['manager_phone'],
-      shipping['manager_phone'],
-      metaValue('manager_phone'),
-      user['assigned_manager_phone'],
-      user['gestor_phone'],
-    ].map((value) {
-      final text = value?.toString().trim() ?? '';
-      if (text.isEmpty || text.toLowerCase() == 'null') return null;
-      return text;
-    }).firstWhere((value) => value != null, orElse: () => null);
+    final managerPhone =
+        <dynamic>[
+              rootManager['phone'],
+              userManager['phone'],
+              root['manager_phone'],
+              nestedData['manager_phone'],
+              user['manager_phone'],
+              billing['manager_phone'],
+              shipping['manager_phone'],
+              metaValue('manager_phone'),
+              user['assigned_manager_phone'],
+              user['gestor_phone'],
+            ]
+            .map((value) {
+              final text = value?.toString().trim() ?? '';
+              if (text.isEmpty || text.toLowerCase() == 'null') return null;
+              return text;
+            })
+            .firstWhere((value) => value != null, orElse: () => null);
 
     bool hasMeta(String key) {
       return metaData.any((item) {
         if (item is! Map) return false;
-        return item['key']?.toString().toLowerCase().trim() == key.toLowerCase();
+        return item['key']?.toString().toLowerCase().trim() ==
+            key.toLowerCase();
       });
     }
 
@@ -5350,7 +5750,8 @@ class ApiService {
         if (text.isEmpty || text.toLowerCase() == 'null') continue;
         final exists = metaData.any((item) {
           if (item is! Map) return false;
-          return item['key']?.toString().toLowerCase().trim() == key.toLowerCase();
+          return item['key']?.toString().toLowerCase().trim() ==
+              key.toLowerCase();
         });
         if (!exists) {
           metaData.add(<String, dynamic>{'key': key, 'value': text});
@@ -5419,19 +5820,22 @@ class ApiService {
       user['manager_name'],
     ]);
 
-    final managerEmail = _firstNonEmptyString(<dynamic>[
+    final managerEmail =
+        _firstNonEmptyString(<dynamic>[
           user['manager_email'],
           billing['manager_email'],
         ]) ??
         '';
-    final managerName = _firstNonEmptyString(<dynamic>[
+    final managerName =
+        _firstNonEmptyString(<dynamic>[
           user['manager_name'],
           user['wpuef_cid_c30'],
           user['gestor_asignado'],
           user['assigned_manager'],
         ]) ??
         '';
-    final managerPhone = _firstNonEmptyString(<dynamic>[
+    final managerPhone =
+        _firstNonEmptyString(<dynamic>[
           user['manager_phone'],
           billing['manager_phone'],
         ]) ??
@@ -5440,17 +5844,28 @@ class ApiService {
     return {
       'id': _parseInt(user['id'] ?? user['wordpress_id']),
       'email': user['email']?.toString() ?? billing['email']?.toString() ?? '',
-      'first_name': user['first_name']?.toString() ?? billing['first_name']?.toString() ?? '',
-      'last_name': user['last_name']?.toString() ?? billing['last_name']?.toString() ?? '',
+      'first_name':
+          user['first_name']?.toString() ??
+          billing['first_name']?.toString() ??
+          '',
+      'last_name':
+          user['last_name']?.toString() ??
+          billing['last_name']?.toString() ??
+          '',
       'username': user['email']?.toString() ?? '',
-      'display_name': user['display_name']?.toString() ?? user['name']?.toString() ?? '',
+      'display_name':
+          user['display_name']?.toString() ?? user['name']?.toString() ?? '',
       'role': user['role']?.toString() ?? '',
       'roles': user['roles'] is List ? user['roles'] : <dynamic>[],
       'billing': billing,
       'shipping': shipping,
       'meta_data': metaData,
-      'billing_nif': user['billing_nif']?.toString() ?? billing['billing_nif']?.toString() ?? '',
-      'cif_nif': user['cif_nif']?.toString() ?? billing['cif_nif']?.toString() ?? '',
+      'billing_nif':
+          user['billing_nif']?.toString() ??
+          billing['billing_nif']?.toString() ??
+          '',
+      'cif_nif':
+          user['cif_nif']?.toString() ?? billing['cif_nif']?.toString() ?? '',
       'manager_name': managerName,
       'gestor_asignado': managerName,
       'assigned_manager': managerName,

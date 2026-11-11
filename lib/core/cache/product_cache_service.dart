@@ -103,7 +103,11 @@ class ProductCacheService {
 
     try {
       final data = await future;
-      cacheMemory<T>(key, data, ttl: ttl);
+      // Una petición anterior invalidada (logout, cambio de tarifa o refresh)
+      // no puede reescribir la caché con datos comerciales obsoletos.
+      if (identical(_inflight[key], future)) {
+        cacheMemory<T>(key, data, ttl: ttl);
+      }
       return data;
     } finally {
       final running = _inflight[key];

@@ -12,6 +12,7 @@ import 'package:mundicam/features/cart/presentation/providers/cart_provider.dart
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/producto_detalles_page.dart';
 import 'package:mundicam/features/catalog/presentation/pages/productos_por_categoria.dart';
+import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 import 'package:mundicam/features/catalog/presentation/widgets/cross_sell_widgets.dart';
 import 'package:mundicam/features/quotes/data/models/local_quote_model.dart';
 import 'package:mundicam/features/quotes/presentation/providers/local_quote_provider.dart';
@@ -59,7 +60,7 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
   int _selectedCategoryId = 0;
   String _selectedCategoryName = '';
   String _selectedBrand = '';
-  String _orderBy = 'price_asc';
+  String _orderBy = mundicamQaNoDefaultSort ? '' : 'price_asc';
   int _requestToken = 0;
   bool _searchEventTracked = false;
 
@@ -202,9 +203,6 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         });
       });
 
-      if (_hasMore) {
-        _loadMoreResults(automatic: true, requestToken: token);
-      }
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
@@ -221,7 +219,6 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
   }
 
   Future<void> _loadMoreResults({
-    bool automatic = false,
     int? requestToken,
   }) async {
     if (_loading || _loadingMore || !_hasMore) return;
@@ -284,19 +281,11 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
         _loadingMore = false;
       });
 
-      // Carga una segunda página automática solo cuando el usuario acaba de entrar.
-      // Así la pantalla enseña 10 rápido y acto seguido deja más resultados listos.
-      if (automatic && _hasMore && mounted && token == _requestToken) {
-        Future<void>.delayed(const Duration(milliseconds: 120), () {
-          if (!mounted || token != _requestToken) return;
-          _loadMoreResults(requestToken: token);
-        });
-      }
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
         _loadingMore = false;
-        if (!automatic) _error = e;
+        _error = e;
       });
       if (kDebugMode) {
         debugPrint('⚠️ Error cargando más resultados de búsqueda: $e');
@@ -326,7 +315,7 @@ class _BusquedaResultadosPageState extends ConsumerState<BusquedaResultadosPage>
     if (!mounted || selectedOrder == null) return;
 
     setState(() {
-      _orderBy = selectedOrder.trim().isEmpty ? 'price_asc' : selectedOrder;
+      _orderBy = selectedOrder.trim().isEmpty ? (mundicamQaNoDefaultSort ? '' : 'price_asc') : selectedOrder;
     });
     _loadResults(forceRefresh: true);
   }

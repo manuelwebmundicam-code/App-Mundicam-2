@@ -36,7 +36,15 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   Object? _lastError;
 
-  final int _perPage = 30;
+  // Primera página de 10 productos para acelerar el arranque.
+  // Reversible: --dart-define=MUNDICAM_CATEGORY_PAGE_SIZE=15
+  static const int _configuredPageSize = int.fromEnvironment(
+    'MUNDICAM_CATEGORY_PAGE_SIZE',
+    defaultValue: 10,
+  );
+  final int _perPage = _configuredPageSize >= 5 && _configuredPageSize <= 30
+      ? _configuredPageSize
+      : 15;
 
   ProductsPaginatedNotifier({
     required this.apiService,
@@ -56,12 +64,59 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   Object? get lastError => _lastError;
 
+  /// QA: precarga la primera pagina usando la API y la cache originales.
+  /// Los precios siempre los calcula el PHP MundiCam para el usuario autenticado.
+  static Future<int> preloadFirstPage({
+    required ApiService apiService,
+    required int categoryId,
+  }) async {
+    if (categoryId <= 0 || !await apiService.hasStoredAppSession()) {
+      return 0;
+    }
+
+    final identity = apiService.catalogCacheIdentity;
+    if (identity.startsWith('user:anon|')) return 0;
+
+    final pageSize = _configuredPageSize >= 5 && _configuredPageSize <= 30
+        ? _configuredPageSize
+        : 15;
+    final cacheKey = _buildCacheKey(
+      userKey: identity,
+      categoryId: categoryId,
+      brandId: null,
+      brandName: '',
+      search: '',
+      orderBy: '',
+      attributeTermIds: const <String, int>{},
+      page: 1,
+      perPage: pageSize,
+    );
+
+    final result = await ProductCacheService()
+        .getOrLoadMemory<CatalogProductsResult>(
+      cacheKey,
+      ttl: _cacheTtl,
+      loader: () => apiService.getProductosCatalogoFiltrado(
+        categoryId: categoryId,
+        page: 1,
+        perPage: pageSize,
+      ),
+    );
+    return result.products.length;
+  }
   static void clearGlobalCache() {
     ProductCacheService().clearCatalogMemory();
   }
 
   void clearCacheForCurrentCategory() {
-    ProductCacheService().clearMemoryPrefix('catalog_page|cat:$categoryId|');
+    // La clave incluye la identidad comercial ANTES de cat:. El prefijo
+    // anterior no coincidía nunca y no invalidaba el listado solicitado.
+    final cache = ProductCacheService();
+    final identity = apiService.catalogCacheIdentity;
+    cache.clearMemoryPrefix('catalog_page|$identity|cat:$categoryId|');
+    // La App API tiene otra capa de caché (30 min). Invalidarla solo al
+    // pulsar Actualizar evita devolver stock/precios antiguos en un refresh.
+    cache.clearMemoryPrefix('api_products|$identity|cat:$categoryId|');
   }
 
   void showReloadingState() {
@@ -78,8 +133,12 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
 
   Future<void> loadFirstPage({
     bool forceRefresh = false,
+    bool restartPending = false,
   }) async {
-    if (_isLoading && !forceRefresh) return;
+    // En cambios de filtro/categoría, invalidar SOLO la petición antigua,
+    // no la caché comercial reciente con idéntico usuario/orden/filtros.
+    // refresh explícito mantiene forceRefresh=true.
+    if (_isLoading && !forceRefresh && !restartPending) return;
 
     final token = ++_requestToken;
 
@@ -145,7 +204,11 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       if (result.products.isEmpty) {
         _hasMore = false;
       } else {
-        state = [...state, ...result.products];
+        final existingIds = state.map((product) => product.id).toSet();
+        state = [
+          ...state,
+          ...result.products.where((product) => existingIds.add(product.id)),
+        ];
         _hasMore = result.hasNextPage;
       }
     } catch (e) {
@@ -202,11 +265,13 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
       perPage: _perPage,
     );
 
-    return ProductCacheService().getOrLoadMemory<CatalogProductsResult>(
-      cacheKey,
-      ttl: _cacheTtl,
-      forceRefresh: forceRefresh,
-      loader: () async {
+    final watch = Stopwatch()..start();
+    try {
+      return await ProductCacheService().getOrLoadMemory<CatalogProductsResult>(
+        cacheKey,
+        ttl: _cacheTtl,
+        forceRefresh: forceRefresh,
+        loader: () async {
         final result = await apiService.getProductosCatalogoFiltrado(
           categoryId: categoryId,
           brandId: effectiveBrandId,
@@ -226,8 +291,19 @@ class ProductsPaginatedNotifier extends StateNotifier<List<Product>> {
         }
 
         return result;
-      },
-    );
+        },
+      );
+    } finally {
+      watch.stop();
+      if (kDebugMode) {
+        debugPrint(
+          'MUNDICAM_CATEGORY_TIMING category=$categoryId '
+          'page=$page size=$_perPage elapsed_ms=' +
+          watch.elapsedMilliseconds.toString() +
+          ' force_refresh=$forceRefresh',
+        );
+      }
+    }
   }
 
   static String _buildCacheKey({

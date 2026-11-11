@@ -10,6 +10,8 @@ class FiltroSelector extends ConsumerStatefulWidget {
   final int parentCategoryId;
   final String categoryName;
   final List<Product> productosEnPantalla;
+  /// Evita competir con la primera carga de productos comerciales.
+  final bool loadEnabled;
   final int? lockedBrandId;
   final String? lockedBrandName;
   final VoidCallback? onApplyFilters;
@@ -19,6 +21,7 @@ class FiltroSelector extends ConsumerStatefulWidget {
     required this.parentCategoryId,
     required this.categoryName,
     required this.productosEnPantalla,
+    this.loadEnabled = true,
     this.lockedBrandId,
     this.lockedBrandName,
     this.onApplyFilters,
@@ -58,9 +61,21 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
   void initState() {
     super.initState();
     _draftFilters = _withLockedBrand(ref.read(productFilterProvider));
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadFilterData();
-    });
+    if (widget.loadEnabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadFilterData();
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant FiltroSelector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.loadEnabled && widget.loadEnabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadFilterData();
+      });
+    }
   }
 
   @override
@@ -74,7 +89,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         setState(() {
           _draftFilters = _withLockedBrand(next);
         });
-        _loadFilterData();
+        if (widget.loadEnabled) _loadFilterData();
       }
     });
 
@@ -142,8 +157,20 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
     bool forceRefresh = false,
   }) async {
     final requestToken = ++_loadToken;
+    // El token puede estar todavía cargándose desde disco al arrancar.
+    final hasSession = await _apiService.hasStoredAppSession();
+    if (!mounted || requestToken != _loadToken) return;
+    if (!hasSession) {
+      setState(() {
+        _loading = false;
+        _error = 'Inicia sesión para ver tus filtros comerciales.';
+        _availableFilterGroups = const <CatalogFilterGroup>[];
+      });
+      return;
+    }
     final filters = _withLockedBrand(ref.read(productFilterProvider));
     final cacheKey = _buildCacheKey(filters);
+    final watch = Stopwatch()..start();
 
     if (!forceRefresh) {
       final cached = _readCache(cacheKey);
@@ -180,6 +207,7 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         brandId: filters.brandId,
         search: effectiveSearch,
         forceRefresh: forceRefresh,
+        reportErrors: true,
       );
 
 
@@ -192,9 +220,11 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
         createdAt: DateTime.now(),
       );
 
+      // Una consulta antigua no debe volver a introducir filtros de otra
+      // categoría, cuenta o marca después de una navegación rápida.
+      if (!mounted || requestToken != _loadToken ||
+          cacheKey != _buildCacheKey(_withLockedBrand(ref.read(productFilterProvider)))) return;
       _writeCache(cacheKey, cacheEntry);
-
-      if (!mounted || requestToken != _loadToken) return;
       setState(() {
         _availableFilterGroups = visibleGroups;
         _loading = false;
@@ -202,9 +232,9 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
       });
 
       if (kDebugMode) {
-        debugPrint(
-          '📊 Filtros web cargados: ${groups.length} grupos',
-        );
+        debugPrint('MUNDICAM_FILTERS_TIMING '
+            'category=${widget.parentCategoryId} elapsed_ms=${watch.elapsedMilliseconds} '
+            'groups=${groups.length}');
       }
     } catch (e) {
       if (!mounted || requestToken != _loadToken) return;
@@ -221,18 +251,12 @@ class _FiltroSelectorState extends ConsumerState<FiltroSelector> {
 
   String _buildCacheKey(MundiFilters filters) {
     return [
+      'user:${_apiService.catalogCacheIdentity}',
       'cat:${widget.parentCategoryId}',
       'brandId:${filters.brandId ?? 0}',
       'brand:${filters.brand.trim().toLowerCase()}',
       'search:${filters.search.trim().toLowerCase()}',
-      'attrs:${_attributesCachePart(filters.attributeTermIds)}',
     ].join('|');
-  }
-
-  static String _attributesCachePart(Map<String, int> attrs) {
-    if (attrs.isEmpty) return '';
-    final keys = attrs.keys.toList()..sort();
-    return keys.map((key) => '$key:${attrs[key]}').join(',');
   }
 
   static _FilterDataCacheEntry? _readCache(String key) {

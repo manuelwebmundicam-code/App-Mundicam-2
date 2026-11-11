@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:mundicam/core/network/api_service.dart';
+import 'package:mundicam/core/network/fast_sku_discovery_service.dart';
+import 'package:mundicam/core/network/fast_sku_hydration.dart';
 import 'package:mundicam/features/catalog/data/models/category_model.dart';
 import 'package:mundicam/features/catalog/data/models/producto.dart';
 import 'package:mundicam/features/catalog/presentation/pages/busqueda_resultados_page.dart';
@@ -15,10 +17,18 @@ class SearchBarWidget extends StatefulWidget {
   final VoidCallback? onGoCart;
   final VoidCallback? onGoQuotes;
 
+  /// Opcional para pruebas; si no se indica, utiliza el ajuste seguro de la app.
+  final FastSkuDiscoveryService? fastSkuService;
+
+  /// Inyección para pruebas de UI, nunca sustituye el servicio comercial real.
+  final Future<List<Product>> Function(String query)? suggestionLoader;
+
   const SearchBarWidget({
     super.key,
     this.onGoCart,
     this.onGoQuotes,
+    this.fastSkuService,
+    this.suggestionLoader,
   });
 
   @override
@@ -27,11 +37,15 @@ class SearchBarWidget extends StatefulWidget {
 
 class _SearchBarWidgetState extends State<SearchBarWidget> {
   final TextEditingController _controller = TextEditingController();
+  late final FastSkuDiscoveryService _fastSkuDiscovery =
+      widget.fastSkuService ?? FastSkuDiscoveryService();
   Timer? _suggestionsDebounce;
   int _suggestionsToken = 0;
   bool _loadingSuggestions = false;
   List<CategoryModel> _categorySuggestions = const <CategoryModel>[];
   List<Product> _productSuggestions = const <Product>[];
+  List<FastSkuSuggestion> _fastSkuSuggestions = const <FastSkuSuggestion>[];
+  bool _openingFastSku = false;
   List<CategoryModel>? _allSuggestionCategoriesCache;
   DateTime? _allSuggestionCategoriesCachedAt;
   String _lastSuccessfulSuggestionQuery = '';
@@ -77,16 +91,18 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
 
   void _scheduleSuggestions(String value) {
     _suggestionsDebounce?.cancel();
+    _suggestionsToken++; // Invalida peticiones anteriores al teclear.
 
     final query = value.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (!_shouldShowSuggestionsForQuery(query)) {
-      _suggestionsToken++;
       if (_categorySuggestions.isNotEmpty ||
           _productSuggestions.isNotEmpty ||
+          _fastSkuSuggestions.isNotEmpty ||
           _loadingSuggestions) {
         setState(() {
           _categorySuggestions = const <CategoryModel>[];
           _productSuggestions = const <Product>[];
+          _fastSkuSuggestions = const <FastSkuSuggestion>[];
           _lastSuccessfulSuggestionQuery = '';
           _loadingSuggestions = false;
         });
@@ -96,6 +112,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
 
     setState(() {
       _loadingSuggestions = true;
+      _fastSkuSuggestions = const <FastSkuSuggestion>[];
       // Mantenemos las sugerencias anteriores unos milisegundos mientras entra la
       // nueva búsqueda para evitar parpadeos y pantallas vacías.
     });
@@ -105,13 +122,54 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
         : const Duration(milliseconds: 380);
 
     _suggestionsDebounce = Timer(delay, () async {
-      final token = ++_suggestionsToken;
+      final token = _suggestionsToken;
       if (!mounted) return;
+      if (_fastSkuDiscovery.isEnabled &&
+          FastSkuDiscoveryService.isSkuPrefix(query)) {
+        // Si el VPS resuelve el prefijo de SKU, no duplicamos la búsqueda
+        // predictiva en WooCommerce. La ficha se hidrata al abrirla.
+        final previews = await _fastSkuDiscovery.suggest(query, limit: 4);
+        if (!mounted || token != _suggestionsToken) return;
+        if (previews.isNotEmpty) {
+          setState(() {
+            _fastSkuSuggestions = previews;
+            _productSuggestions = const <Product>[];
+            _categorySuggestions = const <CategoryModel>[];
+            _loadingSuggestions = false;
+          });
+          return;
+        }
+        // Si el VPS no responde o no encuentra SKU, conservar la API habitual.
+      }
+
+      // En búsquedas generales, las coincidencias VPS solo son provisionales:
+      // WooCommerce mantiene la última palabra sobre las fichas comerciales.
+      if (_fastSkuDiscovery.canSuggestCatalog &&
+          !FastSkuDiscoveryService.isSkuPrefix(query)) {
+        unawaited(
+          _fastSkuDiscovery.suggestCatalog(query, limit: 4).then((previews) {
+            if (!mounted ||
+                token != _suggestionsToken ||
+                previews.isEmpty ||
+                _productSuggestions.isNotEmpty) {
+              return;
+            }
+            setState(() {
+              _fastSkuSuggestions = previews;
+            });
+          }),
+        );
+      }
 
       try {
-        final api = ApiService();
-        final products = await _fetchSuggestionProducts(api, query)
-            .timeout(const Duration(seconds: 4), onTimeout: () => const <Product>[])
+        final Future<List<Product>> commercial = widget.suggestionLoader != null
+            ? widget.suggestionLoader!(query)
+            : _fetchSuggestionProducts(ApiService(), query);
+        final products = await commercial
+            .timeout(
+              const Duration(seconds: 4),
+              onTimeout: () => const <Product>[],
+            )
             .catchError((_) => const <Product>[]);
 
         if (!mounted || token != _suggestionsToken) return;
@@ -124,8 +182,11 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
           // Solo conservamos el resultado cuando la nueva consulta es una extensión
           // de la última consulta que sí devolvió productos. Si cambia de búsqueda,
           // el panel vuelve a comportarse de forma normal.
-          final nextProducts = products.take(_looksLikeSku(query) ? 4 : 7).toList();
-          final keepPrevious = nextProducts.isEmpty &&
+          final nextProducts = products
+              .take(_looksLikeSku(query) ? 4 : 7)
+              .toList();
+          final keepPrevious =
+              nextProducts.isEmpty &&
               _productSuggestions.isNotEmpty &&
               _isExtensionOfSuccessfulSuggestionQuery(query);
 
@@ -133,9 +194,12 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
             _productSuggestions = nextProducts;
             if (nextProducts.isNotEmpty) {
               _lastSuccessfulSuggestionQuery = query;
+              _fastSkuSuggestions = const <FastSkuSuggestion>[];
             }
           }
           _categorySuggestions = const <CategoryModel>[];
+          // Si WooCommerce no encuentra resultados, no ocultar un candidato
+          // público todavía no abierto ni verificado.
           _loadingSuggestions = false;
         });
       } catch (_) {
@@ -167,7 +231,10 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     return current.length >= previous.length && current.startsWith(previous);
   }
 
-  Future<List<Product>> _fetchSuggestionProducts(ApiService api, String query) async {
+  Future<List<Product>> _fetchSuggestionProducts(
+    ApiService api,
+    String query,
+  ) async {
     final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (!_shouldShowSuggestionsForQuery(cleanQuery)) {
       return const <Product>[];
@@ -188,7 +255,8 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
       // Fallback ligero para búsquedas compuestas que algunos endpoints antiguos
       // no resuelven bien, por ejemplo "dahua 6mp" o "turret dahua".
       final fallback = _bestFallbackProductQuery(cleanQuery);
-      if (fallback == null || fallback.toLowerCase() == cleanQuery.toLowerCase()) {
+      if (fallback == null ||
+          fallback.toLowerCase() == cleanQuery.toLowerCase()) {
         return const <Product>[];
       }
 
@@ -196,7 +264,10 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
         fallback,
         limit: limit,
       );
-      final fallbackRanked = _rankAndFilterProducts(fallbackProducts, cleanQuery);
+      final fallbackRanked = _rankAndFilterProducts(
+        fallbackProducts,
+        cleanQuery,
+      );
       if (fallbackRanked.isNotEmpty) return fallbackRanked;
       return const <Product>[];
     } catch (_) {
@@ -209,10 +280,12 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     String query,
   ) async {
     final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (!_shouldShowSuggestionsForQuery(cleanQuery)) return const <CategoryModel>[];
+    if (!_shouldShowSuggestionsForQuery(cleanQuery))
+      return const <CategoryModel>[];
 
     final now = DateTime.now();
-    final cacheStillValid = _allSuggestionCategoriesCache != null &&
+    final cacheStillValid =
+        _allSuggestionCategoriesCache != null &&
         _allSuggestionCategoriesCachedAt != null &&
         now.difference(_allSuggestionCategoriesCachedAt!).inMinutes < 10;
 
@@ -225,30 +298,35 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
       _allSuggestionCategoriesCachedAt = now;
     }
 
-    final scored = allCategories
-        .where((category) => category.id > 0 && category.name.trim().isNotEmpty)
-        .map((category) => _ScoredSuggestionCategory(
-              category: category,
-              score: _categorySuggestionScore(category, cleanQuery),
-            ))
-        .where((item) => item.score > 0)
-        .toList()
-      ..sort((a, b) {
-        final byScore = b.score.compareTo(a.score);
-        if (byScore != 0) return byScore;
-        final byCount = b.category.count.compareTo(a.category.count);
-        if (byCount != 0) return byCount;
-        return a.category.name.compareTo(b.category.name);
-      });
+    final scored =
+        allCategories
+            .where(
+              (category) => category.id > 0 && category.name.trim().isNotEmpty,
+            )
+            .map(
+              (category) => _ScoredSuggestionCategory(
+                category: category,
+                score: _categorySuggestionScore(category, cleanQuery),
+              ),
+            )
+            .where((item) => item.score > 0)
+            .toList()
+          ..sort((a, b) {
+            final byScore = b.score.compareTo(a.score);
+            if (byScore != 0) return byScore;
+            final byCount = b.category.count.compareTo(a.category.count);
+            if (byCount != 0) return byCount;
+            return a.category.name.compareTo(b.category.name);
+          });
 
     return scored.map((item) => item.category).take(6).toList();
   }
 
   String? _bestFallbackProductQuery(String query) {
     final compactQuery = _compact(query);
-    final tokens = _tokens(query)
-        .where((token) => !_isWeakSearchToken(token))
-        .toList();
+    final tokens = _tokens(
+      query,
+    ).where((token) => !_isWeakSearchToken(token)).toList();
 
     // Senior rule: para búsquedas con intención técnica no caemos al nombre de
     // marca si eso puede sacar productos irrelevantes. Ejemplo: "camara ajax"
@@ -261,9 +339,11 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
 
     if (compactQuery.contains('nvr')) return 'nvr';
     if (compactQuery.contains('grab')) return 'grabador';
-    if (compactQuery.contains('turret') || compactQuery.contains('turet')) return 'turret';
+    if (compactQuery.contains('turret') || compactQuery.contains('turet'))
+      return 'turret';
     if (compactQuery.contains('dom')) return 'domo';
-    if (compactQuery.contains('bullet') || compactQuery.contains('tubular')) return 'bullet';
+    if (compactQuery.contains('bullet') || compactQuery.contains('tubular'))
+      return 'bullet';
     if (_queryHasCameraIntent(query)) return 'camara';
 
     if (tokens.isEmpty) return null;
@@ -304,14 +384,19 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     return output;
   }
 
-  List<Product> _rankAndFilterProducts(Iterable<Product> products, String query) {
+  List<Product> _rankAndFilterProducts(
+    Iterable<Product> products,
+    String query,
+  ) {
     final skuLike = _looksLikeSku(query);
     final scored = products
         .where((product) => product.id > 0)
-        .map((product) => _ScoredSuggestionProduct(
-      product: product,
-      score: _productSuggestionScore(product, query),
-    ))
+        .map(
+          (product) => _ScoredSuggestionProduct(
+            product: product,
+            score: _productSuggestionScore(product, query),
+          ),
+        )
         .where((item) => item.score > 0)
         .toList();
 
@@ -321,10 +406,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
       return a.product.name.compareTo(b.product.name);
     });
 
-    return scored
-        .map((item) => item.product)
-        .take(skuLike ? 6 : 8)
-        .toList();
+    return scored.map((item) => item.product).take(skuLike ? 6 : 8).toList();
   }
 
   List<String> _suggestionSearchTerms(String query) {
@@ -376,7 +458,11 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     final brand = _compact(product.brandName ?? '');
     final description = _compact(product.shortDescription);
     final categories = _compact(product.categoryNames.join(' '));
-    final attributes = _compact(product.attributes.map((a) => '${a.name} ${a.options.join(' ')}').join(' '));
+    final attributes = _compact(
+      product.attributes
+          .map((a) => '${a.name} ${a.options.join(' ')}')
+          .join(' '),
+    );
     final fullText = '$name $sku $brand $description $categories $attributes';
 
     // V8 senior precision: cuando el usuario pide cámaras, no basta con que el
@@ -418,7 +504,9 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     if (attributes.contains(q)) score += 240;
     if (description.contains(q)) score += 120;
 
-    final tokens = _tokens(query).where((token) => !_isWeakSearchToken(token)).toList();
+    final tokens = _tokens(
+      query,
+    ).where((token) => !_isWeakSearchToken(token)).toList();
     var tokenHits = 0;
     for (final token in tokens) {
       if (sku.contains(token)) {
@@ -450,10 +538,13 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     if (tokens.length >= 2 && tokenHits >= tokens.length) score += 260;
 
     if (q.contains('dom') &&
-        (name.contains('domo') || description.contains('domo') || fullText.contains('dome'))) {
+        (name.contains('domo') ||
+            description.contains('domo') ||
+            fullText.contains('dome'))) {
       score += 320;
     }
-    if ((q.contains('turret') || q.contains('turet')) && fullText.contains('turret')) {
+    if ((q.contains('turret') || q.contains('turet')) &&
+        fullText.contains('turret')) {
       score += 320;
     }
     if ((q.contains('bullet') || q.contains('tubular')) &&
@@ -476,7 +567,10 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     if (tokens.isEmpty) return true;
 
     for (final token in tokens) {
-      if (token == 'camara' || token == 'camaras' || token == 'camera' || token == 'cameras') {
+      if (token == 'camara' ||
+          token == 'camaras' ||
+          token == 'camera' ||
+          token == 'cameras') {
         if (!_textHasCameraConcept(text)) return false;
         continue;
       }
@@ -487,19 +581,41 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
       if (!text.contains(token)) return false;
     }
 
-    if (_queryHasCameraIntent(query) && !_textHasCameraConcept(text)) return false;
+    if (_queryHasCameraIntent(query) && !_textHasCameraConcept(text))
+      return false;
     if (_queryHasNvrIntent(query) && !_textHasNvrConcept(text)) return false;
     if (_queryHasTurretIntent(query) && !text.contains('turret')) return false;
-    if (_queryHasDomoIntent(query) && !(text.contains('domo') || text.contains('dome') || text.contains('minidomo'))) return false;
-    if (_queryHasBulletIntent(query) && !(text.contains('bullet') || text.contains('tubular'))) return false;
+    if (_queryHasDomoIntent(query) &&
+        !(text.contains('domo') ||
+            text.contains('dome') ||
+            text.contains('minidomo')))
+      return false;
+    if (_queryHasBulletIntent(query) &&
+        !(text.contains('bullet') || text.contains('tubular')))
+      return false;
 
     return true;
   }
 
   List<String> _strictSearchTokens(String query) {
     const stop = <String>{
-      'de', 'del', 'la', 'el', 'los', 'las', 'una', 'uno', 'para', 'con',
-      'por', 'en', 'y', 'o', 'the', 'a', 'an',
+      'de',
+      'del',
+      'la',
+      'el',
+      'los',
+      'las',
+      'una',
+      'uno',
+      'para',
+      'con',
+      'por',
+      'en',
+      'y',
+      'o',
+      'the',
+      'a',
+      'an',
     };
     return query
         .toLowerCase()
@@ -516,7 +632,9 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
 
   bool _queryHasNvrIntent(String query) {
     final q = _compact(query);
-    return q.contains('nvr') || q.contains('grabador') || q.contains('videograbador');
+    return q.contains('nvr') ||
+        q.contains('grabador') ||
+        q.contains('videograbador');
   }
 
   bool _queryHasTurretIntent(String query) {
@@ -617,7 +735,8 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     // mezclar kits de alarma en una búsqueda de cámaras.
     if (looksLikeAlarmAccessory) {
       final cameraSku = sku.startsWith('ipc') || sku.startsWith('hac');
-      final cameraCategory = categories.contains('camarasip') ||
+      final cameraCategory =
+          categories.contains('camarasip') ||
           categories.contains('camaraip') ||
           categories.contains('camarasturret') ||
           categories.contains('camarasbullet') ||
@@ -648,7 +767,8 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     final upper = raw.toUpperCase();
     final compact = upper.replaceAll(RegExp(r'[^A-Z0-9]'), '');
     if (compact.length < 5) return false;
-    if (!RegExp(r'[A-Z]').hasMatch(compact) || !RegExp(r'\d').hasMatch(compact)) {
+    if (!RegExp(r'[A-Z]').hasMatch(compact) ||
+        !RegExp(r'\d').hasMatch(compact)) {
       return false;
     }
 
@@ -656,8 +776,25 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     if (raw.contains('-') || raw.contains('_')) return true;
 
     const knownPrefixes = <String>[
-      'IPC', 'HAC', 'NVR', 'XVR', 'DHI', 'DH', 'MC', 'PFA', 'PFM', 'PFH',
-      'HIK', 'DS', 'AJ', 'AX', 'NVS', 'HDBW', 'HDW', 'TIOC', 'KIT',
+      'IPC',
+      'HAC',
+      'NVR',
+      'XVR',
+      'DHI',
+      'DH',
+      'MC',
+      'PFA',
+      'PFM',
+      'PFH',
+      'HIK',
+      'DS',
+      'AJ',
+      'AX',
+      'NVS',
+      'HDBW',
+      'HDW',
+      'TIOC',
+      'KIT',
     ];
     return knownPrefixes.any(compact.startsWith);
   }
@@ -705,12 +842,14 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     _suggestionsToken++;
     if (_categorySuggestions.isEmpty &&
         _productSuggestions.isEmpty &&
+        _fastSkuSuggestions.isEmpty &&
         !_loadingSuggestions) {
       return;
     }
     setState(() {
       _categorySuggestions = const <CategoryModel>[];
       _productSuggestions = const <Product>[];
+      _fastSkuSuggestions = const <FastSkuSuggestion>[];
       _lastSuccessfulSuggestionQuery = '';
       _loadingSuggestions = false;
     });
@@ -749,16 +888,21 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
   CategoryModel? _bestCategoryForQuery(String query) {
     if (_categorySuggestions.isEmpty) return null;
 
-    final scored = _categorySuggestions
-        .map((category) => _ScoredSuggestionCategory(
-      category: category,
-      score: _categorySuggestionScore(category, query),
-    ))
-        .where((item) => item.score > 0)
-        .toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
+    final scored =
+        _categorySuggestions
+            .map(
+              (category) => _ScoredSuggestionCategory(
+                category: category,
+                score: _categorySuggestionScore(category, query),
+              ),
+            )
+            .where((item) => item.score > 0)
+            .toList()
+          ..sort((a, b) => b.score.compareTo(a.score));
 
-    return scored.isNotEmpty ? scored.first.category : _categorySuggestions.first;
+    return scored.isNotEmpty
+        ? scored.first.category
+        : _categorySuggestions.first;
   }
 
   int _categorySuggestionScore(CategoryModel category, String query) {
@@ -769,10 +913,14 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     var score = 0;
 
     if (name == compactQuery || slug == compactQuery) score += 700;
-    if (name.startsWith(compactQuery) || slug.startsWith(compactQuery)) score += 520;
-    if (name.contains(compactQuery) || slug.contains(compactQuery)) score += 420;
+    if (name.startsWith(compactQuery) || slug.startsWith(compactQuery))
+      score += 520;
+    if (name.contains(compactQuery) || slug.contains(compactQuery))
+      score += 420;
 
-    final tokens = _tokens(query).where((token) => !_isWeakSearchToken(token)).toList();
+    final tokens = _tokens(
+      query,
+    ).where((token) => !_isWeakSearchToken(token)).toList();
     var hits = 0;
     for (final token in tokens) {
       if (text.contains(token)) {
@@ -782,14 +930,21 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     }
     if (tokens.length >= 2 && hits >= tokens.length) score += 260;
 
-    if (compactQuery.contains('camara') && name.contains('camara')) score += 180;
+    if (compactQuery.contains('camara') && name.contains('camara'))
+      score += 180;
     if (compactQuery.contains('ip') && name.contains('ip')) score += 170;
-    if (compactQuery.contains('dom') && (name.contains('domo') || name.contains('minidomo'))) score += 230;
-    if ((compactQuery.contains('turret') || compactQuery.contains('turet')) && name.contains('turret')) score += 260;
+    if (compactQuery.contains('dom') &&
+        (name.contains('domo') || name.contains('minidomo')))
+      score += 230;
+    if ((compactQuery.contains('turret') || compactQuery.contains('turet')) &&
+        name.contains('turret'))
+      score += 260;
     if ((compactQuery.contains('bullet') || compactQuery.contains('tubular')) &&
-        (name.contains('bullet') || name.contains('tubular'))) score += 240;
+        (name.contains('bullet') || name.contains('tubular')))
+      score += 240;
     if ((compactQuery.contains('nvr') || compactQuery.contains('grab')) &&
-        (name.contains('grabador') || name.contains('nvr'))) score += 240;
+        (name.contains('grabador') || name.contains('nvr')))
+      score += 240;
 
     if (category.count > 0) score += category.count.clamp(0, 80).toInt();
     return score;
@@ -811,6 +966,28 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
         ),
       ),
     );
+  }
+
+  Future<void> _openFastSku(FastSkuSuggestion candidate) async {
+    if (_openingFastSku) return;
+    _openingFastSku = true;
+    try {
+      // La referencia VPS nunca se utiliza como ficha comercial.
+      final product = await hydrateVerifiedFastSku(
+        preview: candidate,
+        loadAuthenticated: ApiService().getProductoById,
+      );
+      if (!mounted) return;
+      if (product != null) {
+        _openProduct(product);
+        return;
+      }
+      // Referencia cambiada o acceso comercial no disponible: usar
+      // búsqueda habitual. No fabricar fichas sin precio o permisos.
+      _buscar(candidate.sku);
+    } finally {
+      _openingFastSku = false;
+    }
   }
 
   @override
@@ -865,24 +1042,24 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
                 ),
                 suffixIcon: hasText
                     ? IconButton(
-                  icon: const Icon(
-                    Icons.clear_rounded,
-                    color: Colors.white70,
-                    size: 20,
-                  ),
-                  onPressed: () {
-                    _controller.clear();
-                    _hideSuggestions();
-                  },
-                )
+                        icon: const Icon(
+                          Icons.clear_rounded,
+                          color: Colors.white70,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          _controller.clear();
+                          _hideSuggestions();
+                        },
+                      )
                     : IconButton(
-                  icon: const Icon(
-                    Icons.arrow_forward_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                  onPressed: () => _buscar(_controller.text),
-                ),
+                        icon: const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                        onPressed: () => _buscar(_controller.text),
+                      ),
                 filled: true,
                 fillColor: Colors.transparent,
                 border: OutlineInputBorder(
@@ -900,20 +1077,22 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
             duration: const Duration(milliseconds: 180),
             child: showSuggestions
                 ? Padding(
-              key: const ValueKey('home_search_suggestions'),
-              padding: const EdgeInsets.only(top: 8),
-              child: _HomeSearchSuggestionsPanel(
-                query: query,
-                loading: _loadingSuggestions,
-                products: _productSuggestions,
-                isSkuQuery: _looksLikeSku(query),
-                onSearchAll: () => _buscar(_controller.text),
-                onProductTap: _openProduct,
-              ),
-            )
+                    key: const ValueKey('home_search_suggestions'),
+                    padding: const EdgeInsets.only(top: 8),
+                    child: _HomeSearchSuggestionsPanel(
+                      query: query,
+                      loading: _loadingSuggestions,
+                      products: _productSuggestions,
+                      fastSkuSuggestions: _fastSkuSuggestions,
+                      isSkuQuery: _looksLikeSku(query),
+                      onSearchAll: () => _buscar(_controller.text),
+                      onProductTap: _openProduct,
+                      onFastSkuTap: _openFastSku,
+                    ),
+                  )
                 : const SizedBox.shrink(
-              key: ValueKey('home_search_suggestions_empty'),
-            ),
+                    key: ValueKey('home_search_suggestions_empty'),
+                  ),
           ),
         ],
       ),
@@ -925,17 +1104,21 @@ class _HomeSearchSuggestionsPanel extends StatelessWidget {
   final String query;
   final bool loading;
   final List<Product> products;
+  final List<FastSkuSuggestion> fastSkuSuggestions;
   final bool isSkuQuery;
   final VoidCallback onSearchAll;
   final ValueChanged<Product> onProductTap;
+  final ValueChanged<FastSkuSuggestion> onFastSkuTap;
 
   const _HomeSearchSuggestionsPanel({
     required this.query,
     required this.loading,
     required this.products,
+    required this.fastSkuSuggestions,
     required this.isSkuQuery,
     required this.onSearchAll,
     required this.onProductTap,
+    required this.onFastSkuTap,
   });
 
   @override
@@ -1016,8 +1199,38 @@ class _HomeSearchSuggestionsPanel extends StatelessWidget {
                       backgroundColor: Color(0xFFF1F3F6),
                     ),
                   ),
+                if (products.isEmpty && fastSkuSuggestions.isNotEmpty) ...[
+                  _SuggestionsTitle(
+                    isSkuQuery
+                        ? 'REFERENCIAS RÁPIDAS · sin precios'
+                        : 'COINCIDENCIAS RÁPIDAS · sin precios',
+                  ),
+                  for (final preview in fastSkuSuggestions.take(4))
+                    Material(
+                      color: Colors.transparent,
+                      child: ListTile(
+                        dense: true,
+                        title: Text(
+                          preview.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'SKU: ' + preview.sku + ' · precio al abrir ficha',
+                        ),
+                        trailing: const Icon(Icons.open_in_new, size: 16),
+                        onTap: () => onFastSkuTap(preview),
+                      ),
+                    ),
+                ],
                 if (products.isNotEmpty) ...[
-                  _SuggestionsTitle(isSkuQuery ? 'PRODUCTO' : 'PRODUCTOS RELACIONADOS'),
+                  _SuggestionsTitle(
+                    isSkuQuery ? 'PRODUCTO' : 'PRODUCTOS RELACIONADOS',
+                  ),
                   for (final product in products.take(isSkuQuery ? 1 : 6))
                     _ProductSuggestionTile(
                       product: product,
@@ -1025,7 +1238,10 @@ class _HomeSearchSuggestionsPanel extends StatelessWidget {
                       onTap: () => onProductTap(product),
                     ),
                 ],
-                if (!loading && products.isEmpty && isSkuQuery)
+                if (!loading &&
+                    products.isEmpty &&
+                    fastSkuSuggestions.isEmpty &&
+                    isSkuQuery)
                   const Padding(
                     padding: EdgeInsets.fromLTRB(14, 0, 14, 12),
                     child: Text(
@@ -1072,10 +1288,7 @@ class _CategorySuggestionTile extends StatelessWidget {
   final CategoryModel category;
   final VoidCallback onTap;
 
-  const _CategorySuggestionTile({
-    required this.category,
-    required this.onTap,
-  });
+  const _CategorySuggestionTile({required this.category, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1115,15 +1328,11 @@ class _CategorySuggestionTile extends StatelessWidget {
   }
 }
 
-
 class _ScoredSuggestionProduct {
   final Product product;
   final int score;
 
-  const _ScoredSuggestionProduct({
-    required this.product,
-    required this.score,
-  });
+  const _ScoredSuggestionProduct({required this.product, required this.score});
 }
 
 class _ScoredSuggestionCategory {
@@ -1192,10 +1401,7 @@ class _ProductSuggestionTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _HighlightedSuggestionText(
-                    text: product.name,
-                    query: query,
-                  ),
+                  _HighlightedSuggestionText(text: product.name, query: query),
                   if (subtitle.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(
@@ -1230,10 +1436,7 @@ class _HighlightedSuggestionText extends StatelessWidget {
   final String text;
   final String query;
 
-  const _HighlightedSuggestionText({
-    required this.text,
-    required this.query,
-  });
+  const _HighlightedSuggestionText({required this.text, required this.query});
 
   @override
   Widget build(BuildContext context) {

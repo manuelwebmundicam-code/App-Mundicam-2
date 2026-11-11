@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,6 +11,7 @@ import 'package:mundicam/features/home/presentation/widgets/category_grid.dart';
 import 'package:mundicam/features/home/presentation/widgets/brand_grid.dart';
 import 'package:mundicam/core/network/api_service.dart';
 import 'package:mundicam/core/cache/home_warmup_state.dart';
+import 'package:mundicam/core/cache/category_background_warmup.dart';
 import 'package:mundicam/features/catalog/presentation/providers/category_provider.dart';
 import 'package:mundicam/features/home/presentation/providers/banner_mix_provider.dart';
 import 'package:mundicam/features/company/presentation/pages/empresa_page.dart';
@@ -48,6 +50,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   String _managerPhone = '';
   bool _didLogFirstBuild = false;
   bool _academyPreloadStarted = false;
+  bool _categoryPreloadScheduled = false;
 
   // La pantalla completa de preparación se usa una sola vez por instalación.
   // En esa primera ejecución esperamos categorías, promociones y Academy. Cuando
@@ -68,6 +71,21 @@ class _HomePageState extends ConsumerState<HomePage> {
   void initState() {
     super.initState();
     debugPrint('🍎 HOMEPAGE_INIT');
+    // Validación comercial anticipada, no bloquea Inicio.
+    unawaited(_apiService.refreshSessionContextFromBackend());
+    // Auditoría B2B de categorías: exclusiva de compilaciones DEBUG con flag.
+    // No sustituye la navegación; espera a que Inicio pueda estar disponible.
+    assert(() {
+      if (const bool.fromEnvironment('MUNDICAM_B2B_CATEGORY_PARITY_AUDIT')) {
+        unawaited(Future<void>.delayed(const Duration(seconds: 8), () async {
+          if (!mounted || !await _apiService.hasStoredAppSession()) return;
+          final result = await _apiService.auditarCategoriasVps();
+          // Solo números agregados; no registra usuario, SKU ni credenciales.
+          debugPrint('MUNDICAM_B2B_CATEGORY_PARITY_QA ${result.summary}');
+        }));
+      }
+      return true;
+    }());
     _loadManagerContact();
     _homeScrollController.addListener(_handleHomeScroll);
 
@@ -102,6 +120,25 @@ class _HomePageState extends ConsumerState<HomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(academyProvider.notifier);
+    });
+  }
+
+  void _scheduleCategoryPreload() {
+    if (_categoryPreloadScheduled) return;
+    final roots = ref.read(categoriesProvider).asData?.value;
+    if (roots == null || roots.isEmpty) return;
+    _categoryPreloadScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Inicio ya está pintado; la precarga queda fuera del primer render.
+      Future<void>.delayed(const Duration(milliseconds: 1200), () {
+        if (!mounted) return;
+        unawaited(CategoryBackgroundWarmup.run(
+          roots: roots,
+          hasSession: _apiService.hasStoredAppSession,
+          loadChildren: _apiService.getSubcategoriasDe,
+        ));
+      });
     });
   }
 
@@ -365,6 +402,11 @@ class _HomePageState extends ConsumerState<HomePage> {
 
       _completeInitialHomeWarmup();
     }
+
+    // Observar el provider permite precargar también en posteriores arranques
+    // (cuando Inicio ya no muestra pantalla de preparación).
+    ref.watch(categoriesProvider);
+    _scheduleCategoryPreload();
 
     return Scaffold(
       backgroundColor: _pageBg,
