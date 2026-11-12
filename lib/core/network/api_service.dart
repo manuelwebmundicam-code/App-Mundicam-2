@@ -594,6 +594,9 @@ class ApiService {
   List<Map<String, dynamic>>? _cachedBrandTerms;
   bool? _cachedBrandTermsHideEmpty;
   final Map<String, _CatalogFiltersCacheEntry> _catalogFiltersCache = {};
+  // Una sola petición de filtros por usuario, categoría, marca y búsqueda.
+  final Map<String, Future<List<CatalogFilterGroup>>> _catalogFiltersInFlight =
+      {};
   final Map<int, CategoryModel> _knownCategories = <int, CategoryModel>{};
 
   // Prueba opt-in de árbol público completo. Nunca selecciona
@@ -1013,6 +1016,7 @@ class ApiService {
       if (sessionChanged) {
         ProductCacheService().clearAll();
         _catalogFiltersCache.clear();
+        _catalogFiltersInFlight.clear();
         _cachedBrandTerms = null;
         _cachedBrandTermsHideEmpty = null;
         if (kDebugMode) {
@@ -1129,6 +1133,7 @@ class ApiService {
     // no se pueden reutilizar productos cacheados de otro cliente/admin/comercial.
     ProductCacheService().clearAll();
     _catalogFiltersCache.clear();
+    _catalogFiltersInFlight.clear();
     _cachedBrandTerms = null;
     _cachedBrandTermsHideEmpty = null;
 
@@ -1335,6 +1340,7 @@ class ApiService {
 
     ProductCacheService().clearAll();
     _catalogFiltersCache.clear();
+    _catalogFiltersInFlight.clear();
     _cachedBrandTerms = null;
     _cachedBrandTermsHideEmpty = null;
 
@@ -3547,7 +3553,20 @@ class ApiService {
       return cached.groups;
     }
 
-    try {
+    // La primera petición de filtros en una categoría puede tardar varios
+    // segundos. Compartimos únicamente consultas idénticas aún pendientes,
+    // sin reutilizar datos entre cuentas, roles, marcas ni búsquedas.
+    final inFlight = !forceRefresh ? _catalogFiltersInFlight[cacheKey] : null;
+    if (inFlight != null) {
+      try {
+        return await inFlight;
+      } catch (e) {
+        if (reportErrors) rethrow;
+        return [];
+      }
+    }
+
+    Future<List<CatalogFilterGroup>> fetch() async {
       final watch = Stopwatch()..start();
       final legacyQuery = CatalogFilterRequest.params(
         categoryId: categoryId,
@@ -3648,18 +3667,31 @@ class ApiService {
         );
       }
 
-      _catalogFiltersCache[cacheKey] = _CatalogFiltersCacheEntry(
-        groups: groups,
-        createdAt: DateTime.now(),
-      );
+      // No guardar una respuesta de la sesión anterior tras un logout/login.
+      if (cacheKey.startsWith('$catalogCacheIdentity|')) {
+        _catalogFiltersCache[cacheKey] = _CatalogFiltersCacheEntry(
+          groups: groups,
+          createdAt: DateTime.now(),
+        );
+      }
 
       return groups;
+    }
+
+    final request = fetch();
+    if (!forceRefresh) _catalogFiltersInFlight[cacheKey] = request;
+    try {
+      return await request;
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ Error cargando filtros catálogo: $e');
       // El drawer distingue un catálogo legítimamente sin filtros de una
       // caída de red. Otros consumidores conservan el fallback anterior.
       if (reportErrors) rethrow;
       return [];
+    } finally {
+      if (identical(_catalogFiltersInFlight[cacheKey], request)) {
+        _catalogFiltersInFlight.remove(cacheKey);
+      }
     }
   }
 
