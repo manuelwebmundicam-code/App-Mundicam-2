@@ -1,23 +1,35 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:mundicam/main.dart';
+import 'package:mundicam/features/catalog/presentation/providers/filter_provider.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('MundiCam: nueva categoría sin ordenar ni arrastrar filtros de otra marca', () {
+    final filters = FilterNotifier();
+    addTearDown(filters.dispose);
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    MundiFilters? state;
+    final stop = filters.addListener((value) => state = value, fireImmediately: true);
+    addTearDown(stop);
+    expect(state?.orderBy, isEmpty);
+    filters.setBrand(name: 'Hikvision HiWatch', id: 1700);
+    filters.setSearch('cámara');
+    filters.toggleAttributeTerm(
+      taxonomy: 'pa_resolucion',
+      termId: 25,
+      label: '4 MP',
+      groupLabel: 'Resolución',
+    );
+    filters.setOrderBy('price_desc');
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    filters.resetForCatalogCategory();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(state?.brandId, isNull);
+    expect(state?.brand, isEmpty);
+    expect(state?.search, isEmpty);
+    expect(state?.attributeTermIds, isEmpty);
+    expect(state?.orderBy,
+        mundicamQaNoDefaultSort ? '' : 'price_asc');
+
+    filters.setOrderBy('price_asc');
+    expect(state?.orderBy, 'price_asc');
   });
 }
