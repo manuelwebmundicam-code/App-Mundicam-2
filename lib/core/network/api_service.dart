@@ -606,11 +606,12 @@ class ApiService {
     defaultValue: false,
   );
 
-  // Solo QA con R19 previamente validado: sin activar en apps publicadas.
-  // Al faltar soporte, el servidor antiguo sigue usando el modo histórico.
+  // Opt-in para la próxima versión: PHP R17 preparado con facets_only=1.
+  // Publicar Flutter solo tras instalar y verificar el endpoint compatible.
+  // Desactivación de emergencia: --dart-define=MUNDICAM_FAST_FACETS_ONLY=false.
   static const bool _useFastFacetsOnlyQa = bool.fromEnvironment(
     'MUNDICAM_FAST_FACETS_ONLY',
-    defaultValue: false,
+    defaultValue: true,
   );
   final VpsCatalogService _vpsCompleteCategories = VpsCatalogService();
   final Set<String> _backgroundSearchPrefetchRunning = <String>{};
